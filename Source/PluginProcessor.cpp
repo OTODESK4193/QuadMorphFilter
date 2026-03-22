@@ -26,18 +26,21 @@ juce::AudioProcessorValueTreeState::ParameterLayout QuadMorphFilterAudioProcesso
         layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "step", 1 }, lfoNames[i] + " Step Mode", false));
         layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "sync", 1 }, lfoNames[i] + " Sync", true));
         layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ id + "rateSync", 1 }, lfoNames[i] + " Rate Sync", syncRates, 2));
-        layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "rateFree", 1 }, lfoNames[i] + " Rate Free", 0.1f, 20.0f, 1.0f));
+        layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "rateFree", 1 }, lfoNames[i] + " Rate Free",
+            juce::NormalisableRange<float>(0.1f, 20.0f, 0.001f, 0.3f), 1.0f));
 
         layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "min", 1 }, lfoNames[i] + " Min", 0.0f, 1.0f, 0.0f));
         layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "max", 1 }, lfoNames[i] + " Max", 0.0f, 1.0f, 1.0f));
     }
 
     juce::StringArray suffixes = { "A", "B", "C", "D" };
+    juce::StringArray slopes = { "12 dB/oct", "24 dB/oct", "48 dB/oct", "96 dB/oct" };
     for (const auto& s : suffixes) {
         layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ "enable" + s, 1 }, "Enable " + s, true));
         layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "cutoff" + s, 1 }, "Cutoff " + s, juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.3f), 1000.0f));
         layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "res" + s, 1 }, "Res " + s, 0.1f, 10.0f, 0.707f));
         layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ "type" + s, 1 }, "Type " + s, juce::StringArray{ "LP", "BP", "HP", "Notch" }, 0));
+        layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ "slope" + s, 1 }, "Slope " + s, slopes, 0));
     }
 
     return layout;
@@ -100,7 +103,12 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     float baseX = apvts.getRawParameterValue("posX")->load();
     float baseY = apvts.getRawParameterValue("posY")->load();
 
-    std::array<float, 4> lfoMod4[3];
+    // 【修正】配列の初期化エラーを解消（明示的なゼロクリア）
+    std::array<float, 4> lfoMod4[3] = {
+        std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f},
+        std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f},
+        std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}
+    };
 
     for (int i = 0; i < 3; ++i) {
         juce::String id = "lfo" + juce::String(i + 1);
@@ -173,7 +181,8 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
                 for (int f = 0; f < 4; ++f) {
                     rand1Vals[f] = lfoStates[i].currentRand1[f] + (lfoStates[i].nextRand1[f] - lfoStates[i].currentRand1[f]) * t;
                 }
-                normX = baseX; normY = baseY;
+                normX = rand1Vals[0];
+                normY = rand1Vals[1];
             }
             else if (isRand2) {
                 float t = step ? 0.0f : (lfoStates[i].phase / juce::MathConstants<float>::twoPi);
@@ -196,7 +205,8 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
                 for (int f = 0; f < 4; ++f) {
                     lfoMod4[i][f] = minVal + rand1Vals[f] * (maxVal - minVal);
                 }
-                lfoPositions[i] = { baseX, baseY };
+                lfoPositions[i].x = juce::jlimit(0.0f, 1.0f, minVal + normX * (maxVal - minVal));
+                lfoPositions[i].y = juce::jlimit(0.0f, 1.0f, minVal + normY * (maxVal - minVal));
             }
             else {
                 lfoPositions[i].x = juce::jlimit(0.0f, 1.0f, minVal + normX * (maxVal - minVal));
@@ -212,7 +222,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     std::array<float, 4> cMod{ 0.0f, 0.0f, 0.0f, 0.0f };
     std::array<float, 4> rMod{ 0.0f, 0.0f, 0.0f, 0.0f };
 
-    // Mix (LFO 0)
     bool lfo0_isRand1 = ((int)apvts.getRawParameterValue("lfo1wave")->load() == 3) && (apvts.getRawParameterValue("lfo1en")->load() > 0.5f);
     if (lfo0_isRand1) {
         wMix = lfoMod4[0];
@@ -223,7 +232,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         wMix[2] = (1.0f - x) * y;          wMix[3] = x * y;
     }
 
-    // Cutoff Mod (LFO 1)
     bool lfo1_isRand1 = ((int)apvts.getRawParameterValue("lfo2wave")->load() == 3) && (apvts.getRawParameterValue("lfo2en")->load() > 0.5f);
     if (lfo1_isRand1) {
         cMod = lfoMod4[1];
@@ -233,7 +241,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         cMod = { dist, dist, dist, dist };
     }
 
-    // Reso Mod (LFO 2)
     bool lfo2_isRand1 = ((int)apvts.getRawParameterValue("lfo3wave")->load() == 3) && (apvts.getRawParameterValue("lfo3en")->load() > 0.5f);
     if (lfo2_isRand1) {
         rMod = lfoMod4[2];
@@ -243,11 +250,9 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         rMod = { dist, dist, dist, dist };
     }
 
-    // 【修正】Random 1の場合、ツマミの現在値を完全に無視して絶対値でマッピング
     auto updateF = [&](TptFilter& f, juce::String s, int idx) {
         float fc = 0.0f;
         if (lfo1_isRand1) {
-            // 0.0 ~ 1.0 の乱数を 20Hz ~ 20000Hz へ指数関数マッピング
             fc = 20.0f * std::pow(1000.0f, cMod[idx]);
         }
         else {
@@ -256,7 +261,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
 
         float res = 0.0f;
         if (lfo2_isRand1) {
-            // 0.0 ~ 1.0 の乱数を 0.1 ~ 10.0 へ指数関数マッピング
             res = 0.1f * std::pow(100.0f, rMod[idx]);
         }
         else {
@@ -266,6 +270,7 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         f.setCutoff(juce::jlimit(20.0f, 20000.0f, fc));
         f.setResonance(juce::jlimit(0.1f, 10.0f, res));
         f.setType((int)apvts.getRawParameterValue("type" + s)->load());
+        f.setSlope((int)apvts.getRawParameterValue("slope" + s)->load());
         };
 
     updateF(filterA, "A", 0); updateF(filterB, "B", 1);

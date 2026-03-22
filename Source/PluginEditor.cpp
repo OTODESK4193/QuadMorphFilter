@@ -32,23 +32,43 @@ void FilterVisualizer::paint(juce::Graphics& g) {
     float rx = rPos.x - 0.5f; float ry = rPos.y - 0.5f;
     float resMod = std::sqrt(rx * rx + ry * ry) / 0.707f;
 
+    bool lfo1_isRand1 = ((int)processor.apvts.getRawParameterValue("lfo2wave")->load() == 3) && (processor.apvts.getRawParameterValue("lfo2en")->load() > 0.5f);
+    bool lfo2_isRand1 = ((int)processor.apvts.getRawParameterValue("lfo3wave")->load() == 3) && (processor.apvts.getRawParameterValue("lfo3en")->load() > 0.5f);
+
     juce::Path path;
     for (int px = 0; px <= (int)w; ++px) {
         float freq = 20.0f * std::pow(1000.0f, px / w);
-        auto calc = [&](juce::String s) {
+
+        // 【修正】戻り値の型を明示的に float に指定し、コンパイルエラーを解消
+        auto calc = [&](juce::String s, int idx) -> float {
             if (processor.apvts.getRawParameterValue("enable" + s)->load() < 0.5f) return 0.0f;
+
             float fc = processor.apvts.getRawParameterValue("cutoff" + s)->load() * (1.0f + cutoffMod * 2.0f);
+            if (lfo1_isRand1) fc = 20.0f * std::pow(1000.0f, cPos.x);
+
             float res = processor.apvts.getRawParameterValue("res" + s)->load() * (1.0f + resMod * 3.0f);
+            if (lfo2_isRand1) res = 0.1f * std::pow(100.0f, rPos.x);
+
+            int slopeIdx = (int)processor.apvts.getRawParameterValue("slope" + s)->load();
+            int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
+
+            float adjustedRes = res;
+            if (stages > 1) adjustedRes = res * std::pow(0.6f, std::log2((float)stages));
+
             int t = (int)processor.apvts.getRawParameterValue("type" + s)->load();
             float r = freq / juce::jlimit(20.0f, 20000.0f, fc);
-            float r2 = r * r; float d = 1.0f / juce::jlimit(0.1f, 10.0f, res);
+            float r2 = r * r; float d = 1.0f / juce::jlimit(0.1f, 10.0f, adjustedRes);
             float den = std::sqrt(std::pow(1.0f - r2, 2.0f) + std::pow(r * d, 2.0f));
             float mag = 1.0f / den;
+
             if (t == 1) mag *= r; if (t == 2) mag *= r2; if (t == 3) mag *= std::abs(1.0f - r2);
-            return mag;
+
+            // 【修正】戻り値を確実に float にキャスト
+            return static_cast<float>(std::pow((double)mag, (double)stages));
             };
+
         float x = mPos.x; float y = mPos.y;
-        float mag = (calc("A") * (1 - x) * (1 - y)) + (calc("B") * x * (1 - y)) + (calc("C") * (1 - x) * y) + (calc("D") * x * y);
+        float mag = (calc("A", 0) * (1 - x) * (1 - y)) + (calc("B", 1) * x * (1 - y)) + (calc("C", 2) * (1 - x) * y) + (calc("D", 3) * x * y);
         float yPos = h - (std::log10(mag + 1.0f) * 1.5f * h * 0.4f + h * 0.1f);
         if (px == 0) path.startNewSubPath(0, yPos); else path.lineTo((float)px, yPos);
     }
@@ -69,22 +89,16 @@ void XYPadComponent::paint(juce::Graphics& g) {
     juce::Colour colors[] = { juce::Colours::cyan, juce::Colours::magenta, juce::Colours::yellow };
     for (int i = 0; i < 3; ++i) {
         auto p = processor.getLfoPos(i);
-        int wave = (int)processor.apvts.getRawParameterValue("lfo" + juce::String(i + 1) + "wave")->load();
-        bool isRand1 = (wave == 3);
 
         if (processor.isRecording[i].load(std::memory_order_acquire)) {
             g.setColour(colors[i].brighter(0.8f));
             g.fillEllipse(p.x * getWidth() - 8, p.y * getHeight() - 8, 16, 16);
         }
-        else if (isRand1) {
-            g.setColour(colors[i].withAlpha(0.2f));
-            g.fillEllipse(p.x * getWidth() - 6, p.y * getHeight() - 6, 12, 12);
-        }
         else {
             g.setColour(colors[i]);
             g.fillEllipse(p.x * getWidth() - 6, p.y * getHeight() - 6, 12, 12);
         }
-        g.setColour(juce::Colours::white.withAlpha(isRand1 ? 0.2f : 1.0f));
+        g.setColour(juce::Colours::white);
         g.drawEllipse(p.x * getWidth() - 8, p.y * getHeight() - 8, 16, 16, 1.0f);
     }
 }
@@ -150,8 +164,12 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce:
     g.enableButton.setColour(juce::TextButton::textColourOnId, juce::Colours::cyan);
     addAndMakeVisible(g.enableButton);
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, "enable" + s, g.enableButton);
+
     g.type.addItemList({ "LP", "BP", "HP", "Notch" }, 1); addAndMakeVisible(g.type);
     g.tAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "type" + s, g.type);
+
+    g.slope.addItemList({ "12dB", "24dB", "48dB", "96dB" }, 1); addAndMakeVisible(g.slope);
+    g.slAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "slope" + s, g.slope);
 
     auto setup = [&](juce::Label& l, juce::Slider& sl, juce::String txt, juce::String id, std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& att) {
         l.setText(txt, juce::dontSendNotification); addAndMakeVisible(l);
@@ -198,7 +216,6 @@ void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, ju
     addAndMakeVisible(g.rateFree);
     g.rfAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, id + "rateFree", g.rateFree);
 
-    // 【修正】TextBoxLeftを使用し、数値を直接入力させるスマートなUI
     g.minSlider.setSliderStyle(juce::Slider::LinearHorizontal);
     g.minSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 45, 18);
     addAndMakeVisible(g.minSlider);
@@ -223,8 +240,11 @@ void QuadMorphFilterAudioProcessorEditor::resized() {
     b.removeFromTop(10);
     for (auto* g : { &groupA, &groupB, &groupC, &groupD }) {
         auto r = b.removeFromTop(40).reduced(5, 2);
-        g->enableButton.setBounds(r.removeFromLeft(100).reduced(0, 5));
-        g->type.setBounds(r.removeFromLeft(80).withSizeKeepingCentre(70, 24));
+        g->enableButton.setBounds(r.removeFromLeft(90).reduced(0, 5));
+
+        g->type.setBounds(r.removeFromLeft(70).withSizeKeepingCentre(65, 24));
+        g->slope.setBounds(r.removeFromLeft(70).withSizeKeepingCentre(65, 24));
+
         auto cA = r.removeFromLeft(r.getWidth() / 2).reduced(10, 0);
         g->cutoffLabel.setBounds(cA.removeFromLeft(35)); g->cutoff.setBounds(cA);
         g->resLabel.setBounds(r.removeFromLeft(35)); g->res.setBounds(r);
