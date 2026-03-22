@@ -3,7 +3,7 @@
 #include <memory>
 #include "PluginProcessor.h"
 
-// --- 視覚化コンポーネント (LFO同期版) ---
+// --- 視覚化コンポーネント ---
 class FilterVisualizer : public juce::Component, public juce::Timer
 {
 public:
@@ -14,11 +14,12 @@ private:
     QuadMorphFilterAudioProcessor& processor;
 };
 
-// --- 【新設】XY PAD コンポーネント ---
-class XYPadComponent : public juce::Component
+// --- XY PAD コンポーネント (Timerを追加) ---
+class XYPadComponent : public juce::Component, public juce::Timer
 {
 public:
-    XYPadComponent(QuadMorphFilterAudioProcessor& p) : processor(p) {}
+    XYPadComponent(QuadMorphFilterAudioProcessor& p) : processor(p) { startTimerHz(60); } // 60Hzで更新
+    void timerCallback() override { repaint(); }
     void paint(juce::Graphics& g) override;
     void mouseDown(const juce::MouseEvent& e) override { updatePosition(e); }
     void mouseDrag(const juce::MouseEvent& e) override { updatePosition(e); }
@@ -41,7 +42,7 @@ public:
 private:
     QuadMorphFilterAudioProcessor& audioProcessor;
     FilterVisualizer visualizer;
-    XYPadComponent xyPad; // XYパッドを追加
+    XYPadComponent xyPad;
 
     struct FilterGroup {
         juce::Label groupLabel;
