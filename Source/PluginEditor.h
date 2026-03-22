@@ -14,7 +14,7 @@ private:
     QuadMorphFilterAudioProcessor& processor;
 };
 
-// --- XY PAD コンポーネント (ABCD表示を維持) ---
+// --- XY PAD (3つのドットを描画) ---
 class XYPadComponent : public juce::Component, public juce::Timer
 {
 public:
@@ -43,26 +43,32 @@ private:
     FilterVisualizer visualizer;
     XYPadComponent xyPad;
 
+    // フィルターグループ構造体
     struct FilterGroup {
-        juce::TextButton enableButton; // 点灯式ボタン
+        juce::TextButton enableButton;
         juce::ComboBox type;
         juce::Label cutoffLabel, resLabel;
         juce::Slider cutoff, res;
-
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> eAtt;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> cAtt, rAtt;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> tAtt;
     };
-
     FilterGroup groupA, groupB, groupC, groupD;
 
-    // LFOコントロール
-    juce::Label lfoLabel;
-    juce::Slider lfoRateSlider, lfoAmtSlider;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> lfoR_Att, lfoA_Att;
+    // LFOグループ構造体
+    struct LfoGroup {
+        juce::TextButton enableButton;
+        juce::ComboBox wave, rateSync;
+        juce::ToggleButton stepMode, syncToggle;
+        juce::Slider rateFree, amt;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> eAtt, sAtt, syAtt;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> rfAtt, aAtt;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> wAtt, rsAtt;
+    };
+    LfoGroup lfos[3];
 
-    void setupFilterGroup(FilterGroup& g, juce::String suffix, juce::String groupName);
-    void layoutFilterGroup(FilterGroup& g, juce::Rectangle<int> bounds);
+    void setupFilterGroup(FilterGroup& g, juce::String s, juce::String name);
+    void setupLfoGroup(LfoGroup& g, int index, juce::String name);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(QuadMorphFilterAudioProcessorEditor)
 };

@@ -29,8 +29,8 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
-    // 【追加】Editorから現在の(LFO反映済み)座標を取得するための関数
-    juce::Point<float> getCurrentXY() const { return { currentX, currentY }; }
+    // 3つのドットの座標をEditorへ渡す
+    juce::Point<float> getLfoPos(int index) const { return lfoPositions[index]; }
 
     juce::AudioProcessorValueTreeState apvts;
 
@@ -39,10 +39,19 @@ private:
 
     TptFilter filterA, filterB, filterC, filterD;
 
-    // LFOおよび現在の座標保持用
-    float currentX = 0.5f;
-    float currentY = 0.5f;
-    float lfoPhase = 0.0f;
+    // 3系統のLFO状態
+    struct LfoState {
+        float phase = 0.0f;
+        float lastRandomX = 0.0f;
+        float lastRandomY = 0.0f;
+        float currentStepX = 0.0f;
+        float currentStepY = 0.0f;
+    };
+    LfoState lfoStates[3];
+    juce::Point<float> lfoPositions[3];
+
+    float generateWave(float phase, int type);
+    float getSyncTime(int selection, double bpm);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(QuadMorphFilterAudioProcessor)
 };
