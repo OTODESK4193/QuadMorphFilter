@@ -1,3 +1,6 @@
+// ==========================================
+// TptFilter.cpp
+// ==========================================
 #include "TptFilter.h"
 #include <cmath>
 
@@ -41,13 +44,24 @@ void TptFilter::process(juce::AudioBuffer<float>& buffer)
 {
     int numSamples = buffer.getNumSamples();
     int numChannels = juce::jmin(buffer.getNumChannels(), maxChannels);
+
+    // 【最適化】ポインタをループ外で取得し、アクセスオーバーヘッドを削減
+    const float* readPointers[2] = { nullptr, nullptr };
+    float* writePointers[2] = { nullptr, nullptr };
+    for (int ch = 0; ch < numChannels; ++ch) {
+        readPointers[ch] = buffer.getReadPointer(ch);
+        writePointers[ch] = buffer.getWritePointer(ch);
+    }
+
     for (int i = 0; i < numSamples; ++i)
     {
+        // 係数の更新（SmoothedValueのステップを進めるためサンプル単位で実行）
         updateCoefficients();
+
         for (int ch = 0; ch < numChannels; ++ch)
         {
-            float x = buffer.getReadPointer(ch)[i];
-            buffer.getWritePointer(ch)[i] = processSample(ch, x);
+            float x = readPointers[ch][i];
+            writePointers[ch][i] = processSample(ch, x);
         }
     }
 }
@@ -65,7 +79,6 @@ float TptFilter::processSample(int channel, float x)
     }
 }
 
-// 【追加】マグニチュード応答の計算
 float TptFilter::getMagnitudeForFrequency(float frequency) const
 {
     float fc = cutoff.getCurrentValue();

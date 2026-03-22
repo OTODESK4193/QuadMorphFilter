@@ -1,3 +1,6 @@
+// ==========================================
+// PluginProcessor.cpp
+// ==========================================
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
@@ -5,11 +8,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout QuadMorphFilterAudioProcesso
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
 
-    // XY PAD å…±é€šã®ãƒ™ãƒ¼ã‚¹åº§æ¨™
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "posX", 1 }, "Base X", 0.0f, 1.0f, 0.5f));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "posY", 1 }, "Base Y", 0.0f, 1.0f, 0.5f));
 
-    // LFO 1-3 ãƒ‘ãƒ©ãƒ¡ãƒ¼ã‚¿ (Morph, Cutoff, Reso)
     juce::StringArray lfoNames = { "Morph", "Cutoff", "Reso" };
     juce::StringArray waveTypes = { "Sine", "SAW", "Pulse", "Random", "Noise" };
     juce::StringArray syncRates = { "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64",
@@ -27,7 +28,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout QuadMorphFilterAudioProcesso
         layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "amt", 1 }, lfoNames[i] + " Amount", 0.0f, 1.0f, 0.2f));
     }
 
-    // Filter A-D ãƒ‘ãƒ©ãƒ¡ãƒ¼ã‚¿
     juce::StringArray suffixes = { "A", "B", "C", "D" };
     for (const auto& s : suffixes) {
         layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ "enable" + s, 1 }, "Enable " + s, true));
@@ -52,12 +52,15 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
     filterB.prepare(sampleRate, samplesPerBlock, 2);
     filterC.prepare(sampleRate, samplesPerBlock, 2);
     filterD.prepare(sampleRate, samplesPerBlock, 2);
+
+    // yC³zƒI[ƒfƒBƒIƒpƒX“à‚Å‚Ì“®“Iƒƒ‚ƒŠŠm•Û‚ğ–h‚®‚½‚ßA‚±‚±‚ÅƒTƒCƒY‚ğŠm’è‚·‚é
+    for (auto& buf : filterBuffers) {
+        buf.setSize(2, samplesPerBlock, false, false, true);
+    }
 }
 
-// ã€é‡è¦ï¼šã“ã“ãŒæŠœã‘ã¦ã„ã¾ã—ãŸã€‘Linkerã‚¨ãƒ©ãƒ¼ã®è§£æ¶ˆ
 void QuadMorphFilterAudioProcessor::releaseResources() {}
 
-// æ³¢å½¢ç”Ÿæˆ
 float QuadMorphFilterAudioProcessor::generateWave(float phase, int type) {
     switch (type) {
     case 0: return std::sin(phase);
@@ -69,7 +72,6 @@ float QuadMorphFilterAudioProcessor::generateWave(float phase, int type) {
     }
 }
 
-// Syncãƒ¬ãƒ¼ãƒˆè¨ˆç®—
 float QuadMorphFilterAudioProcessor::getSyncTime(int selection, double bpm) {
     double beatLen = 60.0 / bpm;
     double base = 0.0;
@@ -84,6 +86,7 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     juce::ScopedNoDenormals noDenormals;
     auto numSamples = buffer.getNumSamples();
     auto sampleRate = getSampleRate();
+    auto numChannels = buffer.getNumChannels();
 
     double bpm = 120.0;
     if (auto* ph = getPlayHead()) {
@@ -95,7 +98,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     float baseX = apvts.getRawParameterValue("posX")->load();
     float baseY = apvts.getRawParameterValue("posY")->load();
 
-    // 3ç³»çµ±LFOè¨ˆç®—
     for (int i = 0; i < 3; ++i) {
         juce::String id = "lfo" + juce::String(i + 1);
         bool enabled = apvts.getRawParameterValue(id + "en")->load() > 0.5f;
@@ -119,7 +121,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             float rawY = (wave == 3) ? lfoStates[i].lastRandomY : generateWave(lfoStates[i].phase + juce::MathConstants<float>::halfPi, wave);
 
             if (step) {
-                // Stepãƒ¢ãƒ¼ãƒ‰ã¯ç°¡æ˜“çš„ãªé‡å­åŒ–
                 rawX = std::round(rawX * 4.0f) / 4.0f;
                 rawY = std::round(rawY * 4.0f) / 4.0f;
             }
@@ -132,7 +133,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         }
     }
 
-    // ãƒ¢ã‚¸ãƒ¥ãƒ¬ãƒ¼ã‚·ãƒ§ãƒ³é©ç”¨
     float mX = lfoPositions[0].x; float mY = lfoPositions[0].y;
     float wA = (1 - mX) * (1 - mY); float wB = mX * (1 - mY); float wC = (1 - mX) * mY; float wD = mX * mY;
 
@@ -152,28 +152,33 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         };
     updateF(filterA, "A"); updateF(filterB, "B"); updateF(filterC, "C"); updateF(filterD, "D");
 
-    // ãƒŸãƒƒã‚¯ã‚¹
     bool enA = apvts.getRawParameterValue("enableA")->load() > 0.5f;
     bool enB = apvts.getRawParameterValue("enableB")->load() > 0.5f;
     bool enC = apvts.getRawParameterValue("enableC")->load() > 0.5f;
     bool enD = apvts.getRawParameterValue("enableD")->load() > 0.5f;
 
-    juce::AudioBuffer<float> bA, bB, bC, bD;
+    // yC³z“®“Iƒƒ‚ƒŠŠm•Û‚ğ”rœ‚µA–‘O‚É—pˆÓ‚µ‚½ƒoƒbƒtƒ@‚ÖƒRƒs[‚·‚é
     auto proc = [&](juce::AudioBuffer<float>& t, TptFilter& f, bool e) {
-        t.makeCopyOf(buffer); if (e) f.process(t); else t.clear();
+        for (int ch = 0; ch < numChannels; ++ch) {
+            t.copyFrom(ch, 0, buffer, ch, 0, numSamples);
+        }
+        if (e) f.process(t); else t.clear();
         };
-    proc(bA, filterA, enA); proc(bB, filterB, enB); proc(bC, filterC, enC); proc(bD, filterD, enD);
+
+    proc(filterBuffers[0], filterA, enA);
+    proc(filterBuffers[1], filterB, enB);
+    proc(filterBuffers[2], filterC, enC);
+    proc(filterBuffers[3], filterD, enD);
 
     buffer.clear();
-    for (int ch = 0; ch < buffer.getNumChannels(); ++ch) {
-        if (enA) buffer.addFrom(ch, 0, bA, ch, 0, numSamples, wA);
-        if (enB) buffer.addFrom(ch, 0, bB, ch, 0, numSamples, wB);
-        if (enC) buffer.addFrom(ch, 0, bC, ch, 0, numSamples, wC);
-        if (enD) buffer.addFrom(ch, 0, bD, ch, 0, numSamples, wD);
+    for (int ch = 0; ch < numChannels; ++ch) {
+        if (enA) buffer.addFrom(ch, 0, filterBuffers[0], ch, 0, numSamples, wA);
+        if (enB) buffer.addFrom(ch, 0, filterBuffers[1], ch, 0, numSamples, wB);
+        if (enC) buffer.addFrom(ch, 0, filterBuffers[2], ch, 0, numSamples, wC);
+        if (enD) buffer.addFrom(ch, 0, filterBuffers[3], ch, 0, numSamples, wD);
     }
 }
 
-// å®šå‹é–¢æ•°
 const juce::String QuadMorphFilterAudioProcessor::getName() const { return "Quad-Morph Filter"; }
 bool QuadMorphFilterAudioProcessor::acceptsMidi() const { return false; }
 bool QuadMorphFilterAudioProcessor::producesMidi() const { return false; }

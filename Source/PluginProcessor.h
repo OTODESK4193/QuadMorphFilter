@@ -1,7 +1,11 @@
+// ==========================================
+// PluginProcessor.h
+// ==========================================
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "TptFilter.h"
 #include <vector>
+#include <array>
 
 class QuadMorphFilterAudioProcessor : public juce::AudioProcessor
 {
@@ -29,7 +33,6 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
-    // 3ã¤ã®ãƒ‰ãƒƒãƒˆã®åº§æ¨™ã‚’Editorã¸æ¸¡ã™
     juce::Point<float> getLfoPos(int index) const { return lfoPositions[index]; }
 
     juce::AudioProcessorValueTreeState apvts;
@@ -39,7 +42,9 @@ private:
 
     TptFilter filterA, filterB, filterC, filterD;
 
-    // 3ç³»çµ±ã®LFOçŠ¶æ…‹
+    // yC³zƒI[ƒfƒBƒIƒpƒX“à‚Å‚Ì“®“Iƒƒ‚ƒŠŠm•Û‚ğ–h‚®‚½‚ß‚ÌŒÅ’èƒoƒbƒtƒ@
+    std::array<juce::AudioBuffer<float>, 4> filterBuffers;
+
     struct LfoState {
         float phase = 0.0f;
         float lastRandomX = 0.0f;

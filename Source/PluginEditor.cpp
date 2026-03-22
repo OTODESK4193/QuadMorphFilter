@@ -1,9 +1,31 @@
+// ==========================================
+// PluginEditor.cpp
+// ==========================================
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-// --- Visualizer: 3ã¤ã®LFOçµæœã‚’çµ±åˆã—ã¦æç”» ---
+// --- Visualizer: 3‚Â‚ÌLFOŒ‹‰Ê‚ğ“‡‚µ‚Ä•`‰æ ---
 void FilterVisualizer::paint(juce::Graphics& g) {
     g.fillAll(juce::Colours::black.withAlpha(0.8f));
+
+    auto w = (float)getWidth();
+    auto h = (float)getHeight();
+
+    // y’Ç‰Ázü”g”ƒOƒŠƒbƒhi100, 500, 1k, 5k, 10k Hzj‚Ì•`‰æ
+    g.setColour(juce::Colours::white.withAlpha(0.15f));
+    g.setFont(10.0f);
+    float freqs[] = { 100.0f, 500.0f, 1000.0f, 5000.0f, 10000.0f };
+    juce::String labels[] = { "100Hz", "500Hz", "1kHz", "5kHz", "10kHz" };
+
+    for (int i = 0; i < 5; ++i) {
+        // ‘Î”ƒXƒP[ƒ‹‚ÌXÀ•W‹tZ: x = w * log10(freq / 20.0) / 3.0
+        float x = w * std::log10(freqs[i] / 20.0f) / 3.0f;
+        g.drawVerticalLine((int)x, 0.0f, h);
+        g.setColour(juce::Colours::white.withAlpha(0.5f));
+        g.drawText(labels[i], (int)x + 2, (int)h - 15, 40, 10, juce::Justification::left);
+        g.setColour(juce::Colours::white.withAlpha(0.15f));
+    }
+
     g.setColour(juce::Colours::cyan);
 
     auto mPos = processor.getLfoPos(0); // Morph LFO
@@ -15,7 +37,6 @@ void FilterVisualizer::paint(juce::Graphics& g) {
     float rx = rPos.x - 0.5f; float ry = rPos.y - 0.5f;
     float resMod = std::sqrt(rx * rx + ry * ry) / 0.707f;
 
-    auto w = (float)getWidth(); auto h = (float)getHeight();
     juce::Path path;
 
     for (int px = 0; px <= (int)w; ++px) {
@@ -40,7 +61,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
     g.strokePath(path, juce::PathStrokeType(2.0f));
 }
 
-// --- XYPad: 3ã¤ã®ãƒ‰ãƒƒãƒˆã‚’è‰²åˆ†ã‘ã—ã¦æç”» ---
+// --- XYPad: 3‚Â‚Ìƒhƒbƒg‚ğF•ª‚¯‚µ‚Ä•`‰æ ---
 void XYPadComponent::paint(juce::Graphics& g) {
     auto b = getLocalBounds().toFloat();
     g.setColour(juce::Colours::black.withAlpha(0.6f)); g.fillRoundedRectangle(b, 10.0f);
@@ -69,7 +90,7 @@ void XYPadComponent::updatePosition(const juce::MouseEvent& e) {
     processor.apvts.getParameter("posY")->setValueNotifyingHost(y);
 }
 
-// --- Editoræœ¬ä½“ ---
+// --- Editor–{‘Ì ---
 QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(QuadMorphFilterAudioProcessor& p)
     : AudioProcessorEditor(&p), audioProcessor(p), visualizer(p), xyPad(p)
 {
@@ -88,6 +109,7 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce:
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, "enable" + s, g.enableButton);
     g.type.addItemList({ "LP", "BP", "HP", "Notch" }, 1); addAndMakeVisible(g.type);
     g.tAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "type" + s, g.type);
+
     auto setup = [&](juce::Label& l, juce::Slider& sl, juce::String txt, juce::String id, std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& att) {
         l.setText(txt, juce::dontSendNotification); addAndMakeVisible(l);
         sl.setSliderStyle(juce::Slider::LinearHorizontal); sl.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
@@ -108,10 +130,16 @@ void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, ju
     g.wave.addItemList({ "Sine", "SAW", "Pulse", "Random", "Noise" }, 1); addAndMakeVisible(g.wave);
     g.wAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, id + "wave", g.wave);
 
-    g.stepMode.setButtonText("Step"); addAndMakeVisible(g.stepMode);
+    // yC³zTextButton‚É‚æ‚éÁ“”®ƒgƒOƒ‹İ’è
+    g.stepMode.setButtonText("Step"); g.stepMode.setClickingTogglesState(true);
+    g.stepMode.setColour(juce::TextButton::textColourOnId, lfoCols[idx - 1]);
+    addAndMakeVisible(g.stepMode);
     g.sAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, id + "step", g.stepMode);
 
-    g.syncToggle.setButtonText("Sync"); addAndMakeVisible(g.syncToggle);
+    g.syncToggle.setButtonText("Sync"); g.syncToggle.setClickingTogglesState(true);
+    g.syncToggle.setColour(juce::TextButton::textColourOnId, lfoCols[idx - 1]);
+    g.syncToggle.onClick = [this] { resized(); }; // SyncØ‚è‘Ö‚¦‚ÉƒŒƒCƒAƒEƒg‚ğÄŒvZ
+    addAndMakeVisible(g.syncToggle);
     g.syAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, id + "sync", g.syncToggle);
 
     g.rateSync.addItemList({ "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64", "1/1D", "1/2D", "1/4D", "1/8D", "1/16D", "1/32D", "1/1T", "1/2T", "1/4T", "1/8T", "1/16T", "1/32T" }, 1);
@@ -128,6 +156,7 @@ void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, ju
 }
 
 QuadMorphFilterAudioProcessorEditor::~QuadMorphFilterAudioProcessorEditor() {}
+
 void QuadMorphFilterAudioProcessorEditor::paint(juce::Graphics& g) { g.fillAll(juce::Colours::darkgrey.darker(0.9f)); }
 
 void QuadMorphFilterAudioProcessorEditor::resized() {
@@ -151,16 +180,24 @@ void QuadMorphFilterAudioProcessorEditor::resized() {
         auto r = b.removeFromTop(40).reduced(5, 2);
         lfos[i].enableButton.setBounds(r.removeFromLeft(120).reduced(0, 5));
         lfos[i].wave.setBounds(r.removeFromLeft(80).withSizeKeepingCentre(75, 22));
-        lfos[i].stepMode.setBounds(r.removeFromLeft(55));
-        lfos[i].syncToggle.setBounds(r.removeFromLeft(55));
+
+        // yC³zTextButton‚Ì—]”’’²®
+        lfos[i].stepMode.setBounds(r.removeFromLeft(55).reduced(2, 5));
+        lfos[i].syncToggle.setBounds(r.removeFromLeft(55).reduced(2, 5));
+
+        // yC³zRate Free/Sync ‚Æ Amount ‚ğc‚è‚Ì•‚Å50:50‚É•ªŠ„”z’u
+        auto remainingWidth = r.getWidth();
+        auto rateArea = r.removeFromLeft(remainingWidth / 2);
+        auto amtArea = r; // c‚è‚Ì”¼•ª
+
         if (audioProcessor.apvts.getRawParameterValue("lfo" + juce::String(i + 1) + "sync")->load() > 0.5f) {
-            lfos[i].rateSync.setBounds(r.removeFromLeft(80).withSizeKeepingCentre(75, 22));
+            lfos[i].rateSync.setBounds(rateArea.withSizeKeepingCentre(rateArea.getWidth() - 10, 22));
             lfos[i].rateFree.setVisible(false); lfos[i].rateSync.setVisible(true);
         }
         else {
-            auto rs = r.removeFromLeft(80); lfos[i].rateFree.setBounds(rs.reduced(0, 8));
+            lfos[i].rateFree.setBounds(rateArea.reduced(5, 8));
             lfos[i].rateFree.setVisible(true); lfos[i].rateSync.setVisible(false);
         }
-        lfos[i].amt.setBounds(r.reduced(10, 8));
+        lfos[i].amt.setBounds(amtArea.reduced(5, 8));
     }
 }
