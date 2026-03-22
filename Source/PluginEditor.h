@@ -3,6 +3,7 @@
 #include <memory>
 #include "PluginProcessor.h"
 
+// --- 視覚化コンポーネント ---
 class FilterVisualizer : public juce::Component, public juce::Timer
 {
 public:
@@ -13,6 +14,7 @@ private:
     QuadMorphFilterAudioProcessor& processor;
 };
 
+// --- XY PAD コンポーネント (ABCD表示を維持) ---
 class XYPadComponent : public juce::Component, public juce::Timer
 {
 public:
@@ -26,6 +28,7 @@ private:
     QuadMorphFilterAudioProcessor& processor;
 };
 
+// --- メインエディター ---
 class QuadMorphFilterAudioProcessorEditor : public juce::AudioProcessorEditor
 {
 public:
@@ -41,20 +44,20 @@ private:
     XYPadComponent xyPad;
 
     struct FilterGroup {
-        juce::ToggleButton enableButton; // 【新設】ON/OFF
-        juce::Label groupLabel;
+        juce::TextButton enableButton; // 点灯式ボタン
         juce::ComboBox type;
         juce::Label cutoffLabel, resLabel;
         juce::Slider cutoff, res;
 
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> eAtt; // Toggle用
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> eAtt;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> cAtt, rAtt;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> tAtt;
     };
 
     FilterGroup groupA, groupB, groupC, groupD;
 
-    juce::Label lfoRateLabel, lfoAmtLabel;
+    // LFOコントロール
+    juce::Label lfoLabel;
     juce::Slider lfoRateSlider, lfoAmtSlider;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> lfoR_Att, lfoA_Att;
 

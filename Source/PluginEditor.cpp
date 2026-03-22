@@ -1,7 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-// --- Visualizer & XYPad (描画ロジックは継続、Enable判定を追加) ---
+// --- Visualizer & XYPad ---
 void FilterVisualizer::paint(juce::Graphics& g) {
     g.fillAll(juce::Colours::black.withAlpha(0.8f));
     g.setColour(juce::Colours::cyan);
@@ -12,7 +12,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
     for (int px = 0; px <= (int)w; ++px) {
         float freq = 20.0f * std::pow(1000.0f, px / w);
         auto calc = [&](juce::String s) {
-            if (processor.apvts.getRawParameterValue("enable" + s)->load() < 0.5f) return 0.0f; // OFFなら0
+            if (processor.apvts.getRawParameterValue("enable" + s)->load() < 0.5f) return 0.0f;
             float fc = processor.apvts.getRawParameterValue("cutoff" + s)->load();
             float res = processor.apvts.getRawParameterValue("res" + s)->load();
             int t = (int)processor.apvts.getRawParameterValue("type" + s)->load();
@@ -34,6 +34,14 @@ void XYPadComponent::paint(juce::Graphics& g) {
     auto b = getLocalBounds().toFloat();
     g.setColour(juce::Colours::black.withAlpha(0.5f)); g.fillRoundedRectangle(b, 10.0f);
     g.setColour(juce::Colours::white.withAlpha(0.2f)); g.drawRoundedRectangle(b, 10.0f, 2.0f);
+
+    // ABCD表示
+    g.setColour(juce::Colours::white.withAlpha(0.5f)); g.setFont(14.0f);
+    g.drawText("A", 10, 10, 20, 20, juce::Justification::centred);
+    g.drawText("B", getWidth() - 30, 10, 20, 20, juce::Justification::centred);
+    g.drawText("C", 10, getHeight() - 30, 20, 20, juce::Justification::centred);
+    g.drawText("D", getWidth() - 30, getHeight() - 30, 20, 20, juce::Justification::centred);
+
     auto pos = processor.getCurrentXY();
     g.setColour(juce::Colours::cyan);
     g.fillEllipse(pos.getX() * getWidth() - 5, pos.getY() * getHeight() - 5, 10, 10);
@@ -46,7 +54,7 @@ void XYPadComponent::updatePosition(const juce::MouseEvent& e) {
     processor.apvts.getParameter("posY")->setValueNotifyingHost(y);
 }
 
-// --- Editor本体 ---
+// --- Editor ---
 QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(QuadMorphFilterAudioProcessor& p)
     : AudioProcessorEditor(&p), audioProcessor(p), visualizer(p), xyPad(p)
 {
@@ -54,24 +62,29 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(QuadMor
     setupFilterGroup(groupA, "A", "Filter A"); setupFilterGroup(groupB, "B", "Filter B");
     setupFilterGroup(groupC, "C", "Filter C"); setupFilterGroup(groupD, "D", "Filter D");
 
-    auto setupGlobal = [&](juce::Label& l, juce::Slider& s, juce::String text, juce::String id, std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& att) {
-        l.setText(text, juce::dontSendNotification); addAndMakeVisible(l);
+    // LFOを最下段に配置するためのセットアップ
+    lfoLabel.setText("LFO Modulation", juce::dontSendNotification);
+    lfoLabel.setFont(juce::Font(14.0f, juce::Font::bold)); addAndMakeVisible(lfoLabel);
+
+    auto setupLfo = [&](juce::Slider& s, juce::String id, std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& att) {
         s.setSliderStyle(juce::Slider::LinearHorizontal);
-        s.setTextBoxStyle(juce::Slider::TextBoxRight, false, 50, 15); addAndMakeVisible(s);
+        s.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 50, 20); addAndMakeVisible(s);
         att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, id, s);
         };
-    setupGlobal(lfoRateLabel, lfoRateSlider, "LFO Rate", "lfoRate", lfoR_Att);
-    setupGlobal(lfoAmtLabel, lfoAmtSlider, "LFO Amt", "lfoAmount", lfoA_Att);
+    setupLfo(lfoRateSlider, "lfoRate", lfoR_Att);
+    setupLfo(lfoAmtSlider, "lfoAmount", lfoA_Att);
 
-    setSize(1000, 750); // 横長に調整
+    setSize(1000, 750);
 }
 
 void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce::String s, juce::String groupName) {
+    g.enableButton.setButtonText(groupName);
+    g.enableButton.setClickingTogglesState(true);
+    // ON時：シアン、OFF時：グレーで点灯を表現
+    g.enableButton.setColour(juce::TextButton::textColourOnId, juce::Colours::cyan);
+    g.enableButton.setColour(juce::TextButton::textColourOffId, juce::Colours::grey);
     addAndMakeVisible(g.enableButton);
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, "enable" + s, g.enableButton);
-
-    g.groupLabel.setText(groupName, juce::dontSendNotification);
-    g.groupLabel.setFont(juce::Font(16.0f, juce::Font::bold)); addAndMakeVisible(g.groupLabel);
 
     g.type.addItemList({ "LP", "BP", "HP", "Notch" }, 1); addAndMakeVisible(g.type);
     g.tAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "type" + s, g.type);
@@ -79,7 +92,9 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce:
     auto setupParam = [&](juce::Label& l, juce::Slider& sl, juce::String txt, juce::String id, std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& att) {
         l.setText(txt, juce::dontSendNotification); addAndMakeVisible(l);
         sl.setSliderStyle(juce::Slider::LinearHorizontal);
-        sl.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20); addAndMakeVisible(sl);
+        // 数値を左、スライダーを右に配置
+        sl.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
+        addAndMakeVisible(sl);
         att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, id + s, sl);
         };
     setupParam(g.cutoffLabel, g.cutoff, "Cutoff", "cutoff", g.cAtt);
@@ -87,7 +102,7 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce:
 }
 
 QuadMorphFilterAudioProcessorEditor::~QuadMorphFilterAudioProcessorEditor() {}
-void QuadMorphFilterAudioProcessorEditor::paint(juce::Graphics& g) { g.fillAll(juce::Colours::darkgrey.darker(0.8f)); }
+void QuadMorphFilterAudioProcessorEditor::paint(juce::Graphics& g) { g.fillAll(juce::Colours::darkgrey.darker(0.9f)); }
 
 void QuadMorphFilterAudioProcessorEditor::resized()
 {
@@ -96,16 +111,17 @@ void QuadMorphFilterAudioProcessorEditor::resized()
     // 1. 上段（モニターエリア）
     auto topArea = b.removeFromTop(300);
     visualizer.setBounds(topArea.removeFromLeft(topArea.getWidth() * 0.7f).reduced(5));
-    auto topRight = topArea;
-    xyPad.setBounds(topRight.removeFromTop(topRight.getWidth()).reduced(5));
+    xyPad.setBounds(topArea.reduced(5));
 
-    // LFOはXYパッドの下に配置
-    lfoRateLabel.setBounds(topRight.removeFromTop(20)); lfoRateSlider.setBounds(topRight.removeFromTop(30));
-    lfoAmtLabel.setBounds(topRight.removeFromTop(20)); lfoAmtSlider.setBounds(topRight.removeFromTop(30));
+    // 2. 最下段（LFOエリア）
+    auto lfoArea = b.removeFromBottom(60);
+    lfoLabel.setBounds(lfoArea.removeFromLeft(120));
+    lfoRateSlider.setBounds(lfoArea.removeFromLeft(lfoArea.getWidth() / 2).reduced(10, 15));
+    lfoAmtSlider.setBounds(lfoArea.reduced(10, 15));
 
-    // 2. 下段（フィルターラック）
-    b.removeFromTop(20); // 余白
-    auto rowH = b.getHeight() / 4;
+    // 3. 中段（フィルターラック：行間を詰める）
+    b.removeFromTop(10);
+    int rowH = 45; // 高さを固定して密集させる
     layoutFilterGroup(groupA, b.removeFromTop(rowH));
     layoutFilterGroup(groupB, b.removeFromTop(rowH));
     layoutFilterGroup(groupC, b.removeFromTop(rowH));
@@ -114,18 +130,16 @@ void QuadMorphFilterAudioProcessorEditor::resized()
 
 void QuadMorphFilterAudioProcessorEditor::layoutFilterGroup(FilterGroup& g, juce::Rectangle<int> b)
 {
-    auto r = b.reduced(5);
-    g.enableButton.setBounds(r.removeFromLeft(30));
-    g.groupLabel.setBounds(r.removeFromLeft(80));
+    auto r = b.reduced(5, 2);
+    g.enableButton.setBounds(r.removeFromLeft(100).reduced(0, 5));
     g.type.setBounds(r.removeFromLeft(80).withSizeKeepingCentre(70, 24));
 
-    // Cutoffセクション: 名称(40) -> スライダー(残り半分)
-    auto cutArea = r.removeFromLeft(r.getWidth() / 2).reduced(5, 0);
+    // 名称 -> 数値 -> スライダー の順
+    auto cutArea = r.removeFromLeft(r.getWidth() / 2).reduced(10, 0);
     g.cutoffLabel.setBounds(cutArea.removeFromLeft(50));
     g.cutoff.setBounds(cutArea);
 
-    // Resoセクション: 同上
-    auto resArea = r.reduced(5, 0);
+    auto resArea = r.reduced(10, 0);
     g.resLabel.setBounds(resArea.removeFromLeft(40));
     g.res.setBounds(resArea);
 }
