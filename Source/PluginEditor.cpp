@@ -4,21 +4,17 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-// --- Visualizer: 3つのLFO結果を統合して描画 ---
 void FilterVisualizer::paint(juce::Graphics& g) {
     g.fillAll(juce::Colours::black.withAlpha(0.8f));
-
     auto w = (float)getWidth();
     auto h = (float)getHeight();
 
-    // 【追加】周波数グリッド（100, 500, 1k, 5k, 10k Hz）の描画
     g.setColour(juce::Colours::white.withAlpha(0.15f));
     g.setFont(10.0f);
     float freqs[] = { 100.0f, 500.0f, 1000.0f, 5000.0f, 10000.0f };
     juce::String labels[] = { "100Hz", "500Hz", "1kHz", "5kHz", "10kHz" };
 
     for (int i = 0; i < 5; ++i) {
-        // 対数スケールのX座標逆算: x = w * log10(freq / 20.0) / 3.0
         float x = w * std::log10(freqs[i] / 20.0f) / 3.0f;
         g.drawVerticalLine((int)x, 0.0f, h);
         g.setColour(juce::Colours::white.withAlpha(0.5f));
@@ -27,10 +23,9 @@ void FilterVisualizer::paint(juce::Graphics& g) {
     }
 
     g.setColour(juce::Colours::cyan);
-
-    auto mPos = processor.getLfoPos(0); // Morph LFO
-    auto cPos = processor.getLfoPos(1); // Cutoff LFO
-    auto rPos = processor.getLfoPos(2); // Reso LFO
+    auto mPos = processor.getLfoPos(0);
+    auto cPos = processor.getLfoPos(1);
+    auto rPos = processor.getLfoPos(2);
 
     float dx = cPos.x - 0.5f; float dy = cPos.y - 0.5f;
     float cutoffMod = std::sqrt(dx * dx + dy * dy) / 0.707f;
@@ -38,7 +33,6 @@ void FilterVisualizer::paint(juce::Graphics& g) {
     float resMod = std::sqrt(rx * rx + ry * ry) / 0.707f;
 
     juce::Path path;
-
     for (int px = 0; px <= (int)w; ++px) {
         float freq = 20.0f * std::pow(1000.0f, px / w);
         auto calc = [&](juce::String s) {
@@ -61,7 +55,6 @@ void FilterVisualizer::paint(juce::Graphics& g) {
     g.strokePath(path, juce::PathStrokeType(2.0f));
 }
 
-// --- XYPad: 3つのドットを色分けして描画 ---
 void XYPadComponent::paint(juce::Graphics& g) {
     auto b = getLocalBounds().toFloat();
     g.setColour(juce::Colours::black.withAlpha(0.6f)); g.fillRoundedRectangle(b, 10.0f);
@@ -76,10 +69,58 @@ void XYPadComponent::paint(juce::Graphics& g) {
     juce::Colour colors[] = { juce::Colours::cyan, juce::Colours::magenta, juce::Colours::yellow };
     for (int i = 0; i < 3; ++i) {
         auto p = processor.getLfoPos(i);
-        g.setColour(colors[i]);
-        g.fillEllipse(p.x * getWidth() - 6, p.y * getHeight() - 6, 12, 12);
+        // 録音中のドットは色を少し明るくして強調
+        if (processor.isRecording[i].load(std::memory_order_acquire)) {
+            g.setColour(colors[i].brighter(0.8f));
+            g.fillEllipse(p.x * getWidth() - 8, p.y * getHeight() - 8, 16, 16);
+        }
+        else {
+            g.setColour(colors[i]);
+            g.fillEllipse(p.x * getWidth() - 6, p.y * getHeight() - 6, 12, 12);
+        }
         g.setColour(juce::Colours::white);
         g.drawEllipse(p.x * getWidth() - 8, p.y * getHeight() - 8, 16, 16, 1.0f);
+    }
+}
+
+// 【追加】右クリック当たり判定による録音開始
+void XYPadComponent::mouseDown(const juce::MouseEvent& e) {
+    if (e.mods.isRightButtonDown()) {
+        float w = (float)getWidth(); float h = (float)getHeight();
+        for (int i = 0; i < 3; ++i) {
+            auto p = processor.getLfoPos(i);
+            float px = p.x * w; float py = p.y * h;
+            // ドットからの距離判定(半径15px以内)
+            if (std::hypot(e.x - px, e.y - py) < 15.0f) {
+                draggingLfoIndex = i;
+                processor.recLength[i].store(0, std::memory_order_release);
+                processor.isRecording[i].store(true, std::memory_order_release);
+                return;
+            }
+        }
+    }
+    updatePosition(e);
+}
+
+// 【追加】固定長配列への座標書込（ロックフリー設計）
+void XYPadComponent::mouseDrag(const juce::MouseEvent& e) {
+    if (draggingLfoIndex != -1) {
+        int len = processor.recLength[draggingLfoIndex].load(std::memory_order_acquire);
+        if (len < 2048) {
+            float nx = juce::jlimit(0.0f, 1.0f, (float)e.x / getWidth());
+            float ny = juce::jlimit(0.0f, 1.0f, (float)e.y / getHeight());
+            processor.recBuffer[draggingLfoIndex][len] = { nx, ny };
+            processor.recLength[draggingLfoIndex].store(len + 1, std::memory_order_release);
+        }
+        return;
+    }
+    updatePosition(e);
+}
+
+void XYPadComponent::mouseUp(const juce::MouseEvent& e) {
+    if (draggingLfoIndex != -1) {
+        processor.isRecording[draggingLfoIndex].store(false, std::memory_order_release);
+        draggingLfoIndex = -1;
     }
 }
 
@@ -90,7 +131,6 @@ void XYPadComponent::updatePosition(const juce::MouseEvent& e) {
     processor.apvts.getParameter("posY")->setValueNotifyingHost(y);
 }
 
-// --- Editor本体 ---
 QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(QuadMorphFilterAudioProcessor& p)
     : AudioProcessorEditor(&p), audioProcessor(p), visualizer(p), xyPad(p)
 {
@@ -127,10 +167,16 @@ void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, ju
     addAndMakeVisible(g.enableButton);
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, id + "en", g.enableButton);
 
-    g.wave.addItemList({ "Sine", "SAW", "Pulse", "Random", "Noise" }, 1); addAndMakeVisible(g.wave);
+    // 【修正】LFO1のみRandom 2を含んだリストへ分岐
+    if (idx == 1) {
+        g.wave.addItemList({ "Sine", "SAW", "Pulse", "Random 1", "Random 2", "Noise", "Recording" }, 1);
+    }
+    else {
+        g.wave.addItemList({ "Sine", "SAW", "Pulse", "Random 1", "Noise", "Recording" }, 1);
+    }
+    addAndMakeVisible(g.wave);
     g.wAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, id + "wave", g.wave);
 
-    // 【修正】TextButtonによる消灯式トグル設定
     g.stepMode.setButtonText("Step"); g.stepMode.setClickingTogglesState(true);
     g.stepMode.setColour(juce::TextButton::textColourOnId, lfoCols[idx - 1]);
     addAndMakeVisible(g.stepMode);
@@ -138,7 +184,7 @@ void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, ju
 
     g.syncToggle.setButtonText("Sync"); g.syncToggle.setClickingTogglesState(true);
     g.syncToggle.setColour(juce::TextButton::textColourOnId, lfoCols[idx - 1]);
-    g.syncToggle.onClick = [this] { resized(); }; // Sync切り替え時にレイアウトを再計算
+    g.syncToggle.onClick = [this] { resized(); };
     addAndMakeVisible(g.syncToggle);
     g.syAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, id + "sync", g.syncToggle);
 
@@ -181,14 +227,12 @@ void QuadMorphFilterAudioProcessorEditor::resized() {
         lfos[i].enableButton.setBounds(r.removeFromLeft(120).reduced(0, 5));
         lfos[i].wave.setBounds(r.removeFromLeft(80).withSizeKeepingCentre(75, 22));
 
-        // 【修正】TextButtonの余白調整
         lfos[i].stepMode.setBounds(r.removeFromLeft(55).reduced(2, 5));
         lfos[i].syncToggle.setBounds(r.removeFromLeft(55).reduced(2, 5));
 
-        // 【修正】Rate Free/Sync と Amount を残りの幅で50:50に分割配置
         auto remainingWidth = r.getWidth();
         auto rateArea = r.removeFromLeft(remainingWidth / 2);
-        auto amtArea = r; // 残りの半分
+        auto amtArea = r;
 
         if (audioProcessor.apvts.getRawParameterValue("lfo" + juce::String(i + 1) + "sync")->load() > 0.5f) {
             lfos[i].rateSync.setBounds(rateArea.withSizeKeepingCentre(rateArea.getWidth() - 10, 22));

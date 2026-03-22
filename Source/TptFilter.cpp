@@ -45,7 +45,6 @@ void TptFilter::process(juce::AudioBuffer<float>& buffer)
     int numSamples = buffer.getNumSamples();
     int numChannels = juce::jmin(buffer.getNumChannels(), maxChannels);
 
-    // 【最適化】ポインタをループ外で取得し、アクセスオーバーヘッドを削減
     const float* readPointers[2] = { nullptr, nullptr };
     float* writePointers[2] = { nullptr, nullptr };
     for (int ch = 0; ch < numChannels; ++ch) {
@@ -55,9 +54,7 @@ void TptFilter::process(juce::AudioBuffer<float>& buffer)
 
     for (int i = 0; i < numSamples; ++i)
     {
-        // 係数の更新（SmoothedValueのステップを進めるためサンプル単位で実行）
         updateCoefficients();
-
         for (int ch = 0; ch < numChannels; ++ch)
         {
             float x = readPointers[ch][i];

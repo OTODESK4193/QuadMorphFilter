@@ -6,7 +6,6 @@
 #include <memory>
 #include "PluginProcessor.h"
 
-// --- 視覚化コンポーネント ---
 class FilterVisualizer : public juce::Component, public juce::Timer
 {
 public:
@@ -17,21 +16,23 @@ private:
     QuadMorphFilterAudioProcessor& processor;
 };
 
-// --- XY PAD (3つのドットを描画) ---
 class XYPadComponent : public juce::Component, public juce::Timer
 {
 public:
     XYPadComponent(QuadMorphFilterAudioProcessor& p) : processor(p) { startTimerHz(60); }
     void timerCallback() override { repaint(); }
     void paint(juce::Graphics& g) override;
-    void mouseDown(const juce::MouseEvent& e) override { updatePosition(e); }
-    void mouseDrag(const juce::MouseEvent& e) override { updatePosition(e); }
+
+    // 【追加】MouseUpによる録音フラグのリセット
+    void mouseDown(const juce::MouseEvent& e) override;
+    void mouseDrag(const juce::MouseEvent& e) override;
+    void mouseUp(const juce::MouseEvent& e) override;
 private:
     void updatePosition(const juce::MouseEvent& e);
     QuadMorphFilterAudioProcessor& processor;
+    int draggingLfoIndex = -1; // 録音対象のLFOインデックス
 };
 
-// --- メインエディター ---
 class QuadMorphFilterAudioProcessorEditor : public juce::AudioProcessorEditor
 {
 public:
@@ -46,7 +47,6 @@ private:
     FilterVisualizer visualizer;
     XYPadComponent xyPad;
 
-    // フィルターグループ構造体
     struct FilterGroup {
         juce::TextButton enableButton;
         juce::ComboBox type;
@@ -58,11 +58,9 @@ private:
     };
     FilterGroup groupA, groupB, groupC, groupD;
 
-    // LFOグループ構造体
     struct LfoGroup {
         juce::TextButton enableButton;
         juce::ComboBox wave, rateSync;
-        // 【修正】ToggleButtonからTextButtonへ変更
         juce::TextButton stepMode, syncToggle;
         juce::Slider rateFree, amt;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> eAtt, sAtt, syAtt;

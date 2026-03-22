@@ -12,7 +12,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout QuadMorphFilterAudioProcesso
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "posY", 1 }, "Base Y", 0.0f, 1.0f, 0.5f));
 
     juce::StringArray lfoNames = { "Morph", "Cutoff", "Reso" };
-    juce::StringArray waveTypes = { "Sine", "SAW", "Pulse", "Random", "Noise" };
+    // 【修正】波形リストの分離
+    juce::StringArray waveTypes1 = { "Sine", "SAW", "Pulse", "Random 1", "Random 2", "Noise", "Recording" };
+    juce::StringArray waveTypes23 = { "Sine", "SAW", "Pulse", "Random 1", "Noise", "Recording" };
+
     juce::StringArray syncRates = { "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64",
                                    "1/1D", "1/2D", "1/4D", "1/8D", "1/16D", "1/32D",
                                    "1/1T", "1/2T", "1/4T", "1/8T", "1/16T", "1/32T" };
@@ -20,7 +23,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout QuadMorphFilterAudioProcesso
     for (int i = 0; i < 3; ++i) {
         juce::String id = "lfo" + juce::String(i + 1);
         layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "en", 1 }, lfoNames[i] + " Enable", false));
-        layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ id + "wave", 1 }, lfoNames[i] + " Wave", waveTypes, 0));
+        layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ id + "wave", 1 }, lfoNames[i] + " Wave", (i == 0) ? waveTypes1 : waveTypes23, 0));
         layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "step", 1 }, lfoNames[i] + " Step Mode", false));
         layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "sync", 1 }, lfoNames[i] + " Sync", true));
         layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ id + "rateSync", 1 }, lfoNames[i] + " Rate Sync", syncRates, 2));
@@ -53,7 +56,6 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
     filterC.prepare(sampleRate, samplesPerBlock, 2);
     filterD.prepare(sampleRate, samplesPerBlock, 2);
 
-    // 【修正】オーディオパス内での動的メモリ確保を防ぐため、ここでサイズを確定する
     for (auto& buf : filterBuffers) {
         buf.setSize(2, samplesPerBlock, false, false, true);
     }
@@ -61,13 +63,13 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
 
 void QuadMorphFilterAudioProcessor::releaseResources() {}
 
+// 【修正】Noiseの独立。Random処理はprocessBlock側へ移行
 float QuadMorphFilterAudioProcessor::generateWave(float phase, int type) {
     switch (type) {
     case 0: return std::sin(phase);
     case 1: return 1.0f - (phase / juce::MathConstants<float>::pi);
     case 2: return (phase < juce::MathConstants<float>::pi) ? 1.0f : -1.0f;
-    case 3: return (juce::Random::getSystemRandom().nextFloat() * 2.0f - 1.0f);
-    case 4: return (juce::Random::getSystemRandom().nextFloat() * 2.0f - 1.0f);
+    case 3: return (juce::Random::getSystemRandom().nextFloat() * 2.0f - 1.0f); // Noise
     default: return 0.0f;
     }
 }
@@ -106,27 +108,92 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         bool step = apvts.getRawParameterValue(id + "step")->load() > 0.5f;
         bool sync = apvts.getRawParameterValue(id + "sync")->load() > 0.5f;
 
+        // 【追加】波形ごとのフラグ判別ルーティング
+        bool isRand1 = false, isRand2 = false, isNoise = false, isRec = false;
+        int stdWave = 0;
+        if (i == 0) { // LFO 1
+            if (wave == 3) isRand1 = true;
+            else if (wave == 4) isRand2 = true;
+            else if (wave == 5) isNoise = true;
+            else if (wave == 6) isRec = true;
+            else stdWave = wave;
+        }
+        else { // LFO 2/3
+            if (wave == 3) isRand1 = true;
+            else if (wave == 4) isNoise = true;
+            else if (wave == 5) isRec = true;
+            else stdWave = wave;
+        }
+
         if (enabled) {
             float rate = sync ? (1.0f / getSyncTime((int)apvts.getRawParameterValue(id + "rateSync")->load(), bpm))
                 : apvts.getRawParameterValue(id + "rateFree")->load();
 
             lfoStates[i].phase += (juce::MathConstants<float>::twoPi * rate * numSamples / sampleRate);
+
+            // 位相リセット時のRandom再生成
             if (lfoStates[i].phase >= juce::MathConstants<float>::twoPi) {
                 lfoStates[i].phase -= juce::MathConstants<float>::twoPi;
-                lfoStates[i].lastRandomX = generateWave(0, 3);
-                lfoStates[i].lastRandomY = generateWave(0, 3);
+                lfoStates[i].currentRandom = lfoStates[i].nextRandom;
+
+                if (isRand2) {
+                    float rx = juce::Random::getSystemRandom().nextBool() ? 1.0f : 0.0f;
+                    float ry = juce::Random::getSystemRandom().nextBool() ? 1.0f : 0.0f;
+                    lfoStates[i].nextRandom = { rx, ry };
+                }
+                else if (isRand1) {
+                    float rx = juce::Random::getSystemRandom().nextFloat() * 2.0f - 1.0f;
+                    float ry = juce::Random::getSystemRandom().nextFloat() * 2.0f - 1.0f;
+                    lfoStates[i].nextRandom = { rx, ry };
+                }
             }
 
-            float rawX = (wave == 3) ? lfoStates[i].lastRandomX : generateWave(lfoStates[i].phase, wave);
-            float rawY = (wave == 3) ? lfoStates[i].lastRandomY : generateWave(lfoStates[i].phase + juce::MathConstants<float>::halfPi, wave);
+            float rawX = 0.0f, rawY = 0.0f;
+            bool isAbsolute = false;
 
-            if (step) {
-                rawX = std::round(rawX * 4.0f) / 4.0f;
-                rawY = std::round(rawY * 4.0f) / 4.0f;
+            if (isRec) {
+                // 【追加】Recording再生時のタイムストレッチと線形補間
+                int len = recLength[i].load(std::memory_order_acquire);
+                if (len > 0) {
+                    float t = lfoStates[i].phase / juce::MathConstants<float>::twoPi;
+                    float exactIdx = t * len;
+                    int idx1 = (int)exactIdx % len;
+                    int idx2 = (idx1 + 1) % len;
+                    float frac = exactIdx - std::floor(exactIdx);
+                    rawX = recBuffer[i][idx1].x + (recBuffer[i][idx2].x - recBuffer[i][idx1].x) * frac;
+                    rawY = recBuffer[i][idx1].y + (recBuffer[i][idx2].y - recBuffer[i][idx1].y) * frac;
+                    isAbsolute = true;
+                }
+                else {
+                    rawX = baseX; rawY = baseY;
+                    isAbsolute = true;
+                }
+            }
+            else if (isRand1 || isRand2) {
+                // 【追加】Randomの線形スムージング（StepOff時）
+                float t = step ? 0.0f : (lfoStates[i].phase / juce::MathConstants<float>::twoPi);
+                rawX = lfoStates[i].currentRandom.x + (lfoStates[i].nextRandom.x - lfoStates[i].currentRandom.x) * t;
+                rawY = lfoStates[i].currentRandom.y + (lfoStates[i].nextRandom.y - lfoStates[i].currentRandom.y) * t;
+                if (isRand2) isAbsolute = true;
+            }
+            else {
+                if (isNoise) stdWave = 3;
+                rawX = generateWave(lfoStates[i].phase, stdWave);
+                rawY = generateWave(lfoStates[i].phase + juce::MathConstants<float>::halfPi, stdWave);
+                if (step) {
+                    rawX = std::round(rawX * 4.0f) / 4.0f;
+                    rawY = std::round(rawY * 4.0f) / 4.0f;
+                }
             }
 
-            lfoPositions[i].x = juce::jlimit(0.0f, 1.0f, baseX + rawX * amt * 0.4f);
-            lfoPositions[i].y = juce::jlimit(0.0f, 1.0f, baseY + rawY * amt * 0.4f);
+            if (isAbsolute) {
+                lfoPositions[i].x = juce::jlimit(0.0f, 1.0f, rawX);
+                lfoPositions[i].y = juce::jlimit(0.0f, 1.0f, rawY);
+            }
+            else {
+                lfoPositions[i].x = juce::jlimit(0.0f, 1.0f, baseX + rawX * amt * 0.4f);
+                lfoPositions[i].y = juce::jlimit(0.0f, 1.0f, baseY + rawY * amt * 0.4f);
+            }
         }
         else {
             lfoPositions[i] = { baseX, baseY };
@@ -157,11 +224,8 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     bool enC = apvts.getRawParameterValue("enableC")->load() > 0.5f;
     bool enD = apvts.getRawParameterValue("enableD")->load() > 0.5f;
 
-    // 【修正】動的メモリ確保を排除し、事前に用意したバッファへコピーする
     auto proc = [&](juce::AudioBuffer<float>& t, TptFilter& f, bool e) {
-        for (int ch = 0; ch < numChannels; ++ch) {
-            t.copyFrom(ch, 0, buffer, ch, 0, numSamples);
-        }
+        for (int ch = 0; ch < numChannels; ++ch) t.copyFrom(ch, 0, buffer, ch, 0, numSamples);
         if (e) f.process(t); else t.clear();
         };
 

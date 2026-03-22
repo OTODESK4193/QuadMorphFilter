@@ -6,6 +6,7 @@
 #include "TptFilter.h"
 #include <vector>
 #include <array>
+#include <atomic>
 
 class QuadMorphFilterAudioProcessor : public juce::AudioProcessor
 {
@@ -37,20 +38,22 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
+    // --- 【追加】Recording用固定長バッファ（オーディオパス安全設計） ---
+    std::array<juce::Point<float>, 2048> recBuffer[3];
+    std::atomic<int> recLength[3]{ 0 };
+    std::atomic<bool> isRecording[3]{ false };
+
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
     TptFilter filterA, filterB, filterC, filterD;
-
-    // 【修正】オーディオパス内での動的メモリ確保を防ぐための固定バッファ
     std::array<juce::AudioBuffer<float>, 4> filterBuffers;
 
     struct LfoState {
         float phase = 0.0f;
-        float lastRandomX = 0.0f;
-        float lastRandomY = 0.0f;
-        float currentStepX = 0.0f;
-        float currentStepY = 0.0f;
+        // 【追加】スムージングのためのRandom変数群
+        juce::Point<float> currentRandom{ 0.5f, 0.5f };
+        juce::Point<float> nextRandom{ 0.5f, 0.5f };
     };
     LfoState lfoStates[3];
     juce::Point<float> lfoPositions[3];

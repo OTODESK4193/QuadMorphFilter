@@ -19,8 +19,6 @@ public:
     void setType(int newType);
 
     void process(juce::AudioBuffer<float>& buffer);
-
-    // 【追加】特定の周波数におけるゲイン（マグニチュード）を計算する
     float getMagnitudeForFrequency(float frequency) const;
 
 private:
