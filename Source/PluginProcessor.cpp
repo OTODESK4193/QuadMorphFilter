@@ -1,30 +1,21 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
-#include <memory>
-#include <juce_audio_plugin_client/juce_audio_plugin_client.h>
 
 juce::AudioProcessorValueTreeState::ParameterLayout QuadMorphFilterAudioProcessor::createParameterLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
-
-    // XY PAD 座標 (0.0 ~ 1.0)
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "posX", 1 }, "X Position", 0.0f, 1.0f, 0.5f));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "posY", 1 }, "Y Position", 0.0f, 1.0f, 0.5f));
-
-    // LFO設定
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "lfoRate", 1 }, "LFO Rate", 0.1f, 10.0f, 1.0f));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "lfoAmount", 1 }, "LFO Amount", 0.0f, 1.0f, 0.0f));
 
-    // 4つのコーナー設定 (A, B, C, D)
     juce::StringArray suffixes = { "A", "B", "C", "D" };
-    for (const auto& s : suffixes)
-    {
+    for (const auto& s : suffixes) {
         auto range = juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.3f);
         layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "cutoff" + s, 1 }, "Cutoff " + s, range, 1000.0f));
         layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "res" + s, 1 }, "Res " + s, 0.1f, 10.0f, 0.707f));
         layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ "type" + s, 1 }, "Type " + s, juce::StringArray{ "LP", "BP", "HP", "Notch" }, 0));
     }
-
     return layout;
 }
 
@@ -50,7 +41,7 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     juce::ScopedNoDenormals noDenormals;
     auto numSamples = buffer.getNumSamples();
 
-    // 1. 各フィルターの最新パラメータを適用
+    // パラメータ更新
     auto updateF = [&](TptFilter& f, juce::String s) {
         f.setCutoff(apvts.getRawParameterValue("cutoff" + s)->load());
         f.setResonance(apvts.getRawParameterValue("res" + s)->load());
@@ -58,45 +49,40 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         };
     updateF(filterA, "A"); updateF(filterB, "B"); updateF(filterC, "C"); updateF(filterD, "D");
 
-    // 2. XY座標の取得とLFO適用
-    float x = apvts.getRawParameterValue("posX")->load();
-    float y = apvts.getRawParameterValue("posY")->load();
+    // LFO計算
+    float baseX = apvts.getRawParameterValue("posX")->load();
+    float baseY = apvts.getRawParameterValue("posY")->load();
     float lfoAmt = apvts.getRawParameterValue("lfoAmount")->load();
     float lfoRate = apvts.getRawParameterValue("lfoRate")->load();
 
-    // LFOによる円運動 (簡易実装)
-    if (lfoAmt > 0.0f) {
-        float time = (float)juce::Time::getMillisecondCounterHiRes() * 0.001f;
-        x += std::sin(time * lfoRate) * lfoAmt * 0.5f;
-        y += std::cos(time * lfoRate) * lfoAmt * 0.5f;
-        x = juce::jlimit(0.0f, 1.0f, x);
-        y = juce::jlimit(0.0f, 1.0f, y);
-    }
+    lfoPhase += (float)(lfoRate * juce::MathConstants<double>::twoPi / getSampleRate() * numSamples);
+    if (lfoPhase > juce::MathConstants<float>::twoPi) lfoPhase -= juce::MathConstants<float>::twoPi;
 
-    // 3. 重みの計算 (Bilinear)
-    float wA = (1.0f - x) * (1.0f - y);
-    float wB = x * (1.0f - y);
-    float wC = (1.0f - x) * y;
-    float wD = x * y;
+    // 現在の座標を決定（円運動）
+    currentX = juce::jlimit(0.0f, 1.0f, baseX + std::sin(lfoPhase) * lfoAmt * 0.4f);
+    currentY = juce::jlimit(0.0f, 1.0f, baseY + std::cos(lfoPhase) * lfoAmt * 0.4f);
 
-    // 4. オーディオ処理: 各フィルターの出力をミックス
-    juce::AudioBuffer<float> bufferA, bufferB, bufferC, bufferD;
-    bufferA.makeCopyOf(buffer); bufferB.makeCopyOf(buffer);
-    bufferC.makeCopyOf(buffer); bufferD.makeCopyOf(buffer);
+    // 重みの計算
+    float wA = (1.0f - currentX) * (1.0f - currentY);
+    float wB = currentX * (1.0f - currentY);
+    float wC = (1.0f - currentX) * currentY;
+    float wD = currentX * currentY;
 
-    filterA.process(bufferA); filterB.process(bufferB);
-    filterC.process(bufferC); filterD.process(bufferD);
+    // ミックス処理
+    juce::AudioBuffer<float> bA, bB, bC, bD;
+    bA.makeCopyOf(buffer); bB.makeCopyOf(buffer); bC.makeCopyOf(buffer); bD.makeCopyOf(buffer);
+    filterA.process(bA); filterB.process(bB); filterC.process(bC); filterD.process(bD);
 
     buffer.clear();
     for (int ch = 0; ch < buffer.getNumChannels(); ++ch) {
-        buffer.addFrom(ch, 0, bufferA, ch, 0, numSamples, wA);
-        buffer.addFrom(ch, 0, bufferB, ch, 0, numSamples, wB);
-        buffer.addFrom(ch, 0, bufferC, ch, 0, numSamples, wC);
-        buffer.addFrom(ch, 0, bufferD, ch, 0, numSamples, wD);
+        buffer.addFrom(ch, 0, bA, ch, 0, numSamples, wA);
+        buffer.addFrom(ch, 0, bB, ch, 0, numSamples, wB);
+        buffer.addFrom(ch, 0, bC, ch, 0, numSamples, wC);
+        buffer.addFrom(ch, 0, bD, ch, 0, numSamples, wD);
     }
 }
 
-// 固定情報の定義 (省略)
+// 他の関数は変更なし
 const juce::String QuadMorphFilterAudioProcessor::getName() const { return "Quad-Morph Filter"; }
 bool QuadMorphFilterAudioProcessor::acceptsMidi() const { return false; }
 bool QuadMorphFilterAudioProcessor::producesMidi() const { return false; }

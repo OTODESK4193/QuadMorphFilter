@@ -29,21 +29,20 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
+    // 【追加】Editorから現在の(LFO反映済み)座標を取得するための関数
+    juce::Point<float> getCurrentXY() const { return { currentX, currentY }; }
+
     juce::AudioProcessorValueTreeState apvts;
 
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    // 4基の独立したフィルター
     TptFilter filterA, filterB, filterC, filterD;
 
-    // LFOロジック用
+    // LFOおよび現在の座標保持用
+    float currentX = 0.5f;
+    float currentY = 0.5f;
     float lfoPhase = 0.0f;
-    float lastX = 0.5f;
-    float lastY = 0.5f;
-
-    // マウス軌跡記録用バッファ (将来用)
-    std::vector<juce::Point<float>> recordedPath;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(QuadMorphFilterAudioProcessor)
 };
