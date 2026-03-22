@@ -3,7 +3,6 @@
 #include <memory>
 #include "PluginProcessor.h"
 
-// --- 視覚化コンポーネント ---
 class FilterVisualizer : public juce::Component, public juce::Timer
 {
 public:
@@ -14,22 +13,19 @@ private:
     QuadMorphFilterAudioProcessor& processor;
 };
 
-// --- XY PAD コンポーネント (Timerを追加) ---
 class XYPadComponent : public juce::Component, public juce::Timer
 {
 public:
-    XYPadComponent(QuadMorphFilterAudioProcessor& p) : processor(p) { startTimerHz(60); } // 60Hzで更新
+    XYPadComponent(QuadMorphFilterAudioProcessor& p) : processor(p) { startTimerHz(60); }
     void timerCallback() override { repaint(); }
     void paint(juce::Graphics& g) override;
     void mouseDown(const juce::MouseEvent& e) override { updatePosition(e); }
     void mouseDrag(const juce::MouseEvent& e) override { updatePosition(e); }
-
 private:
     void updatePosition(const juce::MouseEvent& e);
     QuadMorphFilterAudioProcessor& processor;
 };
 
-// --- メインエディター ---
 class QuadMorphFilterAudioProcessorEditor : public juce::AudioProcessorEditor
 {
 public:
@@ -45,14 +41,17 @@ private:
     XYPadComponent xyPad;
 
     struct FilterGroup {
+        juce::ToggleButton enableButton; // 【新設】ON/OFF
         juce::Label groupLabel;
-        juce::Label cutoffLabel;
-        juce::Label resLabel;
-        juce::Slider cutoff, res;
         juce::ComboBox type;
+        juce::Label cutoffLabel, resLabel;
+        juce::Slider cutoff, res;
+
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> eAtt; // Toggle用
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> cAtt, rAtt;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> tAtt;
     };
+
     FilterGroup groupA, groupB, groupC, groupD;
 
     juce::Label lfoRateLabel, lfoAmtLabel;
