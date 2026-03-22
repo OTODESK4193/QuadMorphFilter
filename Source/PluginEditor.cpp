@@ -1,12 +1,12 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-// --- Visualizer: ProcessorのリアルタイムXYを参照して描画 ---
+// --- Visualizer: 描画スケーリングの改善 ---
 void FilterVisualizer::paint(juce::Graphics& g) {
     g.fillAll(juce::Colours::black.withAlpha(0.8f));
     g.setColour(juce::Colours::cyan);
 
-    auto currentPos = processor.getCurrentXY(); // LFO反映済みの座標
+    auto currentPos = processor.getCurrentXY();
     float x = currentPos.getX();
     float y = currentPos.getY();
 
@@ -22,29 +22,46 @@ void FilterVisualizer::paint(juce::Graphics& g) {
             int t = (int)processor.apvts.getRawParameterValue("type" + s)->load();
             float r = freq / fc; float r2 = r * r; float d = 1.0f / res;
             float den = std::sqrt(std::pow(1.0f - r2, 2.0f) + std::pow(r * d, 2.0f));
-            if (t == 0) return 1.0f / den; if (t == 1) return r / den; if (t == 2) return r2 / den;
-            return std::abs(1.0f - r2) / den;
+            float mag = 1.0f / den;
+            if (t == 1) mag = r * mag; // BP
+            if (t == 2) mag = r2 * mag; // HP
+            if (t == 3) mag = std::abs(1.0f - r2) * mag; // Notch
+            return mag;
             };
 
         float mag = (calc("A") * (1 - x) * (1 - y)) + (calc("B") * x * (1 - y)) + (calc("C") * (1 - x) * y) + (calc("D") * x * y);
-        float yPos = h - (mag * h * 0.4f + h * 0.2f);
+
+        // 【修正】高Resonance時でも枠に収めるためのスケーリング (非線形圧縮)
+        // 単純な乗算ではなく、対数的な圧縮を加えることでピークを抑え込みます
+        float scaledMag = std::log10(mag + 1.0f) * 1.5f;
+        float yPos = h - (scaledMag * h * 0.4f + h * 0.1f);
+
+        yPos = juce::jlimit(2.0f, h - 2.0f, yPos); // 上下の枠を突き抜けないガード
+
         if (px == 0) path.startNewSubPath(0, yPos); else path.lineTo((float)px, yPos);
     }
     g.strokePath(path, juce::PathStrokeType(2.0f));
 }
 
-// --- XYPadComponent: マウス操作とインジケーター描画 ---
+// --- XYPadComponent: ガイドラベルの追加 ---
 void XYPadComponent::paint(juce::Graphics& g) {
     auto bounds = getLocalBounds().toFloat();
     g.setColour(juce::Colours::black.withAlpha(0.5f));
     g.fillRoundedRectangle(bounds, 10.0f);
-    g.setColour(juce::Colours::white.withAlpha(0.3f));
+    g.setColour(juce::Colours::white.withAlpha(0.2f));
     g.drawRoundedRectangle(bounds, 10.0f, 2.0f);
 
-    // LFO反映済みの座標に「光る点」を描画
+    // 【追加】四隅のガイドテキスト
+    g.setColour(juce::Colours::white.withAlpha(0.4f));
+    g.setFont(12.0f);
+    g.drawText("A", bounds.removeFromTop(20).removeFromLeft(20), juce::Justification::centred);
+    g.drawText("B", getLocalBounds().removeFromTop(20).removeFromRight(20).toFloat(), juce::Justification::centred);
+    g.drawText("C", getLocalBounds().removeFromBottom(20).removeFromLeft(20).toFloat(), juce::Justification::centred);
+    g.drawText("D", getLocalBounds().removeFromBottom(20).removeFromRight(20).toFloat(), juce::Justification::centred);
+
     auto currentPos = processor.getCurrentXY();
-    float dotX = currentPos.getX() * bounds.getWidth();
-    float dotY = currentPos.getY() * bounds.getHeight();
+    float dotX = currentPos.getX() * getWidth();
+    float dotY = currentPos.getY() * getHeight();
 
     g.setColour(juce::Colours::cyan);
     g.fillEllipse(dotX - 5, dotY - 5, 10, 10);
@@ -60,13 +77,12 @@ void XYPadComponent::updatePosition(const juce::MouseEvent& e) {
     repaint();
 }
 
-// --- Editor 実装 ---
+// --- Editor コンストラクタ / resized (変更なし) ---
 QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(QuadMorphFilterAudioProcessor& p)
     : AudioProcessorEditor(&p), audioProcessor(p), visualizer(p), xyPad(p)
 {
     addAndMakeVisible(visualizer);
     addAndMakeVisible(xyPad);
-
     setupFilterGroup(groupA, "A", "Filter A"); setupFilterGroup(groupB, "B", "Filter B");
     setupFilterGroup(groupC, "C", "Filter C"); setupFilterGroup(groupD, "D", "Filter D");
 
@@ -78,7 +94,6 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(QuadMor
         };
     setupGlobal(lfoRateLabel, lfoRateSlider, "LFO Rate", "lfoRate", lfoR_Att);
     setupGlobal(lfoAmtLabel, lfoAmtSlider, "LFO Amt", "lfoAmount", lfoA_Att);
-
     setSize(900, 800);
 }
 
@@ -98,31 +113,22 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce:
 }
 
 QuadMorphFilterAudioProcessorEditor::~QuadMorphFilterAudioProcessorEditor() {}
-
-void QuadMorphFilterAudioProcessorEditor::paint(juce::Graphics& g) {
-    g.fillAll(juce::Colours::darkgrey.darker());
-}
+void QuadMorphFilterAudioProcessorEditor::paint(juce::Graphics& g) { g.fillAll(juce::Colours::darkgrey.darker()); }
 
 void QuadMorphFilterAudioProcessorEditor::resized()
 {
     auto bounds = getLocalBounds().reduced(20);
     const int groupHeight = 150;
-
     auto topArea = bounds.removeFromTop(groupHeight);
     layoutFilterGroup(groupA, topArea.removeFromLeft(bounds.getWidth() / 2).reduced(10));
     layoutFilterGroup(groupB, topArea.reduced(10));
-
     auto bottomArea = bounds.removeFromBottom(groupHeight);
     layoutFilterGroup(groupC, bottomArea.removeFromLeft(bounds.getWidth() / 2).reduced(10));
     layoutFilterGroup(groupD, bottomArea.reduced(10));
-
-    // 中央：左側にVisualizer、右側にXYパッド
     auto middleArea = bounds.reduced(10);
     visualizer.setBounds(middleArea.removeFromLeft(middleArea.getWidth() * 0.6f).reduced(5));
-
     auto rightArea = middleArea;
-    xyPad.setBounds(rightArea.removeFromTop(rightArea.getWidth()).reduced(5)); // 正方形のパッド
-
+    xyPad.setBounds(rightArea.removeFromTop(rightArea.getWidth()).reduced(5));
     lfoRateLabel.setBounds(rightArea.removeFromTop(20));
     lfoRateSlider.setBounds(rightArea.removeFromTop(40));
     lfoAmtLabel.setBounds(rightArea.removeFromTop(20));
