@@ -103,7 +103,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     float baseX = apvts.getRawParameterValue("posX")->load();
     float baseY = apvts.getRawParameterValue("posY")->load();
 
-    // 【修正】配列の初期化エラーを解消（明示的なゼロクリア）
     std::array<float, 4> lfoMod4[3] = {
         std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f},
         std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f},
@@ -216,6 +215,9 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         else {
             lfoPositions[i] = { baseX, baseY };
         }
+
+        // 【追加】UI描画用に、計算された最新の乱数配列をクラスメンバへコピー
+        currentLfoMod4[i] = lfoMod4[i];
     }
 
     std::array<float, 4> wMix{ 0.0f, 0.0f, 0.0f, 0.0f };

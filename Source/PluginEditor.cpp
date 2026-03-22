@@ -35,19 +35,24 @@ void FilterVisualizer::paint(juce::Graphics& g) {
     bool lfo1_isRand1 = ((int)processor.apvts.getRawParameterValue("lfo2wave")->load() == 3) && (processor.apvts.getRawParameterValue("lfo2en")->load() > 0.5f);
     bool lfo2_isRand1 = ((int)processor.apvts.getRawParameterValue("lfo3wave")->load() == 3) && (processor.apvts.getRawParameterValue("lfo3en")->load() > 0.5f);
 
+    // 【修正】DSP側で計算された独立した4つの乱数配列を取得
+    auto lfo1Mod4 = processor.getLfoMod4(1);
+    auto lfo2Mod4 = processor.getLfoMod4(2);
+
     juce::Path path;
     for (int px = 0; px <= (int)w; ++px) {
         float freq = 20.0f * std::pow(1000.0f, px / w);
 
-        // 【修正】戻り値の型を明示的に float に指定し、コンパイルエラーを解消
         auto calc = [&](juce::String s, int idx) -> float {
             if (processor.apvts.getRawParameterValue("enable" + s)->load() < 0.5f) return 0.0f;
 
             float fc = processor.apvts.getRawParameterValue("cutoff" + s)->load() * (1.0f + cutoffMod * 2.0f);
-            if (lfo1_isRand1) fc = 20.0f * std::pow(1000.0f, cPos.x);
+            // 【修正】各フィルターに対応する独立した乱数を適用して描画
+            if (lfo1_isRand1) fc = 20.0f * std::pow(1000.0f, lfo1Mod4[idx]);
 
             float res = processor.apvts.getRawParameterValue("res" + s)->load() * (1.0f + resMod * 3.0f);
-            if (lfo2_isRand1) res = 0.1f * std::pow(100.0f, rPos.x);
+            // 【修正】各フィルターに対応する独立した乱数を適用して描画
+            if (lfo2_isRand1) res = 0.1f * std::pow(100.0f, lfo2Mod4[idx]);
 
             int slopeIdx = (int)processor.apvts.getRawParameterValue("slope" + s)->load();
             int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
@@ -63,7 +68,6 @@ void FilterVisualizer::paint(juce::Graphics& g) {
 
             if (t == 1) mag *= r; if (t == 2) mag *= r2; if (t == 3) mag *= std::abs(1.0f - r2);
 
-            // 【修正】戻り値を確実に float にキャスト
             return static_cast<float>(std::pow((double)mag, (double)stages));
             };
 

@@ -36,6 +36,9 @@ public:
 
     juce::Point<float> getLfoPos(int index) const { return lfoPositions[index]; }
 
+    // 【追加】UI描画用に、各LFOの独立した4つのモジュレーション値を取得するゲッター
+    std::array<float, 4> getLfoMod4(int index) const { return currentLfoMod4[index]; }
+
     juce::AudioProcessorValueTreeState apvts;
 
     std::array<juce::Point<float>, 2048> recBuffer[3];
@@ -57,6 +60,13 @@ private:
     };
     LfoState lfoStates[3];
     juce::Point<float> lfoPositions[3];
+
+    // 【追加】UIへ安全に値を渡すための固定長通信バッファ
+    std::array<float, 4> currentLfoMod4[3] = {
+        std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f},
+        std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f},
+        std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}
+    };
 
     float generateWave(float phase, int type);
     float getSyncTime(int selection, double bpm);
