@@ -23,14 +23,13 @@ public:
     void timerCallback() override { repaint(); }
     void paint(juce::Graphics& g) override;
 
-    // 【追加】MouseUpによる録音フラグのリセット
     void mouseDown(const juce::MouseEvent& e) override;
     void mouseDrag(const juce::MouseEvent& e) override;
     void mouseUp(const juce::MouseEvent& e) override;
 private:
     void updatePosition(const juce::MouseEvent& e);
     QuadMorphFilterAudioProcessor& processor;
-    int draggingLfoIndex = -1; // 録音対象のLFOインデックス
+    int draggingLfoIndex = -1;
 };
 
 class QuadMorphFilterAudioProcessorEditor : public juce::AudioProcessorEditor
@@ -62,9 +61,9 @@ private:
         juce::TextButton enableButton;
         juce::ComboBox wave, rateSync;
         juce::TextButton stepMode, syncToggle;
-        juce::Slider rateFree, amt;
+        juce::Slider rateFree, minSlider, maxSlider;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> eAtt, sAtt, syAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> rfAtt, aAtt;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> rfAtt, minAtt, maxAtt;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> wAtt, rsAtt;
     };
     LfoGroup lfos[3];

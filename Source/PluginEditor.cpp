@@ -69,28 +69,32 @@ void XYPadComponent::paint(juce::Graphics& g) {
     juce::Colour colors[] = { juce::Colours::cyan, juce::Colours::magenta, juce::Colours::yellow };
     for (int i = 0; i < 3; ++i) {
         auto p = processor.getLfoPos(i);
-        // 録音中のドットは色を少し明るくして強調
+        int wave = (int)processor.apvts.getRawParameterValue("lfo" + juce::String(i + 1) + "wave")->load();
+        bool isRand1 = (wave == 3);
+
         if (processor.isRecording[i].load(std::memory_order_acquire)) {
             g.setColour(colors[i].brighter(0.8f));
             g.fillEllipse(p.x * getWidth() - 8, p.y * getHeight() - 8, 16, 16);
+        }
+        else if (isRand1) {
+            g.setColour(colors[i].withAlpha(0.2f));
+            g.fillEllipse(p.x * getWidth() - 6, p.y * getHeight() - 6, 12, 12);
         }
         else {
             g.setColour(colors[i]);
             g.fillEllipse(p.x * getWidth() - 6, p.y * getHeight() - 6, 12, 12);
         }
-        g.setColour(juce::Colours::white);
+        g.setColour(juce::Colours::white.withAlpha(isRand1 ? 0.2f : 1.0f));
         g.drawEllipse(p.x * getWidth() - 8, p.y * getHeight() - 8, 16, 16, 1.0f);
     }
 }
 
-// 【追加】右クリック当たり判定による録音開始
 void XYPadComponent::mouseDown(const juce::MouseEvent& e) {
     if (e.mods.isRightButtonDown()) {
         float w = (float)getWidth(); float h = (float)getHeight();
         for (int i = 0; i < 3; ++i) {
             auto p = processor.getLfoPos(i);
             float px = p.x * w; float py = p.y * h;
-            // ドットからの距離判定(半径15px以内)
             if (std::hypot(e.x - px, e.y - py) < 15.0f) {
                 draggingLfoIndex = i;
                 processor.recLength[i].store(0, std::memory_order_release);
@@ -102,7 +106,6 @@ void XYPadComponent::mouseDown(const juce::MouseEvent& e) {
     updatePosition(e);
 }
 
-// 【追加】固定長配列への座標書込（ロックフリー設計）
 void XYPadComponent::mouseDrag(const juce::MouseEvent& e) {
     if (draggingLfoIndex != -1) {
         int len = processor.recLength[draggingLfoIndex].load(std::memory_order_acquire);
@@ -167,7 +170,6 @@ void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, ju
     addAndMakeVisible(g.enableButton);
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, id + "en", g.enableButton);
 
-    // 【修正】LFO1のみRandom 2を含んだリストへ分岐
     if (idx == 1) {
         g.wave.addItemList({ "Sine", "SAW", "Pulse", "Random 1", "Random 2", "Noise", "Recording" }, 1);
     }
@@ -196,9 +198,16 @@ void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, ju
     addAndMakeVisible(g.rateFree);
     g.rfAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, id + "rateFree", g.rateFree);
 
-    g.amt.setSliderStyle(juce::Slider::LinearHorizontal); g.amt.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 45, 18);
-    addAndMakeVisible(g.amt);
-    g.aAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, id + "amt", g.amt);
+    // 【修正】TextBoxLeftを使用し、数値を直接入力させるスマートなUI
+    g.minSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    g.minSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 45, 18);
+    addAndMakeVisible(g.minSlider);
+    g.minAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, id + "min", g.minSlider);
+
+    g.maxSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    g.maxSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 45, 18);
+    addAndMakeVisible(g.maxSlider);
+    g.maxAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, id + "max", g.maxSlider);
 }
 
 QuadMorphFilterAudioProcessorEditor::~QuadMorphFilterAudioProcessorEditor() {}
@@ -231,8 +240,9 @@ void QuadMorphFilterAudioProcessorEditor::resized() {
         lfos[i].syncToggle.setBounds(r.removeFromLeft(55).reduced(2, 5));
 
         auto remainingWidth = r.getWidth();
-        auto rateArea = r.removeFromLeft(remainingWidth / 2);
-        auto amtArea = r;
+        auto rateArea = r.removeFromLeft(remainingWidth / 3);
+        auto minArea = r.removeFromLeft(remainingWidth / 3);
+        auto maxArea = r;
 
         if (audioProcessor.apvts.getRawParameterValue("lfo" + juce::String(i + 1) + "sync")->load() > 0.5f) {
             lfos[i].rateSync.setBounds(rateArea.withSizeKeepingCentre(rateArea.getWidth() - 10, 22));
@@ -242,6 +252,8 @@ void QuadMorphFilterAudioProcessorEditor::resized() {
             lfos[i].rateFree.setBounds(rateArea.reduced(5, 8));
             lfos[i].rateFree.setVisible(true); lfos[i].rateSync.setVisible(false);
         }
-        lfos[i].amt.setBounds(amtArea.reduced(5, 8));
+
+        lfos[i].minSlider.setBounds(minArea.reduced(5, 8));
+        lfos[i].maxSlider.setBounds(maxArea.reduced(5, 8));
     }
 }

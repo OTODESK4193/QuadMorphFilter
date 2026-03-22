@@ -38,7 +38,7 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
-    // --- 【追加】Recording用固定長バッファ（オーディオパス安全設計） ---
+    // Recording用固定長バッファ（オーディオパス安全設計）
     std::array<juce::Point<float>, 2048> recBuffer[3];
     std::atomic<int> recLength[3]{ 0 };
     std::atomic<bool> isRecording[3]{ false };
@@ -51,9 +51,11 @@ private:
 
     struct LfoState {
         float phase = 0.0f;
-        // 【追加】スムージングのためのRandom変数群
         juce::Point<float> currentRandom{ 0.5f, 0.5f };
         juce::Point<float> nextRandom{ 0.5f, 0.5f };
+        // Random 1用の4基独立ランダム変数
+        std::array<float, 4> currentRand1{ 0.5f, 0.5f, 0.5f, 0.5f };
+        std::array<float, 4> nextRand1{ 0.5f, 0.5f, 0.5f, 0.5f };
     };
     LfoState lfoStates[3];
     juce::Point<float> lfoPositions[3];
