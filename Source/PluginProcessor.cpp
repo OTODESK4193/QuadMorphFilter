@@ -40,8 +40,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout QuadMorphFilterAudioProcesso
     }
 
     juce::StringArray suffixes = { "A", "B", "C", "D" };
-    // Åyí«â¡ÅzëÊ6ÇÃÉÇÉfÉã Formant (Vowel)
-    juce::StringArray models = { "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR", "Formant (Vowel)" };
+    // Åyí«â¡ÅzëÊ7ÇÃÉÇÉfÉã Comb Filter
+    juce::StringArray models = { "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR", "Formant (Vowel)", "Comb Filter" };
     juce::StringArray slopes = { "12 dB/oct", "24 dB/oct", "48 dB/oct", "96 dB/oct" };
 
     for (const auto& s : suffixes) {

@@ -30,6 +30,8 @@ void TptFilter::reset()
             for (int pole = 0; pole < 4; ++pole) {
                 zdfState[stage][ch][pole] = 0.0f;
             }
+            combWriteIdx[stage][ch] = 0;
+            for (int i = 0; i < 4096; ++i) combBuffer[stage][ch][i] = 0.0f;
         }
     }
     for (int ch = 0; ch < 2; ++ch) {
@@ -49,10 +51,14 @@ void TptFilter::setType(int newType) { filterType = newType; }
 void TptFilter::setSlope(int index)
 {
     slopeIdx = index;
-    if (filterModel == 0 || filterModel == 3 || filterModel == 4 || filterModel == 5) {
+    // 【修正】Formant (5) 選択時は、UIの指定を無視して強制的に 1段 (12dB相当) にロックする
+    if (filterModel == 5) {
+        currentStages = 1;
+    }
+    else if (filterModel == 0 || filterModel == 3 || filterModel == 4 || filterModel == 6) {
         currentStages = (index == 0) ? 1 : (index == 1) ? 2 : (index == 2) ? 4 : 8;
     }
-    else {
+    else { // Ladder base
         currentStages = (index == 0) ? 1 : (index == 1) ? 1 : (index == 2) ? 2 : 4;
     }
 }
@@ -62,13 +68,12 @@ void TptFilter::updateCoefficients()
     float currentCutoff = cutoff.getNextValue();
     float currentRes = resonance.getNextValue();
 
-    if (filterModel == 5) { // 【追加】Formant (Vowel) モーフィング係数
+    if (filterModel == 5) { // Formant
         float v = juce::jmap(std::log10(currentCutoff), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f);
         v = juce::jlimit(0.0f, 4.0f, v);
         int idx = (int)v; float frac = v - idx;
         if (idx >= 4) { idx = 3; frac = 1.0f; }
 
-        // A, I, U, E, O のフォルマント周波数
         float f1_map[5] = { 730.f, 270.f, 300.f, 530.f, 400.f };
         float f2_map[5] = { 1090.f, 2290.f, 870.f, 1840.f, 840.f };
         float f3_map[5] = { 2440.f, 3010.f, 2240.f, 2480.f, 2800.f };
@@ -82,7 +87,7 @@ void TptFilter::updateCoefficients()
         for (int f = 0; f < 3; ++f) {
             float wd = juce::MathConstants<float>::pi * f_arr[f] / (float)sampleRate;
             form_g[f] = std::tan(wd);
-            form_R[f] = 1.0f / (2.0f * currentRes); // ResonanceをQ値として使用
+            form_R[f] = 1.0f / (2.0f * currentRes);
             form_h[f] = 1.0f / (1.0f + 2.0f * form_R[f] * form_g[f] + form_g[f] * form_g[f]);
         }
     }
@@ -91,7 +96,7 @@ void TptFilter::updateCoefficients()
         g = std::tan(wd);
         ladderG = g / (1.0f + g);
 
-        if (filterModel == 0 || filterModel == 3 || filterModel == 4) {
+        if (filterModel == 0 || filterModel == 3 || filterModel == 4 || filterModel == 6) {
             float adjustedRes = currentRes;
             if (currentStages > 1) adjustedRes = currentRes * std::pow(0.6f, std::log2((float)currentStages));
             R = 1.0f / (2.0f * adjustedRes);
@@ -127,12 +132,12 @@ void TptFilter::process(juce::AudioBuffer<float>& buffer)
 float TptFilter::processSample(int channel, float x)
 {
     float comp = 1.0f;
-    if (filterModel == 0 || filterModel == 4 || filterModel == 5) comp = 1.0f + resonance.getCurrentValue() * 0.1f;
+    if (filterModel == 0 || filterModel == 4 || filterModel == 5 || filterModel == 6) comp = 1.0f + resonance.getCurrentValue() * 0.1f;
     else if (filterModel == 1) comp = 1.0f + 0.5f * ladderRes;
     else if (filterModel == 2) comp = 1.0f + 0.2f * ladderRes;
     x *= comp;
 
-    if (filterModel == 4) {
+    if (filterModel == 4) { // Bitcrush / SRR
         float targetSR = cutoff.getCurrentValue();
         float phaseInc = targetSR / sampleRate;
         srrPhase[channel] += phaseInc;
@@ -150,18 +155,16 @@ float TptFilter::processSample(int channel, float x)
 
     float out = x;
 
-    if (filterModel == 0 || filterModel == 4) {
+    if (filterModel == 0 || filterModel == 4) { // Clean SVF / SRR
         for (int stage = 0; stage < currentStages; ++stage) {
             float hp = (out - (2.0f * R + g) * s1[stage][channel] - s2[stage][channel]) * h;
             float bp = g * hp + s1[stage][channel];
             float lp = g * bp + s2[stage][channel];
-            s1[stage][channel] = g * hp + bp;
-            s2[stage][channel] = g * bp + lp;
-
+            s1[stage][channel] = g * hp + bp; s2[stage][channel] = g * bp + lp;
             if (filterType == 0) out = lp; else if (filterType == 1) out = bp; else if (filterType == 2) out = hp; else out = lp + hp;
         }
     }
-    else if (filterModel == 1) {
+    else if (filterModel == 1) { // Moog
         for (int stage = 0; stage < currentStages; ++stage) {
             float s1_ = zdfState[stage][channel][0]; float s2_ = zdfState[stage][channel][1];
             float s3_ = zdfState[stage][channel][2]; float s4_ = zdfState[stage][channel][3];
@@ -182,7 +185,7 @@ float TptFilter::processSample(int channel, float x)
             }
         }
     }
-    else if (filterModel == 2) {
+    else if (filterModel == 2) { // Diode
         for (int stage = 0; stage < currentStages; ++stage) {
             float fb = std::tanh(out - ladderRes * zdfState[stage][channel][3]);
             float v1 = (fb - zdfState[stage][channel][0]) * ladderG; float y1 = v1 + zdfState[stage][channel][0]; zdfState[stage][channel][0] = y1 + v1; y1 = std::tanh(y1);
@@ -198,18 +201,17 @@ float TptFilter::processSample(int channel, float x)
             }
         }
     }
-    else if (filterModel == 3) {
+    else if (filterModel == 3) { // SEM
         for (int stage = 0; stage < currentStages; ++stage) {
             float drivenOut = std::tanh(out * 1.2f);
             float hp = (drivenOut - (2.0f * R + g) * s1[stage][channel] - s2[stage][channel]) * h;
             float bp = g * hp + s1[stage][channel];
             float lp = g * bp + s2[stage][channel];
-            s1[stage][channel] = std::tanh(g * hp + bp);
-            s2[stage][channel] = std::tanh(g * bp + lp);
+            s1[stage][channel] = std::tanh(g * hp + bp); s2[stage][channel] = std::tanh(g * bp + lp);
             if (filterType == 0) out = lp; else if (filterType == 1) out = bp; else if (filterType == 2) out = hp; else out = lp + hp;
         }
     }
-    else if (filterModel == 5) { // 【追加】Formant 処理
+    else if (filterModel == 5) { // Formant (強制1段ロック済み)
         float out_formant = 0.0f;
         float gains[3] = { 1.0f, 0.5f, 0.2f };
         for (int stage = 0; stage < currentStages; ++stage) {
@@ -226,6 +228,42 @@ float TptFilter::processSample(int channel, float x)
                 out_formant += bandOut * gains[f];
             }
             out = out_formant;
+        }
+    }
+    else if (filterModel == 6) { // 【追加】Comb Filter
+        for (int stage = 0; stage < currentStages; ++stage) {
+            float delaySamples = sampleRate / juce::jlimit(20.0f, 20000.0f, cutoff.getCurrentValue());
+            int dInt = (int)delaySamples;
+            float dFrac = delaySamples - dInt;
+
+            int readIdx1 = combWriteIdx[stage][channel] - dInt;
+            if (readIdx1 < 0) readIdx1 += 4096;
+            int readIdx2 = readIdx1 - 1;
+            if (readIdx2 < 0) readIdx2 += 4096;
+
+            float y1 = combBuffer[stage][channel][readIdx1];
+            float y2 = combBuffer[stage][channel][readIdx2];
+            float delayed = y1 + dFrac * (y2 - y1); // 線形補間によるディレイ
+
+            float fb = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 0.0f, 0.95f); // 暴走防止のためMAX 0.95
+            if (filterType == 1 || filterType == 3) fb = -fb; // BP/Notch時はネガティブ・フィードバック
+
+            float inSignal = out;
+            float combOut = 0.0f;
+
+            if (filterType == 0 || filterType == 1) { // Feedback Comb
+                float toBuffer = inSignal + delayed * fb;
+                toBuffer = std::tanh(toBuffer); // 発振時の爆発を防ぐサチュレーション
+                combBuffer[stage][channel][combWriteIdx[stage][channel]] = toBuffer;
+                combOut = toBuffer;
+            }
+            else { // Feedforward Comb
+                combBuffer[stage][channel][combWriteIdx[stage][channel]] = inSignal;
+                combOut = inSignal + delayed * fb;
+            }
+
+            combWriteIdx[stage][channel] = (combWriteIdx[stage][channel] + 1) % 4096;
+            out = combOut;
         }
     }
 
@@ -259,7 +297,7 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         if (filterType == 1) mag *= w; else if (filterType == 2) mag *= w2; else if (filterType == 3) mag *= std::abs(1.0f - w2);
         return std::pow(mag, currentStages);
     }
-    else if (filterModel == 5) { // FormantのMagnitude計算
+    else if (filterModel == 5) { // Formant
         float v = juce::jmap(std::log10(fc), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f);
         v = juce::jlimit(0.0f, 4.0f, v);
         int idx = (int)v; float frac = v - idx;
@@ -287,7 +325,22 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
             if (filterType == 1) m_f *= w_f; else if (filterType == 2) m_f *= w2_f; else if (filterType == 3) m_f *= std::abs(1.0f - w2_f);
             mag_sum += m_f * gains[f];
         }
-        return std::pow(mag_sum, currentStages);
+        return std::pow(mag_sum, 1.0f); // Formantは常に1段(12dB)
+    }
+    else if (filterModel == 6) { // 【追加】Comb Filter の Magnitude 計算
+        float delaySamples = sampleRate / juce::jlimit(20.0f, 20000.0f, fc);
+        float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.95f);
+        if (filterType == 1 || filterType == 3) fb = -fb;
+        float wD = 2.0f * juce::MathConstants<float>::pi * frequency * (delaySamples / sampleRate);
+
+        float m = 1.0f;
+        if (filterType == 0 || filterType == 1) { // Feedback
+            m = 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD));
+        }
+        else { // Feedforward
+            m = std::sqrt(1.0f + fb * fb + 2.0f * fb * std::cos(wD));
+        }
+        return std::pow(m, currentStages);
     }
     else {
         float r_scale = (filterModel == 1) ? 4.0f : 15.0f;

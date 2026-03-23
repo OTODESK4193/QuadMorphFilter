@@ -50,7 +50,6 @@ void FilterVisualizer::paint(juce::Graphics& g) {
     int wInt = (int)w;
     std::vector<float> rawMag(wInt + 1, 0.0f);
 
-    // Step 1: 元の解像度（1px刻み）で生のMagnitudeを計算
     for (int px = 0; px <= wInt; ++px) {
         float freq = 20.0f * std::pow(1000.0f, (float)px / w);
 
@@ -116,7 +115,8 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 mag = std::pow(m, stages);
                 mag *= (1.0f + 0.2f * r_diode);
             }
-            else if (modelIdx == 5) { // 【追加】Formant Visualizer
+            else if (modelIdx == 5) { // Formant (強制1段ロックのVisualizer適用)
+                int stages = 1; // UI無視で1段固定
                 float v = juce::jmap(std::log10(freqLimit), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f);
                 v = juce::jlimit(0.0f, 4.0f, v);
                 int idx_v = (int)v; float frac = v - idx_v;
@@ -127,7 +127,6 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 float f_arr[3] = { f1_m[idx_v] + (f1_m[idx_v + 1] - f1_m[idx_v]) * frac, f2_m[idx_v] + (f2_m[idx_v + 1] - f2_m[idx_v]) * frac, f3_m[idx_v] + (f3_m[idx_v + 1] - f3_m[idx_v]) * frac };
 
                 float mag_sum = 0.0f; float gains[3] = { 1.0f, 0.5f, 0.2f };
-                int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
                 for (int f = 0; f < 3; ++f) {
                     float w_f = freq / juce::jlimit(20.0f, 20000.0f, f_arr[f]);
                     float d_f = 1.0f / juce::jlimit(0.1f, 10.0f, res);
@@ -137,6 +136,19 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 }
                 mag = std::pow(mag_sum, stages) * (1.0f + res * 0.1f);
             }
+            else if (modelIdx == 6) { // 【追加】Comb Filter Visualizer
+                int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
+                float delaySamples = 44100.0f / juce::jlimit(20.0f, 20000.0f, fc);
+                float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.95f);
+                if (t == 1 || t == 3) fb = -fb;
+                float wD = 2.0f * juce::MathConstants<float>::pi * freq * (delaySamples / 44100.0f);
+
+                float m = 1.0f;
+                if (t == 0 || t == 1) m = 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD)); // Feedback
+                else m = std::sqrt(1.0f + fb * fb + 2.0f * fb * std::cos(wD)); // Feedforward
+
+                mag = std::pow(m, stages);
+            }
             return static_cast<float>(mag);
             };
 
@@ -144,9 +156,8 @@ void FilterVisualizer::paint(juce::Graphics& g) {
         rawMag[px] = (calc("A", 0) * (1 - x) * (1 - y)) + (calc("B", 1) * x * (1 - y)) + (calc("C", 2) * (1 - x) * y) + (calc("D", 3) * x * y);
     }
 
-    // Step 2: 【流体スムージング】 移動平均フィルターで角を美しく溶かす
     juce::Path path;
-    int smoothRadius = 8; // 溶かす幅（プロ品質の有機的なカーブを生成）
+    int smoothRadius = 8;
     for (int px = 0; px <= wInt; ++px) {
         float sum = 0.0f; int count = 0;
         for (int k = -smoothRadius; k <= smoothRadius; ++k) {
@@ -274,8 +285,8 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce:
     addAndMakeVisible(g.enableButton);
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, "enable" + s, g.enableButton);
 
-    // 【追加】Formant を選択肢に追加
-    g.model.addItemList({ "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR", "Formant (Vowel)" }, 1); addAndMakeVisible(g.model);
+    // 【追加】Comb Filter を選択肢に追加
+    g.model.addItemList({ "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR", "Formant (Vowel)", "Comb Filter" }, 1); addAndMakeVisible(g.model);
     g.mAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "model" + s, g.model);
 
     g.type.addItemList({ "LP", "BP", "HP", "Notch" }, 1); addAndMakeVisible(g.type);
