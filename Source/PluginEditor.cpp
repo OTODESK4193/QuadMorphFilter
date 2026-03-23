@@ -48,7 +48,8 @@ void FilterVisualizer::paint(juce::Graphics& g) {
     std::array<float, 4> rM = getM(rPos, lfo2Mod4, lfo2_isRand1);
 
     juce::Path path;
-    for (int px = 0; px <= (int)w; ++px) {
+    // 【修正】x軸を 0.25f 刻みにすることで解像度を4倍（オーバーサンプリング描画）にし、角張りを根絶
+    for (float px = 0.0f; px <= w; px += 0.25f) {
         float freq = 20.0f * std::pow(1000.0f, px / w);
 
         auto calc = [&](juce::String s, int idx) -> float {
@@ -68,7 +69,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
             float w2 = w_norm * w_norm;
             float mag = 1.0f;
 
-            if (modelIdx == 0 || modelIdx == 3) { // Clean SVF & SEM (SEM does not apply bass comp)
+            if (modelIdx == 0 || modelIdx == 3 || modelIdx == 4) { // Clean, SEM, SRR (Draws SVF envelope)
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
                 float adjustedRes = res;
                 if (stages > 1) adjustedRes = res * std::pow(0.6f, std::log2((float)stages));
@@ -77,7 +78,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 float m = 1.0f / den;
                 if (t == 1) m *= w_norm; else if (t == 2) m *= w2; else if (t == 3) m *= std::abs(1.0f - w2);
                 mag = std::pow(m, stages);
-                if (modelIdx == 0) mag *= (1.0f + res * 0.1f); // Only Clean SVF gets the visual scaling
+                if (modelIdx == 0 || modelIdx == 4) mag *= (1.0f + res * 0.1f);
             }
             else if (modelIdx == 1) { // Moog
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 1 : (slopeIdx == 2) ? 2 : 4;
@@ -126,7 +127,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
         float db = 20.0f * std::log10(mag + 1e-5f);
         float yPos = juce::jmap(db, 40.0f, -60.0f, 0.0f, h);
 
-        if (px == 0) path.startNewSubPath(0, yPos); else path.lineTo((float)px, yPos);
+        if (px == 0.0f) path.startNewSubPath(0, yPos); else path.lineTo(px, yPos);
     }
     g.strokePath(path, juce::PathStrokeType(2.0f));
 }
@@ -241,7 +242,7 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce:
     addAndMakeVisible(g.enableButton);
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, "enable" + s, g.enableButton);
 
-    g.model.addItemList({ "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)" }, 1); addAndMakeVisible(g.model);
+    g.model.addItemList({ "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR" }, 1); addAndMakeVisible(g.model);
     g.mAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "model" + s, g.model);
 
     g.type.addItemList({ "LP", "BP", "HP", "Notch" }, 1); addAndMakeVisible(g.type);
@@ -322,13 +323,11 @@ void QuadMorphFilterAudioProcessorEditor::resized() {
     for (auto* g : { &groupA, &groupB, &groupC, &groupD }) {
         auto r = b.removeFromTop(40).reduced(5, 2);
 
-        // 【完全刷新】ご指示通りの「文字が見切れない黄金比固定幅」によりスライダーを最大化
         g->enableButton.setBounds(r.removeFromLeft(60).reduced(0, 5));
         g->model.setBounds(r.removeFromLeft(115).reduced(2, 5));
         g->type.setBounds(r.removeFromLeft(60).reduced(2, 5));
         g->slope.setBounds(r.removeFromLeft(85).reduced(2, 5));
 
-        // 残りの約650pxをスライダー2つでゆったり等分
         auto cutArea = r.removeFromLeft(r.getWidth() / 2).reduced(5, 0);
         auto resArea = r.reduced(5, 0);
 

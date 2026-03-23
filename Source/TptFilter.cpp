@@ -36,6 +36,8 @@ void TptFilter::reset()
         rmsIn[ch] = 0.0f;
         rmsOut[ch] = 0.0f;
         agcGain[ch] = 1.0f;
+        srrPhase[ch] = 0.0f;
+        srrHeld[ch] = 0.0f;
     }
 }
 
@@ -47,10 +49,10 @@ void TptFilter::setType(int newType) { filterType = newType; }
 void TptFilter::setSlope(int index)
 {
     slopeIdx = index;
-    if (filterModel == 0 || filterModel == 3) { // Clean SVF & SEM SVF (12dB base)
+    if (filterModel == 0 || filterModel == 3 || filterModel == 4) { // SVF base
         currentStages = (index == 0) ? 1 : (index == 1) ? 2 : (index == 2) ? 4 : 8;
     }
-    else { // Moog & Diode (24/18dB base)
+    else { // Ladder base
         currentStages = (index == 0) ? 1 : (index == 1) ? 1 : (index == 2) ? 2 : 4;
     }
 }
@@ -64,7 +66,7 @@ void TptFilter::updateCoefficients()
     g = std::tan(wd);
     ladderG = g / (1.0f + g);
 
-    if (filterModel == 0 || filterModel == 3) { // SVF系の係数
+    if (filterModel == 0 || filterModel == 3 || filterModel == 4) {
         float adjustedRes = currentRes;
         if (currentStages > 1) adjustedRes = currentRes * std::pow(0.6f, std::log2((float)currentStages));
         R = 1.0f / (2.0f * adjustedRes);
@@ -98,21 +100,34 @@ void TptFilter::process(juce::AudioBuffer<float>& buffer)
 
 float TptFilter::processSample(int channel, float x)
 {
-    // 低域補償 (Bass Compensation)
     float comp = 1.0f;
-    if (filterModel == 0) comp = 1.0f + resonance.getCurrentValue() * 0.1f;
+    if (filterModel == 0 || filterModel == 4) comp = 1.0f + resonance.getCurrentValue() * 0.1f;
     else if (filterModel == 1) comp = 1.0f + 0.5f * ladderRes;
     else if (filterModel == 2) comp = 1.0f + 0.2f * ladderRes;
-    // ※ filterModel == 3 (SEM) は回路特性上低域が減衰しないため補償(comp)を1.0fのまま据え置き
-
     x *= comp;
+
+    // 【追加】Bitcrusher / SRR プロセッシング (入力信号を先に破壊する)
+    if (filterModel == 4) {
+        float targetSR = cutoff.getCurrentValue();
+        float phaseInc = targetSR / sampleRate;
+        srrPhase[channel] += phaseInc;
+
+        if (srrPhase[channel] >= 1.0f) {
+            srrPhase[channel] -= std::floor(srrPhase[channel]);
+            // Resonance (0.1 ~ 10.0) を Bit Depth (16bit ~ 2bit) へマッピング
+            float bits = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 16.0f, 2.0f);
+            float steps = std::pow(2.0f, bits);
+            srrHeld[channel] = std::round(x * steps) / steps;
+        }
+        x = srrHeld[channel];
+    }
 
     float envCoefIn = 0.005f;
     rmsIn[channel] = (1.0f - envCoefIn) * rmsIn[channel] + envCoefIn * (x * x);
 
     float out = x;
 
-    if (filterModel == 0) { // Clean SVF
+    if (filterModel == 0 || filterModel == 4) { // Clean SVF & SRR(破壊後の信号をフィルタリング)
         for (int stage = 0; stage < currentStages; ++stage) {
             float hp = (out - (2.0f * R + g) * s1[stage][channel] - s2[stage][channel]) * h;
             float bp = g * hp + s1[stage][channel];
@@ -157,64 +172,43 @@ float TptFilter::processSample(int channel, float x)
             }
         }
     }
-    else if (filterModel == 2) { // Diode Ladder (TB-303 Type)
+    else if (filterModel == 2) { // Diode Ladder
         for (int stage = 0; stage < currentStages; ++stage) {
-            float fb = out - ladderRes * zdfState[stage][channel][3];
-            fb = std::tanh(fb);
-
-            float v1 = (fb - zdfState[stage][channel][0]) * ladderG; float y1 = v1 + zdfState[stage][channel][0]; zdfState[stage][channel][0] = y1 + v1;
-            y1 = std::tanh(y1);
-            float v2 = (y1 - zdfState[stage][channel][1]) * ladderG; float y2 = v2 + zdfState[stage][channel][1]; zdfState[stage][channel][1] = y2 + v2;
-            y2 = std::tanh(y2);
-            float v3 = (y2 - zdfState[stage][channel][2]) * ladderG; float y3 = v3 + zdfState[stage][channel][2]; zdfState[stage][channel][2] = y3 + v3;
-            y3 = std::tanh(y3);
+            float fb = std::tanh(out - ladderRes * zdfState[stage][channel][3]);
+            float v1 = (fb - zdfState[stage][channel][0]) * ladderG; float y1 = v1 + zdfState[stage][channel][0]; zdfState[stage][channel][0] = y1 + v1; y1 = std::tanh(y1);
+            float v2 = (y1 - zdfState[stage][channel][1]) * ladderG; float y2 = v2 + zdfState[stage][channel][1]; zdfState[stage][channel][1] = y2 + v2; y2 = std::tanh(y2);
+            float v3 = (y2 - zdfState[stage][channel][2]) * ladderG; float y3 = v3 + zdfState[stage][channel][2]; zdfState[stage][channel][2] = y3 + v3; y3 = std::tanh(y3);
             float v4 = (y3 - zdfState[stage][channel][3]) * ladderG; float y4 = v4 + zdfState[stage][channel][3]; zdfState[stage][channel][3] = y4 + v4;
-
-            if (y4 > 0.0f) y4 *= 1.1f;
-            y4 = std::tanh(y4);
+            if (y4 > 0.0f) y4 *= 1.1f; y4 = std::tanh(y4);
 
             if (slopeIdx == 0) {
-                if (filterType == 0) out = y2;
-                else if (filterType == 1) out = y1 - y2;
-                else if (filterType == 2) out = out - y1;
-                else out = y2 + (out - y1);
+                if (filterType == 0) out = y2; else if (filterType == 1) out = y1 - y2; else if (filterType == 2) out = out - y1; else out = y2 + (out - y1);
             }
             else {
-                if (filterType == 0) out = y4;
-                else if (filterType == 1) out = y2 - y4;
-                else if (filterType == 2) out = out - y2;
-                else out = y4 + (out - y2);
+                if (filterType == 0) out = y4; else if (filterType == 1) out = y2 - y4; else if (filterType == 2) out = out - y2; else out = y4 + (out - y2);
             }
         }
     }
-    else if (filterModel == 3) { // 【追加】SEM State Variable (Oberheim Type)
+    else if (filterModel == 3) { // SEM
         for (int stage = 0; stage < currentStages; ++stage) {
-            // SEM特有の軽いサチュレーションを入力に付加
             float drivenOut = std::tanh(out * 1.2f);
-
             float hp = (drivenOut - (2.0f * R + g) * s1[stage][channel] - s2[stage][channel]) * h;
             float bp = g * hp + s1[stage][channel];
             float lp = g * bp + s2[stage][channel];
-
-            // 積分器の中にtanhを挟み、アナログライクな「粘り」をシミュレート
             s1[stage][channel] = std::tanh(g * hp + bp);
             s2[stage][channel] = std::tanh(g * bp + lp);
 
-            if (filterType == 0) out = lp;
-            else if (filterType == 1) out = bp;
-            else if (filterType == 2) out = hp;
-            else out = lp + hp;
+            if (filterType == 0) out = lp; else if (filterType == 1) out = bp; else if (filterType == 2) out = hp; else out = lp + hp;
         }
     }
 
-    // 出力のRMS計算と、リアルタイムAGC（オートゲイン）適用
     float envCoefOut = 0.005f;
     rmsOut[channel] = (1.0f - envCoefOut) * rmsOut[channel] + envCoefOut * (out * out);
 
     float targetGain = 1.0f;
     if (rmsOut[channel] > 1e-8f) {
         targetGain = std::sqrt((rmsIn[channel] + 1e-8f) / (rmsOut[channel] + 1e-8f));
-        targetGain = juce::jlimit(0.1f, 15.0f, targetGain); // 最大+23dBまで補正を許可
+        targetGain = juce::jlimit(0.1f, 15.0f, targetGain);
     }
     agcGain[channel] = (1.0f - 0.0005f) * agcGain[channel] + 0.0005f * targetGain;
 
@@ -229,7 +223,7 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
     float w2 = w * w;
     float mag = 1.0f;
 
-    if (filterModel == 0 || filterModel == 3) { // Clean SVF & SEM SVF
+    if (filterModel == 0 || filterModel == 3 || filterModel == 4) {
         float adjustedRes = res;
         if (currentStages > 1) adjustedRes = res * std::pow(0.6f, std::log2((float)currentStages));
         float d = 1.0f / juce::jlimit(0.1f, 10.0f, adjustedRes);
@@ -238,17 +232,17 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         if (filterType == 1) mag *= w; else if (filterType == 2) mag *= w2; else if (filterType == 3) mag *= std::abs(1.0f - w2);
         return std::pow(mag, currentStages);
     }
-    else { // Moog & Diode
+    else {
         float r_scale = (filterModel == 1) ? 4.0f : 15.0f;
         float r_val = juce::jmap(res, 0.1f, 10.0f, 0.0f, r_scale);
         if (currentStages > 1) r_val *= std::pow(0.7f, std::log2((float)currentStages));
 
         float real_p, imag_p;
-        if (filterModel == 1) { // Moog
+        if (filterModel == 1) {
             real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + r_val;
             imag_p = 4.0f * w * (1.0f - w2);
         }
-        else { // Diode (近似18dB)
+        else {
             real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + r_val;
             imag_p = 3.5f * w * (1.0f - w2);
         }
