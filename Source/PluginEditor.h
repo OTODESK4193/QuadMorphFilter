@@ -32,7 +32,6 @@ private:
     QuadMorphFilterAudioProcessor& processor;
     int draggingLfoIndex = -1;
 
-    // 【追加】Visual Trails（残像）保存用バッファ
     std::array<juce::Point<float>, 30> trails[3];
     int trailIdx[3] = { 0, 0, 0 };
 };
@@ -64,7 +63,7 @@ private:
 
     struct LfoGroup {
         juce::TextButton enableButton;
-        juce::ComboBox wave, rateSync, boundCombo; // 【追加】Boundaryコンボ
+        juce::ComboBox wave, rateSync, boundCombo;
         juce::TextButton stepMode, syncToggle;
         juce::Slider rateFree, minSlider, maxSlider;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> eAtt, sAtt, syAtt;

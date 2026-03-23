@@ -23,20 +23,31 @@ void FilterVisualizer::paint(juce::Graphics& g) {
     }
 
     g.setColour(juce::Colours::cyan);
-    auto mPos = processor.getLfoPos(0);
     auto cPos = processor.getLfoPos(1);
     auto rPos = processor.getLfoPos(2);
-
-    float dx = cPos.x - 0.5f; float dy = cPos.y - 0.5f;
-    float cutoffMod = std::sqrt(dx * dx + dy * dy) / 0.707f;
-    float rx = rPos.x - 0.5f; float ry = rPos.y - 0.5f;
-    float resMod = std::sqrt(rx * rx + ry * ry) / 0.707f;
 
     bool lfo1_isRand1 = ((int)processor.apvts.getRawParameterValue("lfo2wave")->load() == 3) && (processor.apvts.getRawParameterValue("lfo2en")->load() > 0.5f);
     bool lfo2_isRand1 = ((int)processor.apvts.getRawParameterValue("lfo3wave")->load() == 3) && (processor.apvts.getRawParameterValue("lfo3en")->load() > 0.5f);
 
     auto lfo1Mod4 = processor.getLfoMod4(1);
     auto lfo2Mod4 = processor.getLfoMod4(2);
+
+    auto getM = [](juce::Point<float> p, const std::array<float, 4>& m4, bool isRand1) -> std::array<float, 4> {
+        std::array<float, 4> res;
+        if (isRand1) {
+            for (int i = 0; i < 4; ++i) res[i] = m4[i] * 2.0f - 1.0f;
+        }
+        else {
+            res[0] = p.x * 2.0f - 1.0f;
+            res[1] = p.y * 2.0f - 1.0f;
+            res[2] = (1.0f - p.x) * 2.0f - 1.0f;
+            res[3] = (1.0f - p.y) * 2.0f - 1.0f;
+        }
+        return res;
+        };
+
+    std::array<float, 4> cM = getM(cPos, lfo1Mod4, lfo1_isRand1);
+    std::array<float, 4> rM = getM(rPos, lfo2Mod4, lfo2_isRand1);
 
     juce::Path path;
     for (int px = 0; px <= (int)w; ++px) {
@@ -45,11 +56,11 @@ void FilterVisualizer::paint(juce::Graphics& g) {
         auto calc = [&](juce::String s, int idx) -> float {
             if (processor.apvts.getRawParameterValue("enable" + s)->load() < 0.5f) return 0.0f;
 
-            float fc = processor.apvts.getRawParameterValue("cutoff" + s)->load() * (1.0f + cutoffMod * 2.0f);
-            if (lfo1_isRand1) fc = 20.0f * std::pow(1000.0f, lfo1Mod4[idx]);
+            float baseCutoff = processor.apvts.getRawParameterValue("cutoff" + s)->load();
+            float fc = baseCutoff * std::pow(2.0f, 4.0f * cM[idx]);
 
-            float res = processor.apvts.getRawParameterValue("res" + s)->load() * (1.0f + resMod * 3.0f);
-            if (lfo2_isRand1) res = 0.1f * std::pow(100.0f, lfo2Mod4[idx]);
+            float baseRes = processor.apvts.getRawParameterValue("res" + s)->load();
+            float res = baseRes * std::pow(2.0f, 2.0f * rM[idx]);
 
             int slopeIdx = (int)processor.apvts.getRawParameterValue("slope" + s)->load();
             int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
@@ -67,6 +78,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
             return static_cast<float>(std::pow((double)mag, (double)stages));
             };
 
+        auto mPos = processor.getLfoPos(0);
         float x = mPos.x; float y = mPos.y;
         float mag = (calc("A", 0) * (1 - x) * (1 - y)) + (calc("B", 1) * x * (1 - y)) + (calc("C", 2) * (1 - x) * y) + (calc("D", 3) * x * y);
         float yPos = h - (std::log10(mag + 1.0f) * 1.5f * h * 0.4f + h * 0.1f);
@@ -81,7 +93,6 @@ XYPadComponent::XYPadComponent(QuadMorphFilterAudioProcessor& p) : processor(p) 
 }
 
 void XYPadComponent::timerCallback() {
-    // Åyí«â¡ÅzVisual TrailsÇÃécëúãLò^
     for (int i = 0; i < 3; ++i) {
         trails[i][trailIdx[i]] = processor.getLfoPos(i);
         trailIdx[i] = (trailIdx[i] + 1) % 30;
@@ -104,7 +115,6 @@ void XYPadComponent::paint(juce::Graphics& g) {
     for (int i = 0; i < 3; ++i) {
         if (processor.apvts.getRawParameterValue("lfo" + juce::String(i + 1) + "en")->load() < 0.5f) continue;
 
-        // Åyí«â¡ÅzVisual TrailsÇÃï`âÊ
         for (int t = 0; t < 30; ++t) {
             int idx = (trailIdx[i] + t) % 30;
             auto pt = trails[i][idx];
@@ -150,7 +160,7 @@ void XYPadComponent::mouseDown(const juce::MouseEvent& e) {
         float w = (float)getWidth(); float h = (float)getHeight();
         for (int i = 0; i < 3; ++i) {
             int wave = (int)processor.apvts.getRawParameterValue("lfo" + juce::String(i + 1) + "wave")->load();
-            if (wave == 6) { // Recordingîgå`
+            if (wave == 6) {
                 auto p = processor.getLfoPos(i);
                 float px = p.x * w; float py = p.y * h;
                 if (std::hypot(e.x - px, e.y - py) < 15.0f) {
@@ -247,16 +257,16 @@ void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, ju
     addAndMakeVisible(g.enableButton);
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, id + "en", g.enableButton);
 
+    // ÅyèCê≥ÅzêVîgå`ÇîΩâf
     juce::StringArray waveTypes = {
         "Sine", "SAW", "Pulse", "Random 1", "Random 2", "Noise", "Recording",
-        "Smooth Noise", "Lorenz Attractor", "Double Pendulum", "Random Walk",
+        "Smooth Noise", "Spirograph", "Harmonic Swarm", "3D Torus Knot",
         "Lissajous", "Spiral", "Star", "Rose", "Lemniscate", "Billiard", "Polygon", "Attractor Orbit"
     };
     g.wave.addItemList(waveTypes, 1);
     addAndMakeVisible(g.wave);
     g.wAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, id + "wave", g.wave);
 
-    // Åyí«â¡ÅzBoundary ComboBox ÇÃ UI
     g.boundCombo.addItemList({ "Clip", "Bounce", "Wrap" }, 1);
     addAndMakeVisible(g.boundCombo);
     g.bAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, id + "bound", g.boundCombo);
@@ -324,7 +334,6 @@ void QuadMorphFilterAudioProcessorEditor::resized() {
         auto r = b.removeFromTop(40).reduced(5, 2);
         lfos[i].enableButton.setBounds(r.removeFromLeft(100).reduced(0, 5));
 
-        // ÅyèCê≥ÅzêVê›ÇµÇΩBoundaryÉRÉìÉ{É{ÉbÉNÉXÇä‹ÇﬂÇƒÉåÉCÉAÉEÉgÇìôï™
         lfos[i].wave.setBounds(r.removeFromLeft(120).withSizeKeepingCentre(115, 22));
         lfos[i].boundCombo.setBounds(r.removeFromLeft(70).withSizeKeepingCentre(65, 22));
 
