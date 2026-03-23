@@ -35,7 +35,6 @@ void FilterVisualizer::paint(juce::Graphics& g) {
     bool lfo1_isRand1 = ((int)processor.apvts.getRawParameterValue("lfo2wave")->load() == 3) && (processor.apvts.getRawParameterValue("lfo2en")->load() > 0.5f);
     bool lfo2_isRand1 = ((int)processor.apvts.getRawParameterValue("lfo3wave")->load() == 3) && (processor.apvts.getRawParameterValue("lfo3en")->load() > 0.5f);
 
-    // 【修正】DSP側で計算された独立した4つの乱数配列を取得
     auto lfo1Mod4 = processor.getLfoMod4(1);
     auto lfo2Mod4 = processor.getLfoMod4(2);
 
@@ -47,11 +46,9 @@ void FilterVisualizer::paint(juce::Graphics& g) {
             if (processor.apvts.getRawParameterValue("enable" + s)->load() < 0.5f) return 0.0f;
 
             float fc = processor.apvts.getRawParameterValue("cutoff" + s)->load() * (1.0f + cutoffMod * 2.0f);
-            // 【修正】各フィルターに対応する独立した乱数を適用して描画
             if (lfo1_isRand1) fc = 20.0f * std::pow(1000.0f, lfo1Mod4[idx]);
 
             float res = processor.apvts.getRawParameterValue("res" + s)->load() * (1.0f + resMod * 3.0f);
-            // 【修正】各フィルターに対応する独立した乱数を適用して描画
             if (lfo2_isRand1) res = 0.1f * std::pow(100.0f, lfo2Mod4[idx]);
 
             int slopeIdx = (int)processor.apvts.getRawParameterValue("slope" + s)->load();
@@ -93,10 +90,22 @@ void XYPadComponent::paint(juce::Graphics& g) {
     juce::Colour colors[] = { juce::Colours::cyan, juce::Colours::magenta, juce::Colours::yellow };
     for (int i = 0; i < 3; ++i) {
         auto p = processor.getLfoPos(i);
+        bool isWait = processor.isWaitingForRecord[i].load(std::memory_order_acquire);
+        bool isDrag = processor.isRecordingDrag[i].load(std::memory_order_acquire);
 
-        if (processor.isRecording[i].load(std::memory_order_acquire)) {
-            g.setColour(colors[i].brighter(0.8f));
-            g.fillEllipse(p.x * getWidth() - 8, p.y * getHeight() - 8, 16, 16);
+        // 【修正】待機中および描画中のUIフィードバック
+        if (isWait) {
+            if (isDrag) {
+                // 描画中は高輝度で強調
+                g.setColour(colors[i].brighter(0.8f));
+                g.fillEllipse(p.x * getWidth() - 8, p.y * getHeight() - 8, 16, 16);
+            }
+            else {
+                // 待機中は周期的に点滅させる
+                float alpha = 0.3f + 0.7f * std::abs(std::sin(juce::Time::getMillisecondCounter() * 0.005f));
+                g.setColour(colors[i].withAlpha(alpha));
+                g.fillEllipse(p.x * getWidth() - 8, p.y * getHeight() - 8, 16, 16);
+            }
         }
         else {
             g.setColour(colors[i]);
@@ -107,16 +116,43 @@ void XYPadComponent::paint(juce::Graphics& g) {
     }
 }
 
+// 【修正】ステートマシンのイベント処理を拡張（待機トグルと左ドラッグ描画）
 void XYPadComponent::mouseDown(const juce::MouseEvent& e) {
     if (e.mods.isRightButtonDown()) {
+        // 右クリック: すでに待機中のLFOがあれば終了させる（録音確定）
+        for (int i = 0; i < 3; ++i) {
+            if (processor.isWaitingForRecord[i].load()) {
+                processor.isWaitingForRecord[i].store(false, std::memory_order_release);
+                processor.isRecordingDrag[i].store(false, std::memory_order_release);
+                draggingLfoIndex = -1;
+                return;
+            }
+        }
+        // 右クリック: 待機中でなければ、クリックした近くのRecordingモードLFOを待機状態にする
         float w = (float)getWidth(); float h = (float)getHeight();
         for (int i = 0; i < 3; ++i) {
-            auto p = processor.getLfoPos(i);
-            float px = p.x * w; float py = p.y * h;
-            if (std::hypot(e.x - px, e.y - py) < 15.0f) {
+            int wave = (int)processor.apvts.getRawParameterValue("lfo" + juce::String(i + 1) + "wave")->load();
+            if ((i == 0 && wave == 6) || (i != 0 && wave == 5)) { // Recording波形かチェック
+                auto p = processor.getLfoPos(i);
+                float px = p.x * w; float py = p.y * h;
+                if (std::hypot(e.x - px, e.y - py) < 15.0f) {
+                    processor.recLength[i].store(0, std::memory_order_release); // バッファクリア
+                    processor.isWaitingForRecord[i].store(true, std::memory_order_release);
+                    return;
+                }
+            }
+        }
+    }
+    else {
+        // 左クリック: 待機中のLFOがあれば描画（ドラッグ）を開始
+        for (int i = 0; i < 3; ++i) {
+            if (processor.isWaitingForRecord[i].load(std::memory_order_acquire)) {
                 draggingLfoIndex = i;
-                processor.recLength[i].store(0, std::memory_order_release);
-                processor.isRecording[i].store(true, std::memory_order_release);
+                processor.isRecordingDrag[i].store(true, std::memory_order_release);
+                float nx = juce::jlimit(0.0f, 1.0f, (float)e.x / getWidth());
+                float ny = juce::jlimit(0.0f, 1.0f, (float)e.y / getHeight());
+                processor.currentRecX[i].store(nx, std::memory_order_release);
+                processor.currentRecY[i].store(ny, std::memory_order_release);
                 return;
             }
         }
@@ -125,13 +161,16 @@ void XYPadComponent::mouseDown(const juce::MouseEvent& e) {
 }
 
 void XYPadComponent::mouseDrag(const juce::MouseEvent& e) {
-    if (draggingLfoIndex != -1) {
+    // 左ドラッグ: 録音バッファとリアルタイム座標の更新
+    if (draggingLfoIndex != -1 && processor.isRecordingDrag[draggingLfoIndex].load(std::memory_order_acquire)) {
         int len = processor.recLength[draggingLfoIndex].load(std::memory_order_acquire);
         if (len < 2048) {
             float nx = juce::jlimit(0.0f, 1.0f, (float)e.x / getWidth());
             float ny = juce::jlimit(0.0f, 1.0f, (float)e.y / getHeight());
             processor.recBuffer[draggingLfoIndex][len] = { nx, ny };
             processor.recLength[draggingLfoIndex].store(len + 1, std::memory_order_release);
+            processor.currentRecX[draggingLfoIndex].store(nx, std::memory_order_release);
+            processor.currentRecY[draggingLfoIndex].store(ny, std::memory_order_release);
         }
         return;
     }
@@ -139,8 +178,9 @@ void XYPadComponent::mouseDrag(const juce::MouseEvent& e) {
 }
 
 void XYPadComponent::mouseUp(const juce::MouseEvent& e) {
+    // マウスを離すとドラッグ状態を解除（待機状態は維持し、最後のポイントにとどまる）
     if (draggingLfoIndex != -1) {
-        processor.isRecording[draggingLfoIndex].store(false, std::memory_order_release);
+        processor.isRecordingDrag[draggingLfoIndex].store(false, std::memory_order_release);
         draggingLfoIndex = -1;
     }
 }

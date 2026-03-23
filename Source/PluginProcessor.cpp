@@ -118,6 +118,9 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         float minVal = apvts.getRawParameterValue(id + "min")->load();
         float maxVal = apvts.getRawParameterValue(id + "max")->load();
 
+        bool isWait = isWaitingForRecord[i].load(std::memory_order_acquire);
+        bool isDrag = isRecordingDrag[i].load(std::memory_order_acquire);
+
         bool isRand1 = false, isRand2 = false, isNoise = false, isRec = false;
         int stdWave = 0;
         if (i == 0) {
@@ -138,21 +141,24 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             float rate = sync ? (1.0f / getSyncTime((int)apvts.getRawParameterValue(id + "rateSync")->load(), bpm))
                 : apvts.getRawParameterValue(id + "rateFree")->load();
 
-            lfoStates[i].phase += (juce::MathConstants<float>::twoPi * rate * numSamples / sampleRate);
+            // 【修正】待機中・録音中はLFOの位相加算をストップする
+            if (!isWait) {
+                lfoStates[i].phase += (juce::MathConstants<float>::twoPi * rate * numSamples / sampleRate);
 
-            if (lfoStates[i].phase >= juce::MathConstants<float>::twoPi) {
-                lfoStates[i].phase -= juce::MathConstants<float>::twoPi;
-                lfoStates[i].currentRandom = lfoStates[i].nextRandom;
-                lfoStates[i].currentRand1 = lfoStates[i].nextRand1;
+                if (lfoStates[i].phase >= juce::MathConstants<float>::twoPi) {
+                    lfoStates[i].phase -= juce::MathConstants<float>::twoPi;
+                    lfoStates[i].currentRandom = lfoStates[i].nextRandom;
+                    lfoStates[i].currentRand1 = lfoStates[i].nextRand1;
 
-                if (isRand2) {
-                    float rx = juce::Random::getSystemRandom().nextBool() ? 1.0f : 0.0f;
-                    float ry = juce::Random::getSystemRandom().nextBool() ? 1.0f : 0.0f;
-                    lfoStates[i].nextRandom = { rx, ry };
-                }
-                else if (isRand1) {
-                    for (int f = 0; f < 4; ++f) {
-                        lfoStates[i].nextRand1[f] = juce::Random::getSystemRandom().nextFloat();
+                    if (isRand2) {
+                        float rx = juce::Random::getSystemRandom().nextBool() ? 1.0f : 0.0f;
+                        float ry = juce::Random::getSystemRandom().nextBool() ? 1.0f : 0.0f;
+                        lfoStates[i].nextRandom = { rx, ry };
+                    }
+                    else if (isRand1) {
+                        for (int f = 0; f < 4; ++f) {
+                            lfoStates[i].nextRand1[f] = juce::Random::getSystemRandom().nextFloat();
+                        }
                     }
                 }
             }
@@ -161,18 +167,42 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             std::array<float, 4> rand1Vals = { 0.0f, 0.0f, 0.0f, 0.0f };
 
             if (isRec) {
-                int len = recLength[i].load(std::memory_order_acquire);
-                if (len > 0) {
-                    float t = lfoStates[i].phase / juce::MathConstants<float>::twoPi;
-                    float exactIdx = t * len;
-                    int idx1 = (int)exactIdx % len;
-                    int idx2 = (idx1 + 1) % len;
-                    float frac = exactIdx - std::floor(exactIdx);
-                    normX = recBuffer[i][idx1].x + (recBuffer[i][idx2].x - recBuffer[i][idx1].x) * frac;
-                    normY = recBuffer[i][idx1].y + (recBuffer[i][idx2].y - recBuffer[i][idx1].y) * frac;
+                // 【修正】Recording時のステート別処理
+                if (isWait) {
+                    if (isDrag) {
+                        // ドラッグ中はリアルタイムの現在地を出力
+                        normX = currentRecX[i].load(std::memory_order_relaxed);
+                        normY = currentRecY[i].load(std::memory_order_relaxed);
+                    }
+                    else {
+                        // 待機中（ドラッグしていない時）
+                        int len = recLength[i].load(std::memory_order_acquire);
+                        if (len > 0) {
+                            // 描画後は最後のポイントを保持
+                            normX = recBuffer[i][len - 1].x;
+                            normY = recBuffer[i][len - 1].y;
+                        }
+                        else {
+                            // バッファクリア直後は中央に待機
+                            normX = 0.5f; normY = 0.5f;
+                        }
+                    }
                 }
                 else {
-                    normX = baseX; normY = baseY;
+                    // 通常のループ再生
+                    int len = recLength[i].load(std::memory_order_acquire);
+                    if (len > 0) {
+                        float t = lfoStates[i].phase / juce::MathConstants<float>::twoPi;
+                        float exactIdx = t * len;
+                        int idx1 = (int)exactIdx % len;
+                        int idx2 = (idx1 + 1) % len;
+                        float frac = exactIdx - std::floor(exactIdx);
+                        normX = recBuffer[i][idx1].x + (recBuffer[i][idx2].x - recBuffer[i][idx1].x) * frac;
+                        normY = recBuffer[i][idx1].y + (recBuffer[i][idx2].y - recBuffer[i][idx1].y) * frac;
+                    }
+                    else {
+                        normX = baseX; normY = baseY;
+                    }
                 }
             }
             else if (isRand1) {
@@ -216,7 +246,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             lfoPositions[i] = { baseX, baseY };
         }
 
-        // 【追加】UI描画用に、計算された最新の乱数配列をクラスメンバへコピー
         currentLfoMod4[i] = lfoMod4[i];
     }
 
