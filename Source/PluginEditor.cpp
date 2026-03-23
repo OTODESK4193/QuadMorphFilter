@@ -70,7 +70,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
             float w2 = w_norm * w_norm;
             float mag = 1.0f;
 
-            if (modelIdx == 0 || modelIdx == 3 || modelIdx == 4) {
+            if (modelIdx == 0 || modelIdx == 3 || modelIdx == 4 || modelIdx == 9) { // SRR, Wavefolder visual
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
                 float adjustedRes = res;
                 if (stages > 1) adjustedRes = res * std::pow(0.6f, std::log2((float)stages));
@@ -80,6 +80,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 if (t == 1) m *= w_norm; else if (t == 2) m *= w2; else if (t == 3) m *= std::abs(1.0f - w2);
                 mag = std::pow(m, stages);
                 if (modelIdx == 0 || modelIdx == 4) mag *= (1.0f + res * 0.1f);
+                if (modelIdx == 9) mag *= juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 1.0f, 5.0f); // Wavefolder visual boost
             }
             else if (modelIdx == 1) {
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 1 : (slopeIdx == 2) ? 2 : 4;
@@ -87,15 +88,9 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 if (stages > 1) r_moog *= std::pow(0.7f, std::log2((float)stages));
                 float real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + r_moog;
                 float imag_p = 4.0f * w_norm * (1.0f - w2);
-                float den2 = real_p * real_p + imag_p * imag_p;
-                float m = 1.0f / std::sqrt(den2);
-                if (slopeIdx == 0) {
-                    if (t == 1) m *= w_norm; else if (t == 2) m *= w2; else if (t == 3) m *= std::abs(1.0f - w2);
-                }
-                else {
-                    if (t == 1) m *= w2; else if (t == 2) m *= w2 * w2; else if (t == 3) m *= std::abs(1.0f - w2 * w2);
-                }
-                mag = std::pow(m, stages);
+                mag = std::pow(1.0f / std::sqrt(real_p * real_p + imag_p * imag_p), stages);
+                if (slopeIdx == 0) { if (t == 1) mag *= w_norm; else if (t == 2) mag *= w2; else if (t == 3) mag *= std::abs(1.0f - w2); }
+                else { if (t == 1) mag *= w2; else if (t == 2) mag *= w2 * w2; else if (t == 3) mag *= std::abs(1.0f - w2 * w2); }
                 mag *= (1.0f + 0.5f * r_moog);
             }
             else if (modelIdx == 2) {
@@ -104,50 +99,52 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 if (stages > 1) r_diode *= std::pow(0.7f, std::log2((float)stages));
                 float real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + r_diode;
                 float imag_p = 3.5f * w_norm * (1.0f - w2);
-                float den2 = real_p * real_p + imag_p * imag_p;
-                float m = 1.0f / std::sqrt(den2);
-                if (slopeIdx == 0) {
-                    if (t == 1) m *= w_norm; else if (t == 2) m *= w2; else if (t == 3) m *= std::abs(1.0f - w2);
-                }
-                else {
-                    if (t == 1) m *= w2 * w_norm; else if (t == 2) m *= w2 * w2; else if (t == 3) m *= std::abs(1.0f - w2 * w_norm);
-                }
-                mag = std::pow(m, stages);
+                mag = std::pow(1.0f / std::sqrt(real_p * real_p + imag_p * imag_p), stages);
+                if (slopeIdx == 0) { if (t == 1) mag *= w_norm; else if (t == 2) mag *= w2; else if (t == 3) mag *= std::abs(1.0f - w2); }
+                else { if (t == 1) mag *= w2 * w_norm; else if (t == 2) mag *= w2 * w2; else if (t == 3) mag *= std::abs(1.0f - w2 * w_norm); }
                 mag *= (1.0f + 0.2f * r_diode);
             }
-            else if (modelIdx == 5) { // Formant (強制1段ロックのVisualizer適用)
-                int stages = 1; // UI無視で1段固定
+            else if (modelIdx == 5) {
                 float v = juce::jmap(std::log10(freqLimit), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f);
-                v = juce::jlimit(0.0f, 4.0f, v);
-                int idx_v = (int)v; float frac = v - idx_v;
-                if (idx_v >= 4) { idx_v = 3; frac = 1.0f; }
-                float f1_m[5] = { 730.f, 270.f, 300.f, 530.f, 400.f };
-                float f2_m[5] = { 1090.f, 2290.f, 870.f, 1840.f, 840.f };
-                float f3_m[5] = { 2440.f, 3010.f, 2240.f, 2480.f, 2800.f };
+                v = juce::jlimit(0.0f, 4.0f, v); int idx_v = (int)v; float frac = v - idx_v; if (idx_v >= 4) { idx_v = 3; frac = 1.0f; }
+                float f1_m[5] = { 730.f, 270.f, 300.f, 530.f, 400.f }; float f2_m[5] = { 1090.f, 2290.f, 870.f, 1840.f, 840.f }; float f3_m[5] = { 2440.f, 3010.f, 2240.f, 2480.f, 2800.f };
                 float f_arr[3] = { f1_m[idx_v] + (f1_m[idx_v + 1] - f1_m[idx_v]) * frac, f2_m[idx_v] + (f2_m[idx_v + 1] - f2_m[idx_v]) * frac, f3_m[idx_v] + (f3_m[idx_v + 1] - f3_m[idx_v]) * frac };
-
                 float mag_sum = 0.0f; float gains[3] = { 1.0f, 0.5f, 0.2f };
                 for (int f = 0; f < 3; ++f) {
-                    float w_f = freq / juce::jlimit(20.0f, 20000.0f, f_arr[f]);
-                    float d_f = 1.0f / juce::jlimit(0.1f, 10.0f, res);
+                    float w_f = freq / juce::jlimit(20.0f, 20000.0f, f_arr[f]); float d_f = 1.0f / juce::jlimit(0.1f, 10.0f, res);
                     float m_f = 1.0f / std::sqrt(std::pow(1.0f - w_f * w_f, 2.0f) + std::pow(w_f * d_f, 2.0f));
                     if (t == 1) m_f *= w_f; else if (t == 2) m_f *= w_f * w_f; else if (t == 3) m_f *= std::abs(1.0f - w_f * w_f);
                     mag_sum += m_f * gains[f];
                 }
-                mag = std::pow(mag_sum, stages) * (1.0f + res * 0.1f);
+                mag = mag_sum * (1.0f + res * 0.1f);
             }
-            else if (modelIdx == 6) { // 【追加】Comb Filter Visualizer
+            else if (modelIdx == 6) {
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
                 float delaySamples = 44100.0f / juce::jlimit(20.0f, 20000.0f, fc);
-                float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.95f);
-                if (t == 1 || t == 3) fb = -fb;
+                float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.95f); if (t == 1 || t == 3) fb = -fb;
                 float wD = 2.0f * juce::MathConstants<float>::pi * freq * (delaySamples / 44100.0f);
-
-                float m = 1.0f;
-                if (t == 0 || t == 1) m = 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD)); // Feedback
-                else m = std::sqrt(1.0f + fb * fb + 2.0f * fb * std::cos(wD)); // Feedforward
-
+                float m = (t == 0 || t == 1) ? (1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD))) : std::sqrt(1.0f + fb * fb + 2.0f * fb * std::cos(wD));
                 mag = std::pow(m, stages);
+            }
+            else if (modelIdx == 7) { // 【追加】MS-20 Visualizer
+                int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
+                float ms_res = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 2.5f);
+                float d = 1.0f / (ms_res + 0.1f);
+                float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w_norm * d, 2.0f));
+                float m = 1.0f / den;
+                if (t == 1) m *= w_norm; else if (t == 2) m *= w2; else if (t == 3) m *= std::abs(1.0f - w2);
+                mag = std::pow(m, stages) * (1.0f + ms_res * 0.2f);
+            }
+            else if (modelIdx == 8) { // 【追加】All-Pass Phaser Visualizer
+                int stages = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
+                float phi = -2.0f * std::atan(freq / juce::jlimit(20.0f, 20000.0f, fc));
+                float fb = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 0.95f);
+                if (t == 1 || t == 3) fb = -fb;
+                float c_ap = std::cos(stages * phi); float s_ap = std::sin(stages * phi);
+                float den2 = (1.0f - fb * c_ap) * (1.0f - fb * c_ap) + (fb * s_ap) * (fb * s_ap);
+                float real_yap = (c_ap - fb) / den2; float imag_yap = s_ap / den2;
+                float real_out = 0.5f * (1.0f + real_yap); float imag_out = 0.5f * imag_yap;
+                mag = std::sqrt(real_out * real_out + imag_out * imag_out);
             }
             return static_cast<float>(mag);
             };
@@ -285,8 +282,8 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce:
     addAndMakeVisible(g.enableButton);
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, "enable" + s, g.enableButton);
 
-    // 【追加】Comb Filter を選択肢に追加
-    g.model.addItemList({ "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR", "Formant (Vowel)", "Comb Filter" }, 1); addAndMakeVisible(g.model);
+    // 【追加】全10モデルを UI に反映
+    g.model.addItemList({ "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR", "Formant (Vowel)", "Comb Filter", "MS-20 (Screaming)", "All-Pass Phaser", "Wavefolder" }, 1); addAndMakeVisible(g.model);
     g.mAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "model" + s, g.model);
 
     g.type.addItemList({ "LP", "BP", "HP", "Notch" }, 1); addAndMakeVisible(g.type);

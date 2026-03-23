@@ -14,7 +14,7 @@ public:
     void prepare(double newSampleRate, int samplesPerBlock, int numChannels);
     void reset();
 
-    // 0: Clean SVF, 1: Moog Ladder, 2: Diode Ladder, 3: SEM, 4: Bitcrush/SRR, 5: Formant, 6: Comb Filter
+    // 0: Clean SVF, 1: Moog Ladder, 2: Diode Ladder, 3: SEM, 4: Bitcrush/SRR, 5: Formant, 6: Comb, 7: MS-20, 8: Phaser, 9: Wavefolder
     void setModel(int newModel);
     void setCutoff(float newCutoff);
     void setResonance(float newResonance);
@@ -62,9 +62,13 @@ private:
     float form_s1[3][2] = { {0.0f} };
     float form_s2[3][2] = { {0.0f} };
 
-    // 【追加】Comb Filter 係数 (各段・各チャンネルごとのディレイバッファ)
+    // Comb Filter 係数
     float combBuffer[8][2][4096] = { {{0.0f}} };
     int combWriteIdx[8][2] = { {0} };
+
+    // 【追加】All-Pass Phaser 係数 (16段まで拡張)
+    float ap_s[16][2] = { {0.0f} };
+    float ap_out_prev[2] = { 0.0f };
 
     // リアルタイムRMS・動的AGC用ステート
     float rmsIn[2] = { 0.0f, 0.0f };
