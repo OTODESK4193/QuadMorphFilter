@@ -52,12 +52,12 @@ private:
 
     struct FilterGroup {
         juce::TextButton enableButton;
-        juce::ComboBox type, slope;
+        juce::ComboBox model, type, slope;
         juce::Label cutoffLabel, resLabel;
         juce::Slider cutoff, res;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> eAtt;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> cAtt, rAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> tAtt, slAtt;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mAtt, tAtt, slAtt;
     };
     FilterGroup groupA, groupB, groupC, groupD;
 

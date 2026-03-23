@@ -11,7 +11,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout QuadMorphFilterAudioProcesso
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "posX", 1 }, "Base X", 0.0f, 1.0f, 0.5f));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "posY", 1 }, "Base Y", 0.0f, 1.0f, 0.5f));
 
-    // ÅyèCê≥ÅzêVîgå`ÅiSpirograph, Harmonic Swarm, 3D Torus KnotÅjÇ÷íuÇ´ä∑Ç¶
     juce::StringArray waveTypes = {
         "Sine", "SAW", "Pulse", "Random 1", "Random 2", "Noise", "Recording",
         "Smooth Noise", "Spirograph", "Harmonic Swarm", "3D Torus Knot",
@@ -34,21 +33,23 @@ juce::AudioProcessorValueTreeState::ParameterLayout QuadMorphFilterAudioProcesso
         layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "step", 1 }, lfoNames[i] + " Step Mode", false));
         layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "sync", 1 }, lfoNames[i] + " Sync", true));
         layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ id + "rateSync", 1 }, lfoNames[i] + " Rate Sync", syncRates, 5));
-        layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "rateFree", 1 }, lfoNames[i] + " Rate Free",
-            juce::NormalisableRange<float>(0.01f, 20.0f, 0.001f, 0.2f), 1.0f));
+        layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "rateFree", 1 }, lfoNames[i] + " Rate Free", juce::NormalisableRange<float>(0.01f, 20.0f, 0.001f, 0.2f), 1.0f));
         layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "min", 1 }, lfoNames[i] + " Min", 0.0f, 1.0f, 0.0f));
         layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "max", 1 }, lfoNames[i] + " Max", 0.0f, 1.0f, 1.0f));
         layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ id + "bound", 1 }, lfoNames[i] + " Boundary", bounds, 0));
     }
 
     juce::StringArray suffixes = { "A", "B", "C", "D" };
+    juce::StringArray models = { "Clean SVF", "Moog Ladder" };
     juce::StringArray slopes = { "12 dB/oct", "24 dB/oct", "48 dB/oct", "96 dB/oct" };
+
     for (const auto& s : suffixes) {
         layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ "enable" + s, 1 }, "Enable " + s, true));
-        layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "cutoff" + s, 1 }, "Cutoff " + s, juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.3f), 1000.0f));
-        layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "res" + s, 1 }, "Res " + s, 0.1f, 10.0f, 0.707f));
+        layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ "model" + s, 1 }, "Model " + s, models, 0));
         layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ "type" + s, 1 }, "Type " + s, juce::StringArray{ "LP", "BP", "HP", "Notch" }, 0));
         layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ "slope" + s, 1 }, "Slope " + s, slopes, 0));
+        layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "cutoff" + s, 1 }, "Cutoff " + s, juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.3f), 1000.0f));
+        layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "res" + s, 1 }, "Res " + s, 0.1f, 10.0f, 0.707f));
     }
 
     return layout;
@@ -68,23 +69,10 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
     filterC.prepare(sampleRate, samplesPerBlock, 2);
     filterD.prepare(sampleRate, samplesPerBlock, 2);
 
-    for (auto& buf : filterBuffers) {
-        buf.setSize(2, samplesPerBlock, false, false, true);
-    }
+    for (auto& buf : filterBuffers) buf.setSize(2, samplesPerBlock, false, false, true);
 }
 
 void QuadMorphFilterAudioProcessor::releaseResources() {}
-
-// ÅyèCê≥Åzì∆óßÇµÇΩóêêîê∂ê¨äÌÇégópÇµÅAäÆëSÇ»ÉXÉåÉbÉhÉZÅ[Étâª
-float QuadMorphFilterAudioProcessor::generateWave(float phase, int type, juce::Random& rng) {
-    switch (type) {
-    case 0: return std::sin(phase);
-    case 1: return 1.0f - (phase / juce::MathConstants<float>::pi);
-    case 2: return (phase < juce::MathConstants<float>::pi) ? 1.0f : -1.0f;
-    case 5: return (rng.nextFloat() * 2.0f - 1.0f);
-    default: return 0.0f;
-    }
-}
 
 float QuadMorphFilterAudioProcessor::getSyncTime(int selection, double bpm) {
     double beatLen = 60.0 / bpm;
@@ -102,27 +90,16 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     float dt = numSamples / (float)sampleRate;
 
     double bpm = 120.0;
-    if (auto* ph = getPlayHead()) {
-        if (auto pos = ph->getPosition()) {
-            if (pos->getBpm().hasValue()) bpm = *(pos->getBpm());
-        }
-    }
+    if (auto* ph = getPlayHead()) if (auto pos = ph->getPosition()) if (pos->getBpm().hasValue()) bpm = *(pos->getBpm());
 
     float baseX = apvts.getRawParameterValue("posX")->load();
     float baseY = apvts.getRawParameterValue("posY")->load();
 
-    std::array<float, 4> lfoMod4[3] = {
-        std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f},
-        std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f},
-        std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}
-    };
+    std::array<float, 4> lfoMod4[3] = { {0.f,0.f,0.f,0.f}, {0.f,0.f,0.f,0.f}, {0.f,0.f,0.f,0.f} };
 
     auto applyBound = [](float v, int mode) {
         if (mode == 0) return juce::jlimit(0.0f, 1.0f, v);
-        if (mode == 1) {
-            v = std::fmod(v, 2.0f); if (v < 0.0f) v += 2.0f;
-            if (v > 1.0f) v = 2.0f - v; return v;
-        }
+        if (mode == 1) { v = std::fmod(v, 2.0f); if (v < 0.0f) v += 2.0f; if (v > 1.0f) v = 2.0f - v; return v; }
         v = std::fmod(v, 1.0f); if (v < 0.0f) v += 1.0f; return v;
         };
 
@@ -135,15 +112,13 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         float minVal = apvts.getRawParameterValue(id + "min")->load();
         float maxVal = apvts.getRawParameterValue(id + "max")->load();
         int boundMode = (int)apvts.getRawParameterValue(id + "bound")->load();
-
         float spread = maxVal - minVal;
 
         bool isWait = isWaitingForRecord[i].load(std::memory_order_acquire);
         bool isDrag = isRecordingDrag[i].load(std::memory_order_acquire);
 
         if (enabled) {
-            float rate = sync ? (1.0f / getSyncTime((int)apvts.getRawParameterValue(id + "rateSync")->load(), bpm))
-                : apvts.getRawParameterValue(id + "rateFree")->load();
+            float rate = sync ? (1.0f / getSyncTime((int)apvts.getRawParameterValue(id + "rateSync")->load(), bpm)) : apvts.getRawParameterValue(id + "rateFree")->load();
             float actualDt = rate * dt;
 
             if (!isWait) {
@@ -151,26 +126,16 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
                 if (lfoStates[i].phase >= juce::MathConstants<float>::twoPi) {
                     lfoStates[i].phase -= juce::MathConstants<float>::twoPi;
                     lfoStates[i].currentRandom = lfoStates[i].nextRandom;
-
-                    // ÅyäÆëSì∆óßÅzëSÉCÉìÉXÉ^ÉìÉXÅEÉoÉEÉìÉXéûÇ‡à¿ëSÇ»ÉCÉìÉXÉ^ÉìÉXRNGÇ÷ìùàÍ
-                    float rx = lfoStates[i].rng.nextBool() ? 1.0f : 0.0f;
-                    float ry = lfoStates[i].rng.nextBool() ? 1.0f : 0.0f;
-                    lfoStates[i].nextRandom = { rx, ry };
-
+                    lfoStates[i].nextRandom = { lfoStates[i].rng.nextBool() ? 1.0f : 0.0f, lfoStates[i].rng.nextBool() ? 1.0f : 0.0f };
                     lfoStates[i].currentRand1 = lfoStates[i].nextRand1;
                     for (int f = 0; f < 4; ++f) lfoStates[i].nextRand1[f] = lfoStates[i].rng.nextFloat();
-
-                    lfoStates[i].smoothNx = lfoStates[i].tNextNx;
-                    lfoStates[i].smoothNy = lfoStates[i].tNextNy;
-                    lfoStates[i].tNextNx = lfoStates[i].rng.nextFloat();
-                    lfoStates[i].tNextNy = lfoStates[i].rng.nextFloat();
+                    lfoStates[i].smoothNx = lfoStates[i].tNextNx; lfoStates[i].smoothNy = lfoStates[i].tNextNy;
+                    lfoStates[i].tNextNx = lfoStates[i].rng.nextFloat(); lfoStates[i].tNextNy = lfoStates[i].rng.nextFloat();
                 }
             }
 
-            float p = lfoStates[i].phase;
-            float t = step ? 0.0f : (p / juce::MathConstants<float>::twoPi);
+            float p = lfoStates[i].phase; float t = step ? 0.0f : (p / juce::MathConstants<float>::twoPi);
             float W_x = 0.0f, W_y = 0.0f;
-            std::array<float, 4> rand1Vals = { 0.0f, 0.0f, 0.0f, 0.0f };
 
             switch (wave) {
             case 0: W_x = std::sin(p); W_y = std::sin(p + juce::MathConstants<float>::halfPi); break;
@@ -183,10 +148,7 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             case 6:
                 if (isWait) {
                     if (isDrag) { W_x = currentRecX[i].load() * 2.f - 1.f; W_y = currentRecY[i].load() * 2.f - 1.f; }
-                    else {
-                        int len = recLength[i].load();
-                        if (len > 0) { W_x = recBuffer[i][len - 1].x * 2.f - 1.f; W_y = recBuffer[i][len - 1].y * 2.f - 1.f; }
-                    }
+                    else { int len = recLength[i].load(); if (len > 0) { W_x = recBuffer[i][len - 1].x * 2.f - 1.f; W_y = recBuffer[i][len - 1].y * 2.f - 1.f; } }
                 }
                 else {
                     int len = recLength[i].load();
@@ -201,34 +163,21 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
                 W_x = (lfoStates[i].smoothNx + (lfoStates[i].tNextNx - lfoStates[i].smoothNx) * smT) * 2.f - 1.f;
                 W_y = (lfoStates[i].smoothNy + (lfoStates[i].tNextNy - lfoStates[i].smoothNy) * smT) * 2.f - 1.f; break;
             }
-            case 8: // ÅyêVãKÅzSpirograph
-                W_x = 0.5f * std::cos(p) + 0.5f * std::cos(5.2f * p);
-                W_y = 0.5f * std::sin(p) - 0.5f * std::sin(5.2f * p); break;
-            case 9: // ÅyêVãKÅzHarmonic Swarm
-                W_x = (std::sin(p) + std::sin(1.37f * p) + std::sin(2.11f * p)) / 3.0f;
-                W_y = (std::cos(1.09f * p) + std::cos(1.73f * p) + std::cos(2.51f * p)) / 3.0f; break;
-            case 10: // ÅyêVãKÅz3D Torus Knot
-            {
-                float r_knot = std::cos(2.0f * p) + 2.0f;
-                W_x = r_knot * std::cos(3.0f * p) / 3.0f;
-                W_y = r_knot * std::sin(3.0f * p) / 3.0f; break;
-            }
+            case 8: W_x = 0.5f * std::cos(p) + 0.5f * std::cos(5.2f * p); W_y = 0.5f * std::sin(p) - 0.5f * std::sin(5.2f * p); break;
+            case 9: W_x = (std::sin(p) + std::sin(1.37f * p) + std::sin(2.11f * p)) / 3.0f; W_y = (std::cos(1.09f * p) + std::cos(1.73f * p) + std::cos(2.51f * p)) / 3.0f; break;
+            case 10: { float r_knot = std::cos(2.0f * p) + 2.0f; W_x = r_knot * std::cos(3.0f * p) / 3.0f; W_y = r_knot * std::sin(3.0f * p) / 3.0f; break; }
             case 11: W_x = std::sin(p * 3.0f); W_y = std::sin(p * 4.0f); break;
             case 12: W_x = t * std::cos(p * 5.0f); W_y = t * std::sin(p * 5.0f); break;
             case 13: W_x = 0.6f * std::cos(p) + 0.4f * std::cos(1.5f * p); W_y = 0.6f * std::sin(p) - 0.4f * std::sin(1.5f * p); break;
             case 14: W_x = std::cos(2.5f * p) * std::cos(p); W_y = std::cos(2.5f * p) * std::sin(p); break;
             case 15: { float scale = 2.0f / (3.0f - std::cos(2.0f * p)); W_x = scale * std::cos(p); W_y = scale * std::sin(2.0f * p) / 2.0f; break; }
-            case 16: // Billiard
-                if (!isWait) {
-                    lfoStates[i].bilX += lfoStates[i].bilVx * actualDt * 1.5f; lfoStates[i].bilY += lfoStates[i].bilVy * actualDt * 1.5f;
-                    if (lfoStates[i].bilX > 1.0f || lfoStates[i].bilX < -1.0f) lfoStates[i].bilVx *= -1.0f;
-                    if (lfoStates[i].bilY > 1.0f || lfoStates[i].bilY < -1.0f) lfoStates[i].bilVy *= -1.0f;
-                }
-                W_x = lfoStates[i].bilX; W_y = lfoStates[i].bilY; break;
-            case 17: {
-                float rP = std::cos(juce::MathConstants<float>::pi / 6.0f) / std::cos(std::fmod(p, juce::MathConstants<float>::pi / 3.0f) - juce::MathConstants<float>::pi / 6.0f);
-                W_x = rP * std::cos(p); W_y = rP * std::sin(p); break;
+            case 16: if (!isWait) {
+                lfoStates[i].bilX += lfoStates[i].bilVx * actualDt * 1.5f; lfoStates[i].bilY += lfoStates[i].bilVy * actualDt * 1.5f;
+                if (lfoStates[i].bilX > 1.0f || lfoStates[i].bilX < -1.0f) lfoStates[i].bilVx *= -1.0f;
+                if (lfoStates[i].bilY > 1.0f || lfoStates[i].bilY < -1.0f) lfoStates[i].bilVy *= -1.0f;
             }
+                   W_x = lfoStates[i].bilX; W_y = lfoStates[i].bilY; break;
+            case 17: { float rP = std::cos(juce::MathConstants<float>::pi / 6.0f) / std::cos(std::fmod(p, juce::MathConstants<float>::pi / 3.0f) - juce::MathConstants<float>::pi / 6.0f); W_x = rP * std::cos(p); W_y = rP * std::sin(p); break; }
             case 18: { float rO = 0.6f + 0.4f * std::sin(p * 7.0f); W_x = rO * std::cos(p); W_y = rO * std::sin(p); break; }
             }
 
@@ -241,12 +190,10 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
                     if (step) w = std::round(w * 4.0f) / 4.0f;
                     lfoMod4[i][f] = applyBound(baseX + w * spread, boundMode);
                 }
-                lfoPositions[i].x = lfoMod4[i][0];
-                lfoPositions[i].y = lfoMod4[i][1];
+                lfoPositions[i].x = lfoMod4[i][0]; lfoPositions[i].y = lfoMod4[i][1];
             }
             else {
-                lfoPositions[i].x = applyBound(baseX + W_x * spread, boundMode);
-                lfoPositions[i].y = applyBound(baseY + W_y * spread, boundMode);
+                lfoPositions[i].x = applyBound(baseX + W_x * spread, boundMode); lfoPositions[i].y = applyBound(baseY + W_y * spread, boundMode);
                 for (int f = 0; f < 4; ++f) lfoMod4[i][f] = lfoPositions[i].x;
             }
         }
@@ -258,15 +205,8 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
 
     auto getM = [](juce::Point<float> p, const std::array<float, 4>& m4, bool isRand1) -> std::array<float, 4> {
         std::array<float, 4> res;
-        if (isRand1) {
-            for (int i = 0; i < 4; ++i) res[i] = m4[i] * 2.0f - 1.0f;
-        }
-        else {
-            res[0] = p.x * 2.0f - 1.0f;
-            res[1] = p.y * 2.0f - 1.0f;
-            res[2] = (1.0f - p.x) * 2.0f - 1.0f;
-            res[3] = (1.0f - p.y) * 2.0f - 1.0f;
-        }
+        if (isRand1) { for (int i = 0; i < 4; ++i) res[i] = m4[i] * 2.0f - 1.0f; }
+        else { res[0] = p.x * 2.0f - 1.0f; res[1] = p.y * 2.0f - 1.0f; res[2] = (1.0f - p.x) * 2.0f - 1.0f; res[3] = (1.0f - p.y) * 2.0f - 1.0f; }
         return res;
         };
 
@@ -283,16 +223,16 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         float fc = baseCutoff * std::pow(2.0f, 4.0f * cM[idx]);
         float res = baseRes * std::pow(2.0f, 2.0f * rM[idx]);
 
+        f.setModel((int)apvts.getRawParameterValue("model" + s)->load());
         f.setCutoff(juce::jlimit(20.0f, 20000.0f, fc));
         f.setResonance(juce::jlimit(0.1f, 10.0f, res));
         f.setType((int)apvts.getRawParameterValue("type" + s)->load());
         f.setSlope((int)apvts.getRawParameterValue("slope" + s)->load());
         };
 
-    updateF(filterA, "A", 0); updateF(filterB, "B", 1);
-    updateF(filterC, "C", 2); updateF(filterD, "D", 3);
+    updateF(filterA, "A", 0); updateF(filterB, "B", 1); updateF(filterC, "C", 2); updateF(filterD, "D", 3);
 
-    std::array<float, 4> wMix{ 0.0f, 0.0f, 0.0f, 0.0f };
+    std::array<float, 4> wMix{ 0.f, 0.f, 0.f, 0.f };
     bool lfo0_isRand1 = ((int)apvts.getRawParameterValue("lfo1wave")->load() == 3) && (apvts.getRawParameterValue("lfo1en")->load() > 0.5f);
     if (lfo0_isRand1) { wMix = lfoMod4[0]; }
     else {

@@ -53,14 +53,13 @@ private:
     std::array<juce::AudioBuffer<float>, 4> filterBuffers;
 
     struct LfoState {
-        juce::Random rng; // 【修正】インスタンス独立の乱数生成器（スレッドセーフ）
+        juce::Random rng;
         float phase = 0.0f;
         juce::Point<float> currentRandom{ 0.5f, 0.5f };
         juce::Point<float> nextRandom{ 0.5f, 0.5f };
         std::array<float, 4> currentRand1{ 0.5f, 0.5f, 0.5f, 0.5f };
         std::array<float, 4> nextRand1{ 0.5f, 0.5f, 0.5f, 0.5f };
 
-        // 物理演算ステート（BilliardとSmoothNoiseは安全なので保持）
         float bilX = 0.0f, bilY = 0.0f, bilVx = 1.3f, bilVy = 1.7f;
         float smoothNx = 0.5f, smoothNy = 0.5f;
         float tNextNx = 0.5f, tNextNy = 0.5f;
@@ -74,7 +73,6 @@ private:
         std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}
     };
 
-    float generateWave(float phase, int type, juce::Random& rng);
     float getSyncTime(int selection, double bpm);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(QuadMorphFilterAudioProcessor)
