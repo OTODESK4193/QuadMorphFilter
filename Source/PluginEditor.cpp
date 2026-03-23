@@ -68,7 +68,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
             float w2 = w_norm * w_norm;
             float mag = 1.0f;
 
-            if (modelIdx == 0) {
+            if (modelIdx == 0 || modelIdx == 3) { // Clean SVF & SEM (SEM does not apply bass comp)
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
                 float adjustedRes = res;
                 if (stages > 1) adjustedRes = res * std::pow(0.6f, std::log2((float)stages));
@@ -77,9 +77,9 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 float m = 1.0f / den;
                 if (t == 1) m *= w_norm; else if (t == 2) m *= w2; else if (t == 3) m *= std::abs(1.0f - w2);
                 mag = std::pow(m, stages);
-                mag *= (1.0f + res * 0.1f);
+                if (modelIdx == 0) mag *= (1.0f + res * 0.1f); // Only Clean SVF gets the visual scaling
             }
-            else if (modelIdx == 1) {
+            else if (modelIdx == 1) { // Moog
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 1 : (slopeIdx == 2) ? 2 : 4;
                 float r_moog = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 4.0f);
                 if (stages > 1) r_moog *= std::pow(0.7f, std::log2((float)stages));
@@ -98,7 +98,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 mag = std::pow(m, stages);
                 mag *= (1.0f + 0.5f * r_moog);
             }
-            else if (modelIdx == 2) { // 【追加】Diode Ladder Visualizer (18dB特性近似)
+            else if (modelIdx == 2) { // Diode
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 1 : (slopeIdx == 2) ? 2 : 4;
                 float r_diode = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 15.0f);
                 if (stages > 1) r_diode *= std::pow(0.7f, std::log2((float)stages));
@@ -241,7 +241,7 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce:
     addAndMakeVisible(g.enableButton);
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, "enable" + s, g.enableButton);
 
-    g.model.addItemList({ "Clean SVF", "Moog Ladder", "Diode (TB-303)" }, 1); addAndMakeVisible(g.model);
+    g.model.addItemList({ "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)" }, 1); addAndMakeVisible(g.model);
     g.mAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "model" + s, g.model);
 
     g.type.addItemList({ "LP", "BP", "HP", "Notch" }, 1); addAndMakeVisible(g.type);
@@ -322,12 +322,13 @@ void QuadMorphFilterAudioProcessorEditor::resized() {
     for (auto* g : { &groupA, &groupB, &groupC, &groupD }) {
         auto r = b.removeFromTop(40).reduced(5, 2);
 
-        // 【完全刷新】ご指示通りのGUIコンボボックス幅(2/3, 半分, 1/3)の比率調整と、大幅なスライダー拡張
+        // 【完全刷新】ご指示通りの「文字が見切れない黄金比固定幅」によりスライダーを最大化
         g->enableButton.setBounds(r.removeFromLeft(60).reduced(0, 5));
-        g->model.setBounds(r.removeFromLeft(80).reduced(2, 5)); // 2/3程度
-        g->type.setBounds(r.removeFromLeft(60).reduced(2, 5));  // 半分程度
-        g->slope.setBounds(r.removeFromLeft(50).reduced(2, 5)); // 1/3程度
+        g->model.setBounds(r.removeFromLeft(115).reduced(2, 5));
+        g->type.setBounds(r.removeFromLeft(60).reduced(2, 5));
+        g->slope.setBounds(r.removeFromLeft(85).reduced(2, 5));
 
+        // 残りの約650pxをスライダー2つでゆったり等分
         auto cutArea = r.removeFromLeft(r.getWidth() / 2).reduced(5, 0);
         auto resArea = r.reduced(5, 0);
 

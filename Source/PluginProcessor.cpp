@@ -40,7 +40,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout QuadMorphFilterAudioProcesso
     }
 
     juce::StringArray suffixes = { "A", "B", "C", "D" };
-    juce::StringArray models = { "Clean SVF", "Moog Ladder", "Diode (TB-303)" }; // Åyí«â¡ÅzëÊ3ÇÃÉÇÉfÉã
+    // Åyí«â¡ÅzëÊ4ÇÃÉÇÉfÉã SEM (Oberheim) 
+    juce::StringArray models = { "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)" };
     juce::StringArray slopes = { "12 dB/oct", "24 dB/oct", "48 dB/oct", "96 dB/oct" };
 
     for (const auto& s : suffixes) {
@@ -141,7 +142,7 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             case 0: W_x = std::sin(p); W_y = std::sin(p + juce::MathConstants<float>::halfPi); break;
             case 1: W_x = 1.0f - (p / juce::MathConstants<float>::pi); W_y = 1.0f - (std::fmod(p + juce::MathConstants<float>::halfPi, juce::MathConstants<float>::twoPi) / juce::MathConstants<float>::pi); break;
             case 2: W_x = (p < juce::MathConstants<float>::pi) ? 1.0f : -1.0f; W_y = (std::fmod(p + juce::MathConstants<float>::halfPi, juce::MathConstants<float>::twoPi) < juce::MathConstants<float>::pi) ? 1.0f : -1.0f; break;
-            case 3: /* Rand1 handles below */ break;
+            case 3: break;
             case 4: W_x = (lfoStates[i].currentRandom.x + (lfoStates[i].nextRandom.x - lfoStates[i].currentRandom.x) * t) * 2.0f - 1.0f;
                 W_y = (lfoStates[i].currentRandom.y + (lfoStates[i].nextRandom.y - lfoStates[i].currentRandom.y) * t) * 2.0f - 1.0f; break;
             case 5: W_x = lfoStates[i].rng.nextFloat() * 2.0f - 1.0f; W_y = lfoStates[i].rng.nextFloat() * 2.0f - 1.0f; break;

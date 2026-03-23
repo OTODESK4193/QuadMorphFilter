@@ -47,7 +47,7 @@ void TptFilter::setType(int newType) { filterType = newType; }
 void TptFilter::setSlope(int index)
 {
     slopeIdx = index;
-    if (filterModel == 0) {
+    if (filterModel == 0 || filterModel == 3) { // Clean SVF & SEM SVF (12dB base)
         currentStages = (index == 0) ? 1 : (index == 1) ? 2 : (index == 2) ? 4 : 8;
     }
     else { // Moog & Diode (24/18dB base)
@@ -64,7 +64,7 @@ void TptFilter::updateCoefficients()
     g = std::tan(wd);
     ladderG = g / (1.0f + g);
 
-    if (filterModel == 0) {
+    if (filterModel == 0 || filterModel == 3) { // SVF系の係数
         float adjustedRes = currentRes;
         if (currentStages > 1) adjustedRes = currentRes * std::pow(0.6f, std::log2((float)currentStages));
         R = 1.0f / (2.0f * adjustedRes);
@@ -74,7 +74,7 @@ void TptFilter::updateCoefficients()
         ladderRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, 4.0f);
         if (currentStages > 1) ladderRes *= std::pow(0.7f, std::log2((float)currentStages));
     }
-    else if (filterModel == 2) { // Diode (強烈な自己発振域 15.0 まで許容)
+    else if (filterModel == 2) { // Diode
         ladderRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, 15.0f);
         if (currentStages > 1) ladderRes *= std::pow(0.7f, std::log2((float)currentStages));
     }
@@ -102,7 +102,9 @@ float TptFilter::processSample(int channel, float x)
     float comp = 1.0f;
     if (filterModel == 0) comp = 1.0f + resonance.getCurrentValue() * 0.1f;
     else if (filterModel == 1) comp = 1.0f + 0.5f * ladderRes;
-    else if (filterModel == 2) comp = 1.0f + 0.2f * ladderRes; // Diodeは少し抑えめに補償
+    else if (filterModel == 2) comp = 1.0f + 0.2f * ladderRes;
+    // ※ filterModel == 3 (SEM) は回路特性上低域が減衰しないため補償(comp)を1.0fのまま据え置き
+
     x *= comp;
 
     float envCoefIn = 0.005f;
@@ -155,13 +157,11 @@ float TptFilter::processSample(int channel, float x)
             }
         }
     }
-    else if (filterModel == 2) { // 【追加】Diode Ladder (TB-303 Type)
+    else if (filterModel == 2) { // Diode Ladder (TB-303 Type)
         for (int stage = 0; stage < currentStages; ++stage) {
-            // フィードバック経路のサチュレーション
             float fb = out - ladderRes * zdfState[stage][channel][3];
             fb = std::tanh(fb);
 
-            // 各極間にtanhを挟み、ダイオード特有のローディング（干渉）と歪みをシミュレート
             float v1 = (fb - zdfState[stage][channel][0]) * ladderG; float y1 = v1 + zdfState[stage][channel][0]; zdfState[stage][channel][0] = y1 + v1;
             y1 = std::tanh(y1);
             float v2 = (y1 - zdfState[stage][channel][1]) * ladderG; float y2 = v2 + zdfState[stage][channel][1]; zdfState[stage][channel][1] = y2 + v2;
@@ -170,22 +170,40 @@ float TptFilter::processSample(int channel, float x)
             y3 = std::tanh(y3);
             float v4 = (y3 - zdfState[stage][channel][3]) * ladderG; float y4 = v4 + zdfState[stage][channel][3]; zdfState[stage][channel][3] = y4 + v4;
 
-            // TB-303風の非対称波形クリッピング
             if (y4 > 0.0f) y4 *= 1.1f;
             y4 = std::tanh(y4);
 
-            if (slopeIdx == 0) { // 12dB設定時 -> 約9dB/oct タッピング
+            if (slopeIdx == 0) {
                 if (filterType == 0) out = y2;
                 else if (filterType == 1) out = y1 - y2;
                 else if (filterType == 2) out = out - y1;
                 else out = y2 + (out - y1);
             }
-            else { // 24dB以上設定時 -> 約18dB/oct タッピング
+            else {
                 if (filterType == 0) out = y4;
                 else if (filterType == 1) out = y2 - y4;
                 else if (filterType == 2) out = out - y2;
                 else out = y4 + (out - y2);
             }
+        }
+    }
+    else if (filterModel == 3) { // 【追加】SEM State Variable (Oberheim Type)
+        for (int stage = 0; stage < currentStages; ++stage) {
+            // SEM特有の軽いサチュレーションを入力に付加
+            float drivenOut = std::tanh(out * 1.2f);
+
+            float hp = (drivenOut - (2.0f * R + g) * s1[stage][channel] - s2[stage][channel]) * h;
+            float bp = g * hp + s1[stage][channel];
+            float lp = g * bp + s2[stage][channel];
+
+            // 積分器の中にtanhを挟み、アナログライクな「粘り」をシミュレート
+            s1[stage][channel] = std::tanh(g * hp + bp);
+            s2[stage][channel] = std::tanh(g * bp + lp);
+
+            if (filterType == 0) out = lp;
+            else if (filterType == 1) out = bp;
+            else if (filterType == 2) out = hp;
+            else out = lp + hp;
         }
     }
 
@@ -211,7 +229,7 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
     float w2 = w * w;
     float mag = 1.0f;
 
-    if (filterModel == 0) {
+    if (filterModel == 0 || filterModel == 3) { // Clean SVF & SEM SVF
         float adjustedRes = res;
         if (currentStages > 1) adjustedRes = res * std::pow(0.6f, std::log2((float)currentStages));
         float d = 1.0f / juce::jlimit(0.1f, 10.0f, adjustedRes);
@@ -220,7 +238,7 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         if (filterType == 1) mag *= w; else if (filterType == 2) mag *= w2; else if (filterType == 3) mag *= std::abs(1.0f - w2);
         return std::pow(mag, currentStages);
     }
-    else {
+    else { // Moog & Diode
         float r_scale = (filterModel == 1) ? 4.0f : 15.0f;
         float r_val = juce::jmap(res, 0.1f, 10.0f, 0.0f, r_scale);
         if (currentStages > 1) r_val *= std::pow(0.7f, std::log2((float)currentStages));
@@ -242,10 +260,10 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
             if (filterType == 1) mag *= w; else if (filterType == 2) mag *= w2; else if (filterType == 3) mag *= std::abs(1.0f - w2);
         }
         else {
-            if (filterModel == 1) { // Moog (24dB mode)
+            if (filterModel == 1) {
                 if (filterType == 1) mag *= w2; else if (filterType == 2) mag *= w2 * w2; else if (filterType == 3) mag *= std::abs(1.0f - w2 * w2);
             }
-            else { // Diode (18dB mode approx)
+            else {
                 if (filterType == 1) mag *= w2 * w; else if (filterType == 2) mag *= w2 * w2; else if (filterType == 3) mag *= std::abs(1.0f - w2 * w);
             }
         }

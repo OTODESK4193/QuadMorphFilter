@@ -14,7 +14,8 @@ public:
     void prepare(double newSampleRate, int samplesPerBlock, int numChannels);
     void reset();
 
-    void setModel(int newModel); // 0: Clean SVF, 1: Moog Ladder, 2: Diode Ladder
+    // 0: Clean SVF, 1: Moog Ladder, 2: Diode Ladder, 3: SEM (Oberheim)
+    void setModel(int newModel);
     void setCutoff(float newCutoff);
     void setResonance(float newResonance);
     void setType(int newType);
@@ -38,19 +39,19 @@ private:
     int slopeIdx = 0;
     int currentStages = 1;
 
-    // SVF係数
+    // SVF & SEM 係数
     float g = 0.0f;
     float R = 0.0f;
     float h = 0.0f;
     float s1[8][2] = { {0.0f} };
     float s2[8][2] = { {0.0f} };
 
-    // Moog & Diode Ladder係数
+    // Moog & Diode Ladder 係数
     float ladderG = 0.0f;
     float ladderRes = 0.0f;
     float zdfState[8][2][4] = { { {0.0f} } };
 
-    // リアルタイムRMS・オートゲインコントロール（動的AGC）用ステート
+    // リアルタイムRMS・動的AGC用ステート
     float rmsIn[2] = { 0.0f, 0.0f };
     float rmsOut[2] = { 0.0f, 0.0f };
     float agcGain[2] = { 1.0f, 1.0f };
