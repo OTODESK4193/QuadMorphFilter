@@ -40,7 +40,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout QuadMorphFilterAudioProcesso
     }
 
     juce::StringArray suffixes = { "A", "B", "C", "D" };
-    juce::StringArray models = { "Clean SVF", "Moog Ladder" };
+    juce::StringArray models = { "Clean SVF", "Moog Ladder", "Diode (TB-303)" }; // Åyí«â¡ÅzëÊ3ÇÃÉÇÉfÉã
     juce::StringArray slopes = { "12 dB/oct", "24 dB/oct", "48 dB/oct", "96 dB/oct" };
 
     for (const auto& s : suffixes) {

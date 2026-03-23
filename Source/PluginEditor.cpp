@@ -9,7 +9,6 @@ void FilterVisualizer::paint(juce::Graphics& g) {
     auto w = (float)getWidth();
     auto h = (float)getHeight();
 
-    // 【追加】プロクオリティの固定広域スケール（+40dB 〜 -60dB）に基づき、0dB基準線を中央やや下に描画
     float y0dB = juce::jmap(0.0f, 40.0f, -60.0f, 0.0f, h);
     g.setColour(juce::Colours::white.withAlpha(0.1f));
     g.drawHorizontalLine((int)y0dB, 0.0f, w);
@@ -69,7 +68,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
             float w2 = w_norm * w_norm;
             float mag = 1.0f;
 
-            if (modelIdx == 0) { // Clean SVF Visualizer
+            if (modelIdx == 0) {
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
                 float adjustedRes = res;
                 if (stages > 1) adjustedRes = res * std::pow(0.6f, std::log2((float)stages));
@@ -78,12 +77,9 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 float m = 1.0f / den;
                 if (t == 1) m *= w_norm; else if (t == 2) m *= w2; else if (t == 3) m *= std::abs(1.0f - w2);
                 mag = std::pow(m, stages);
-
-                // 【追加】低域補償分のゲインを視覚にも反映
                 mag *= (1.0f + res * 0.1f);
-
             }
-            else { // Moog Ladder Visualizer
+            else if (modelIdx == 1) {
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 1 : (slopeIdx == 2) ? 2 : 4;
                 float r_moog = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 4.0f);
                 if (stages > 1) r_moog *= std::pow(0.7f, std::log2((float)stages));
@@ -100,9 +96,26 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                     if (t == 1) m *= w2; else if (t == 2) m *= w2 * w2; else if (t == 3) m *= std::abs(1.0f - w2 * w2);
                 }
                 mag = std::pow(m, stages);
-
-                // 【追加】低域補償分のゲインを視覚にも反映
                 mag *= (1.0f + 0.5f * r_moog);
+            }
+            else if (modelIdx == 2) { // 【追加】Diode Ladder Visualizer (18dB特性近似)
+                int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 1 : (slopeIdx == 2) ? 2 : 4;
+                float r_diode = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 15.0f);
+                if (stages > 1) r_diode *= std::pow(0.7f, std::log2((float)stages));
+
+                float real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + r_diode;
+                float imag_p = 3.5f * w_norm * (1.0f - w2);
+                float den2 = real_p * real_p + imag_p * imag_p;
+                float m = 1.0f / std::sqrt(den2);
+
+                if (slopeIdx == 0) {
+                    if (t == 1) m *= w_norm; else if (t == 2) m *= w2; else if (t == 3) m *= std::abs(1.0f - w2);
+                }
+                else {
+                    if (t == 1) m *= w2 * w_norm; else if (t == 2) m *= w2 * w2; else if (t == 3) m *= std::abs(1.0f - w2 * w_norm);
+                }
+                mag = std::pow(m, stages);
+                mag *= (1.0f + 0.2f * r_diode);
             }
             return static_cast<float>(mag);
             };
@@ -110,7 +123,6 @@ void FilterVisualizer::paint(juce::Graphics& g) {
         auto mPos = processor.getLfoPos(0); float x = mPos.x; float y = mPos.y;
         float mag = (calc("A", 0) * (1 - x) * (1 - y)) + (calc("B", 1) * x * (1 - y)) + (calc("C", 2) * (1 - x) * y) + (calc("D", 3) * x * y);
 
-        // 【完全刷新】デシベル（dB）固定スケールへの変換（+40dBを天井とし、鋭いピークをはみ出さずに維持）
         float db = 20.0f * std::log10(mag + 1e-5f);
         float yPos = juce::jmap(db, 40.0f, -60.0f, 0.0f, h);
 
@@ -229,7 +241,7 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce:
     addAndMakeVisible(g.enableButton);
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, "enable" + s, g.enableButton);
 
-    g.model.addItemList({ "Clean SVF", "Moog Ladder" }, 1); addAndMakeVisible(g.model);
+    g.model.addItemList({ "Clean SVF", "Moog Ladder", "Diode (TB-303)" }, 1); addAndMakeVisible(g.model);
     g.mAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "model" + s, g.model);
 
     g.type.addItemList({ "LP", "BP", "HP", "Notch" }, 1); addAndMakeVisible(g.type);
@@ -310,21 +322,19 @@ void QuadMorphFilterAudioProcessorEditor::resized() {
     for (auto* g : { &groupA, &groupB, &groupC, &groupD }) {
         auto r = b.removeFromTop(40).reduced(5, 2);
 
-        // 【完全刷新】スライダー幅を半減させ、残りのスペースをコンボボックスとボタンで均等に割り当てる
-        auto slidersArea = r.removeFromRight(300);
-        auto resArea = slidersArea.removeFromRight(150).reduced(5, 0);
-        auto cutArea = slidersArea.reduced(5, 0);
+        // 【完全刷新】ご指示通りのGUIコンボボックス幅(2/3, 半分, 1/3)の比率調整と、大幅なスライダー拡張
+        g->enableButton.setBounds(r.removeFromLeft(60).reduced(0, 5));
+        g->model.setBounds(r.removeFromLeft(80).reduced(2, 5)); // 2/3程度
+        g->type.setBounds(r.removeFromLeft(60).reduced(2, 5));  // 半分程度
+        g->slope.setBounds(r.removeFromLeft(50).reduced(2, 5)); // 1/3程度
+
+        auto cutArea = r.removeFromLeft(r.getWidth() / 2).reduced(5, 0);
+        auto resArea = r.reduced(5, 0);
 
         g->cutoffLabel.setBounds(cutArea.removeFromLeft(30));
         g->cutoff.setBounds(cutArea);
         g->resLabel.setBounds(resArea.removeFromLeft(30));
         g->res.setBounds(resArea);
-
-        int comboWidth = (r.getWidth() - 70) / 3;
-        g->enableButton.setBounds(r.removeFromLeft(70).reduced(0, 5));
-        g->model.setBounds(r.removeFromLeft(comboWidth).reduced(5, 8));
-        g->type.setBounds(r.removeFromLeft(comboWidth).reduced(5, 8));
-        g->slope.setBounds(r.removeFromLeft(comboWidth).reduced(5, 8));
     }
 
     b.removeFromTop(15);

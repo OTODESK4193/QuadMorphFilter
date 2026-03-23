@@ -14,7 +14,7 @@ public:
     void prepare(double newSampleRate, int samplesPerBlock, int numChannels);
     void reset();
 
-    void setModel(int newModel);
+    void setModel(int newModel); // 0: Clean SVF, 1: Moog Ladder, 2: Diode Ladder
     void setCutoff(float newCutoff);
     void setResonance(float newResonance);
     void setType(int newType);
@@ -45,12 +45,12 @@ private:
     float s1[8][2] = { {0.0f} };
     float s2[8][2] = { {0.0f} };
 
-    // Moog Ladder係数
-    float moogG = 0.0f;
-    float moogRes = 0.0f;
+    // Moog & Diode Ladder係数
+    float ladderG = 0.0f;
+    float ladderRes = 0.0f;
     float zdfState[8][2][4] = { { {0.0f} } };
 
-    // 【追加】リアルタイムRMS・オートゲインコントロール（動的AGC）用ステート
+    // リアルタイムRMS・オートゲインコントロール（動的AGC）用ステート
     float rmsIn[2] = { 0.0f, 0.0f };
     float rmsOut[2] = { 0.0f, 0.0f };
     float agcGain[2] = { 1.0f, 1.0f };

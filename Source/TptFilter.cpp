@@ -50,7 +50,7 @@ void TptFilter::setSlope(int index)
     if (filterModel == 0) {
         currentStages = (index == 0) ? 1 : (index == 1) ? 2 : (index == 2) ? 4 : 8;
     }
-    else {
+    else { // Moog & Diode (24/18dB base)
         currentStages = (index == 0) ? 1 : (index == 1) ? 1 : (index == 2) ? 2 : 4;
     }
 }
@@ -60,19 +60,23 @@ void TptFilter::updateCoefficients()
     float currentCutoff = cutoff.getNextValue();
     float currentRes = resonance.getNextValue();
 
-    float adjustedRes = currentRes;
-    if (filterModel == 0 && currentStages > 1) {
-        adjustedRes = currentRes * std::pow(0.6f, std::log2((float)currentStages));
-    }
     float wd = juce::MathConstants<float>::pi * currentCutoff / (float)sampleRate;
     g = std::tan(wd);
-    R = 1.0f / (2.0f * adjustedRes);
-    h = 1.0f / (1.0f + 2.0f * R * g + g * g);
+    ladderG = g / (1.0f + g);
 
-    moogG = g / (1.0f + g);
-    moogRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, 4.0f);
-    if (filterModel == 1 && currentStages > 1) {
-        moogRes *= std::pow(0.7f, std::log2((float)currentStages));
+    if (filterModel == 0) {
+        float adjustedRes = currentRes;
+        if (currentStages > 1) adjustedRes = currentRes * std::pow(0.6f, std::log2((float)currentStages));
+        R = 1.0f / (2.0f * adjustedRes);
+        h = 1.0f / (1.0f + 2.0f * R * g + g * g);
+    }
+    else if (filterModel == 1) { // Moog
+        ladderRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, 4.0f);
+        if (currentStages > 1) ladderRes *= std::pow(0.7f, std::log2((float)currentStages));
+    }
+    else if (filterModel == 2) { // Diode (強烈な自己発振域 15.0 まで許容)
+        ladderRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, 15.0f);
+        if (currentStages > 1) ladderRes *= std::pow(0.7f, std::log2((float)currentStages));
     }
 }
 
@@ -94,11 +98,13 @@ void TptFilter::process(juce::AudioBuffer<float>& buffer)
 
 float TptFilter::processSample(int channel, float x)
 {
-    // 【追加】低域補償 (Bass Compensation) : レゾナンスによるエネルギー損失を入力段でブースト
-    float comp = (filterModel == 1) ? (1.0f + 0.5f * moogRes) : (1.0f + resonance.getCurrentValue() * 0.1f);
+    // 低域補償 (Bass Compensation)
+    float comp = 1.0f;
+    if (filterModel == 0) comp = 1.0f + resonance.getCurrentValue() * 0.1f;
+    else if (filterModel == 1) comp = 1.0f + 0.5f * ladderRes;
+    else if (filterModel == 2) comp = 1.0f + 0.2f * ladderRes; // Diodeは少し抑えめに補償
     x *= comp;
 
-    // 【追加】入力のRMS計算 (動的AGC用)
     float envCoefIn = 0.005f;
     rmsIn[channel] = (1.0f - envCoefIn) * rmsIn[channel] + envCoefIn * (x * x);
 
@@ -126,15 +132,14 @@ float TptFilter::processSample(int channel, float x)
             float S1 = s1_ / (1.0f + g); float S2 = s2_ / (1.0f + g);
             float S3 = s3_ / (1.0f + g); float S4 = s4_ / (1.0f + g);
 
-            float sigma = moogG * moogG * moogG * S1 + moogG * moogG * S2 + moogG * S3 + S4;
-            float u = (out - moogRes * sigma) / (1.0f + moogRes * moogG * moogG * moogG * moogG);
+            float sigma = ladderG * ladderG * ladderG * S1 + ladderG * ladderG * S2 + ladderG * S3 + S4;
+            float u = (out - ladderRes * sigma) / (1.0f + ladderRes * ladderG * ladderG * ladderG * ladderG);
+            u = std::tanh(u);
 
-            u = std::tanh(u); // Drive Saturation
-
-            float v1 = (u - s1_) * moogG; float y1 = v1 + s1_; zdfState[stage][channel][0] = s1_ + 2.0f * v1;
-            float v2 = (y1 - s2_) * moogG; float y2 = v2 + s2_; zdfState[stage][channel][1] = s2_ + 2.0f * v2;
-            float v3 = (y2 - s3_) * moogG; float y3 = v3 + s3_; zdfState[stage][channel][2] = s3_ + 2.0f * v3;
-            float v4 = (y3 - s4_) * moogG; float y4 = v4 + s4_; zdfState[stage][channel][3] = s4_ + 2.0f * v4;
+            float v1 = (u - s1_) * ladderG; float y1 = v1 + s1_; zdfState[stage][channel][0] = s1_ + 2.0f * v1;
+            float v2 = (y1 - s2_) * ladderG; float y2 = v2 + s2_; zdfState[stage][channel][1] = s2_ + 2.0f * v2;
+            float v3 = (y2 - s3_) * ladderG; float y3 = v3 + s3_; zdfState[stage][channel][2] = s3_ + 2.0f * v3;
+            float v4 = (y3 - s4_) * ladderG; float y4 = v4 + s4_; zdfState[stage][channel][3] = s4_ + 2.0f * v4;
 
             if (slopeIdx == 0) {
                 if (filterType == 0) out = y2;
@@ -150,17 +155,49 @@ float TptFilter::processSample(int channel, float x)
             }
         }
     }
+    else if (filterModel == 2) { // 【追加】Diode Ladder (TB-303 Type)
+        for (int stage = 0; stage < currentStages; ++stage) {
+            // フィードバック経路のサチュレーション
+            float fb = out - ladderRes * zdfState[stage][channel][3];
+            fb = std::tanh(fb);
 
-    // 【追加】出力のRMS計算と、リアルタイムAGC（オートゲイン）適用
+            // 各極間にtanhを挟み、ダイオード特有のローディング（干渉）と歪みをシミュレート
+            float v1 = (fb - zdfState[stage][channel][0]) * ladderG; float y1 = v1 + zdfState[stage][channel][0]; zdfState[stage][channel][0] = y1 + v1;
+            y1 = std::tanh(y1);
+            float v2 = (y1 - zdfState[stage][channel][1]) * ladderG; float y2 = v2 + zdfState[stage][channel][1]; zdfState[stage][channel][1] = y2 + v2;
+            y2 = std::tanh(y2);
+            float v3 = (y2 - zdfState[stage][channel][2]) * ladderG; float y3 = v3 + zdfState[stage][channel][2]; zdfState[stage][channel][2] = y3 + v3;
+            y3 = std::tanh(y3);
+            float v4 = (y3 - zdfState[stage][channel][3]) * ladderG; float y4 = v4 + zdfState[stage][channel][3]; zdfState[stage][channel][3] = y4 + v4;
+
+            // TB-303風の非対称波形クリッピング
+            if (y4 > 0.0f) y4 *= 1.1f;
+            y4 = std::tanh(y4);
+
+            if (slopeIdx == 0) { // 12dB設定時 -> 約9dB/oct タッピング
+                if (filterType == 0) out = y2;
+                else if (filterType == 1) out = y1 - y2;
+                else if (filterType == 2) out = out - y1;
+                else out = y2 + (out - y1);
+            }
+            else { // 24dB以上設定時 -> 約18dB/oct タッピング
+                if (filterType == 0) out = y4;
+                else if (filterType == 1) out = y2 - y4;
+                else if (filterType == 2) out = out - y2;
+                else out = y4 + (out - y2);
+            }
+        }
+    }
+
+    // 出力のRMS計算と、リアルタイムAGC（オートゲイン）適用
     float envCoefOut = 0.005f;
     rmsOut[channel] = (1.0f - envCoefOut) * rmsOut[channel] + envCoefOut * (out * out);
 
     float targetGain = 1.0f;
     if (rmsOut[channel] > 1e-8f) {
         targetGain = std::sqrt((rmsIn[channel] + 1e-8f) / (rmsOut[channel] + 1e-8f));
-        targetGain = juce::jlimit(0.1f, 10.0f, targetGain); // 最大+20dBまで補正を許可
+        targetGain = juce::jlimit(0.1f, 15.0f, targetGain); // 最大+23dBまで補正を許可
     }
-    // 滑らかにゲインを追従させる (アタック/リリース ~100ms)
     agcGain[channel] = (1.0f - 0.0005f) * agcGain[channel] + 0.0005f * targetGain;
 
     return out * agcGain[channel];
@@ -184,11 +221,20 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         return std::pow(mag, currentStages);
     }
     else {
-        float r_moog = juce::jmap(res, 0.1f, 10.0f, 0.0f, 4.0f);
-        if (currentStages > 1) r_moog *= std::pow(0.7f, std::log2((float)currentStages));
+        float r_scale = (filterModel == 1) ? 4.0f : 15.0f;
+        float r_val = juce::jmap(res, 0.1f, 10.0f, 0.0f, r_scale);
+        if (currentStages > 1) r_val *= std::pow(0.7f, std::log2((float)currentStages));
 
-        float real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + r_moog;
-        float imag_p = 4.0f * w * (1.0f - w2);
+        float real_p, imag_p;
+        if (filterModel == 1) { // Moog
+            real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + r_val;
+            imag_p = 4.0f * w * (1.0f - w2);
+        }
+        else { // Diode (近似18dB)
+            real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + r_val;
+            imag_p = 3.5f * w * (1.0f - w2);
+        }
+
         float den2 = real_p * real_p + imag_p * imag_p;
         mag = 1.0f / std::sqrt(den2);
 
@@ -196,7 +242,12 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
             if (filterType == 1) mag *= w; else if (filterType == 2) mag *= w2; else if (filterType == 3) mag *= std::abs(1.0f - w2);
         }
         else {
-            if (filterType == 1) mag *= w2; else if (filterType == 2) mag *= w2 * w2; else if (filterType == 3) mag *= std::abs(1.0f - w2 * w2);
+            if (filterModel == 1) { // Moog (24dB mode)
+                if (filterType == 1) mag *= w2; else if (filterType == 2) mag *= w2 * w2; else if (filterType == 3) mag *= std::abs(1.0f - w2 * w2);
+            }
+            else { // Diode (18dB mode approx)
+                if (filterType == 1) mag *= w2 * w; else if (filterType == 2) mag *= w2 * w2; else if (filterType == 3) mag *= std::abs(1.0f - w2 * w);
+            }
         }
         return std::pow(mag, currentStages);
     }
