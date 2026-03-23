@@ -4,6 +4,7 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <memory>
+#include <deque>
 #include "PluginProcessor.h"
 
 class FilterVisualizer : public juce::Component, public juce::Timer
@@ -19,8 +20,8 @@ private:
 class XYPadComponent : public juce::Component, public juce::Timer
 {
 public:
-    XYPadComponent(QuadMorphFilterAudioProcessor& p) : processor(p) { startTimerHz(60); }
-    void timerCallback() override { repaint(); }
+    XYPadComponent(QuadMorphFilterAudioProcessor& p);
+    void timerCallback() override;
     void paint(juce::Graphics& g) override;
 
     void mouseDown(const juce::MouseEvent& e) override;
@@ -30,6 +31,10 @@ private:
     void updatePosition(const juce::MouseEvent& e);
     QuadMorphFilterAudioProcessor& processor;
     int draggingLfoIndex = -1;
+
+    // 【追加】Visual Trails（残像）保存用バッファ
+    std::array<juce::Point<float>, 30> trails[3];
+    int trailIdx[3] = { 0, 0, 0 };
 };
 
 class QuadMorphFilterAudioProcessorEditor : public juce::AudioProcessorEditor
@@ -59,12 +64,12 @@ private:
 
     struct LfoGroup {
         juce::TextButton enableButton;
-        juce::ComboBox wave, rateSync;
+        juce::ComboBox wave, rateSync, boundCombo; // 【追加】Boundaryコンボ
         juce::TextButton stepMode, syncToggle;
         juce::Slider rateFree, minSlider, maxSlider;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> eAtt, sAtt, syAtt;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> rfAtt, minAtt, maxAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> wAtt, rsAtt;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> wAtt, rsAtt, bAtt;
     };
     LfoGroup lfos[3];
 

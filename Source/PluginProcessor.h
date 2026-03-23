@@ -39,13 +39,12 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
-    // 【修正】Recording用のステート管理変数
     std::array<juce::Point<float>, 2048> recBuffer[3];
     std::atomic<int> recLength[3]{ 0 };
-    std::atomic<bool> isWaitingForRecord[3]{ false }; // 右クリック1回目（待機）
-    std::atomic<bool> isRecordingDrag[3]{ false };    // 左ドラッグ中（記録）
-    std::atomic<float> currentRecX[3]{ 0.5f };        // ドラッグ中のリアルタイムX
-    std::atomic<float> currentRecY[3]{ 0.5f };        // ドラッグ中のリアルタイムY
+    std::atomic<bool> isWaitingForRecord[3]{ false };
+    std::atomic<bool> isRecordingDrag[3]{ false };
+    std::atomic<float> currentRecX[3]{ 0.5f };
+    std::atomic<float> currentRecY[3]{ 0.5f };
 
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -54,11 +53,20 @@ private:
     std::array<juce::AudioBuffer<float>, 4> filterBuffers;
 
     struct LfoState {
+        juce::Random rng;
         float phase = 0.0f;
         juce::Point<float> currentRandom{ 0.5f, 0.5f };
         juce::Point<float> nextRandom{ 0.5f, 0.5f };
         std::array<float, 4> currentRand1{ 0.5f, 0.5f, 0.5f, 0.5f };
         std::array<float, 4> nextRand1{ 0.5f, 0.5f, 0.5f, 0.5f };
+
+        // 【追加】物理演算・パラメトリック用ステート変数
+        float lorenzX = 0.1f, lorenzY = 0.0f, lorenzZ = 0.0f;
+        float dpT1 = 3.14f, dpT2 = 3.14f, dpW1 = 0.0f, dpW2 = 0.0f;
+        float walkX = 0.5f, walkY = 0.5f;
+        float bilX = 0.5f, bilY = 0.5f, bilVx = 0.31f, bilVy = 0.47f;
+        float smoothNx = 0.5f, smoothNy = 0.5f;
+        float tNextNx = 0.5f, tNextNy = 0.5f;
     };
     LfoState lfoStates[3];
     juce::Point<float> lfoPositions[3];

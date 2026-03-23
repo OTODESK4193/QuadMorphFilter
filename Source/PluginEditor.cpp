@@ -64,7 +64,6 @@ void FilterVisualizer::paint(juce::Graphics& g) {
             float mag = 1.0f / den;
 
             if (t == 1) mag *= r; if (t == 2) mag *= r2; if (t == 3) mag *= std::abs(1.0f - r2);
-
             return static_cast<float>(std::pow((double)mag, (double)stages));
             };
 
@@ -74,6 +73,20 @@ void FilterVisualizer::paint(juce::Graphics& g) {
         if (px == 0) path.startNewSubPath(0, yPos); else path.lineTo((float)px, yPos);
     }
     g.strokePath(path, juce::PathStrokeType(2.0f));
+}
+
+XYPadComponent::XYPadComponent(QuadMorphFilterAudioProcessor& p) : processor(p) {
+    for (int i = 0; i < 3; ++i) trails[i].fill({ 0.5f, 0.5f });
+    startTimerHz(60);
+}
+
+void XYPadComponent::timerCallback() {
+    // 【追加】Visual Trailsの残像記録
+    for (int i = 0; i < 3; ++i) {
+        trails[i][trailIdx[i]] = processor.getLfoPos(i);
+        trailIdx[i] = (trailIdx[i] + 1) % 30;
+    }
+    repaint();
 }
 
 void XYPadComponent::paint(juce::Graphics& g) {
@@ -89,19 +102,27 @@ void XYPadComponent::paint(juce::Graphics& g) {
 
     juce::Colour colors[] = { juce::Colours::cyan, juce::Colours::magenta, juce::Colours::yellow };
     for (int i = 0; i < 3; ++i) {
+        if (processor.apvts.getRawParameterValue("lfo" + juce::String(i + 1) + "en")->load() < 0.5f) continue;
+
+        // 【追加】Visual Trailsの描画
+        for (int t = 0; t < 30; ++t) {
+            int idx = (trailIdx[i] + t) % 30;
+            auto pt = trails[i][idx];
+            float alpha = (float)t / 30.0f * 0.4f;
+            g.setColour(colors[i].withAlpha(alpha));
+            g.fillEllipse(pt.x * getWidth() - 3, pt.y * getHeight() - 3, 6, 6);
+        }
+
         auto p = processor.getLfoPos(i);
         bool isWait = processor.isWaitingForRecord[i].load(std::memory_order_acquire);
         bool isDrag = processor.isRecordingDrag[i].load(std::memory_order_acquire);
 
-        // 【修正】待機中および描画中のUIフィードバック
         if (isWait) {
             if (isDrag) {
-                // 描画中は高輝度で強調
                 g.setColour(colors[i].brighter(0.8f));
                 g.fillEllipse(p.x * getWidth() - 8, p.y * getHeight() - 8, 16, 16);
             }
             else {
-                // 待機中は周期的に点滅させる
                 float alpha = 0.3f + 0.7f * std::abs(std::sin(juce::Time::getMillisecondCounter() * 0.005f));
                 g.setColour(colors[i].withAlpha(alpha));
                 g.fillEllipse(p.x * getWidth() - 8, p.y * getHeight() - 8, 16, 16);
@@ -116,10 +137,8 @@ void XYPadComponent::paint(juce::Graphics& g) {
     }
 }
 
-// 【修正】ステートマシンのイベント処理を拡張（待機トグルと左ドラッグ描画）
 void XYPadComponent::mouseDown(const juce::MouseEvent& e) {
     if (e.mods.isRightButtonDown()) {
-        // 右クリック: すでに待機中のLFOがあれば終了させる（録音確定）
         for (int i = 0; i < 3; ++i) {
             if (processor.isWaitingForRecord[i].load()) {
                 processor.isWaitingForRecord[i].store(false, std::memory_order_release);
@@ -128,15 +147,14 @@ void XYPadComponent::mouseDown(const juce::MouseEvent& e) {
                 return;
             }
         }
-        // 右クリック: 待機中でなければ、クリックした近くのRecordingモードLFOを待機状態にする
         float w = (float)getWidth(); float h = (float)getHeight();
         for (int i = 0; i < 3; ++i) {
             int wave = (int)processor.apvts.getRawParameterValue("lfo" + juce::String(i + 1) + "wave")->load();
-            if ((i == 0 && wave == 6) || (i != 0 && wave == 5)) { // Recording波形かチェック
+            if (wave == 6) { // Recording波形
                 auto p = processor.getLfoPos(i);
                 float px = p.x * w; float py = p.y * h;
                 if (std::hypot(e.x - px, e.y - py) < 15.0f) {
-                    processor.recLength[i].store(0, std::memory_order_release); // バッファクリア
+                    processor.recLength[i].store(0, std::memory_order_release);
                     processor.isWaitingForRecord[i].store(true, std::memory_order_release);
                     return;
                 }
@@ -144,7 +162,6 @@ void XYPadComponent::mouseDown(const juce::MouseEvent& e) {
         }
     }
     else {
-        // 左クリック: 待機中のLFOがあれば描画（ドラッグ）を開始
         for (int i = 0; i < 3; ++i) {
             if (processor.isWaitingForRecord[i].load(std::memory_order_acquire)) {
                 draggingLfoIndex = i;
@@ -161,7 +178,6 @@ void XYPadComponent::mouseDown(const juce::MouseEvent& e) {
 }
 
 void XYPadComponent::mouseDrag(const juce::MouseEvent& e) {
-    // 左ドラッグ: 録音バッファとリアルタイム座標の更新
     if (draggingLfoIndex != -1 && processor.isRecordingDrag[draggingLfoIndex].load(std::memory_order_acquire)) {
         int len = processor.recLength[draggingLfoIndex].load(std::memory_order_acquire);
         if (len < 2048) {
@@ -178,7 +194,6 @@ void XYPadComponent::mouseDrag(const juce::MouseEvent& e) {
 }
 
 void XYPadComponent::mouseUp(const juce::MouseEvent& e) {
-    // マウスを離すとドラッグ状態を解除（待機状態は維持し、最後のポイントにとどまる）
     if (draggingLfoIndex != -1) {
         processor.isRecordingDrag[draggingLfoIndex].store(false, std::memory_order_release);
         draggingLfoIndex = -1;
@@ -232,14 +247,19 @@ void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, ju
     addAndMakeVisible(g.enableButton);
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, id + "en", g.enableButton);
 
-    if (idx == 1) {
-        g.wave.addItemList({ "Sine", "SAW", "Pulse", "Random 1", "Random 2", "Noise", "Recording" }, 1);
-    }
-    else {
-        g.wave.addItemList({ "Sine", "SAW", "Pulse", "Random 1", "Noise", "Recording" }, 1);
-    }
+    juce::StringArray waveTypes = {
+        "Sine", "SAW", "Pulse", "Random 1", "Random 2", "Noise", "Recording",
+        "Smooth Noise", "Lorenz Attractor", "Double Pendulum", "Random Walk",
+        "Lissajous", "Spiral", "Star", "Rose", "Lemniscate", "Billiard", "Polygon", "Attractor Orbit"
+    };
+    g.wave.addItemList(waveTypes, 1);
     addAndMakeVisible(g.wave);
     g.wAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, id + "wave", g.wave);
+
+    // 【追加】Boundary ComboBox の UI
+    g.boundCombo.addItemList({ "Clip", "Bounce", "Wrap" }, 1);
+    addAndMakeVisible(g.boundCombo);
+    g.bAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, id + "bound", g.boundCombo);
 
     g.stepMode.setButtonText("Step"); g.stepMode.setClickingTogglesState(true);
     g.stepMode.setColour(juce::TextButton::textColourOnId, lfoCols[idx - 1]);
@@ -252,7 +272,12 @@ void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, ju
     addAndMakeVisible(g.syncToggle);
     g.syAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, id + "sync", g.syncToggle);
 
-    g.rateSync.addItemList({ "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64", "1/1D", "1/2D", "1/4D", "1/8D", "1/16D", "1/32D", "1/1T", "1/2T", "1/4T", "1/8T", "1/16T", "1/32T" }, 1);
+    juce::StringArray syncRates = {
+        "8/1", "4/1", "2/1", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64",
+        "1/1D", "1/2D", "1/4D", "1/8D", "1/16D", "1/32D",
+        "1/1T", "1/2T", "1/4T", "1/8T", "1/16T", "1/32T"
+    };
+    g.rateSync.addItemList(syncRates, 1);
     addAndMakeVisible(g.rateSync);
     g.rsAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, id + "rateSync", g.rateSync);
 
@@ -297,11 +322,14 @@ void QuadMorphFilterAudioProcessorEditor::resized() {
     b.removeFromTop(15);
     for (int i = 0; i < 3; ++i) {
         auto r = b.removeFromTop(40).reduced(5, 2);
-        lfos[i].enableButton.setBounds(r.removeFromLeft(120).reduced(0, 5));
-        lfos[i].wave.setBounds(r.removeFromLeft(80).withSizeKeepingCentre(75, 22));
+        lfos[i].enableButton.setBounds(r.removeFromLeft(100).reduced(0, 5));
 
-        lfos[i].stepMode.setBounds(r.removeFromLeft(55).reduced(2, 5));
-        lfos[i].syncToggle.setBounds(r.removeFromLeft(55).reduced(2, 5));
+        // 【修正】新設したBoundaryコンボボックスを含めてレイアウトを等分
+        lfos[i].wave.setBounds(r.removeFromLeft(120).withSizeKeepingCentre(115, 22));
+        lfos[i].boundCombo.setBounds(r.removeFromLeft(70).withSizeKeepingCentre(65, 22));
+
+        lfos[i].stepMode.setBounds(r.removeFromLeft(50).reduced(2, 5));
+        lfos[i].syncToggle.setBounds(r.removeFromLeft(50).reduced(2, 5));
 
         auto remainingWidth = r.getWidth();
         auto rateArea = r.removeFromLeft(remainingWidth / 3);
@@ -309,15 +337,15 @@ void QuadMorphFilterAudioProcessorEditor::resized() {
         auto maxArea = r;
 
         if (audioProcessor.apvts.getRawParameterValue("lfo" + juce::String(i + 1) + "sync")->load() > 0.5f) {
-            lfos[i].rateSync.setBounds(rateArea.withSizeKeepingCentre(rateArea.getWidth() - 10, 22));
+            lfos[i].rateSync.setBounds(rateArea.withSizeKeepingCentre(rateArea.getWidth() - 5, 22));
             lfos[i].rateFree.setVisible(false); lfos[i].rateSync.setVisible(true);
         }
         else {
-            lfos[i].rateFree.setBounds(rateArea.reduced(5, 8));
+            lfos[i].rateFree.setBounds(rateArea.reduced(2, 8));
             lfos[i].rateFree.setVisible(true); lfos[i].rateSync.setVisible(false);
         }
 
-        lfos[i].minSlider.setBounds(minArea.reduced(5, 8));
-        lfos[i].maxSlider.setBounds(maxArea.reduced(5, 8));
+        lfos[i].minSlider.setBounds(minArea.reduced(2, 8));
+        lfos[i].maxSlider.setBounds(maxArea.reduced(2, 8));
     }
 }
