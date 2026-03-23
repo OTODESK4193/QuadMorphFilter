@@ -11,10 +11,11 @@ public:
     TptFilter();
     ~TptFilter() = default;
 
+    // 【修正】欠落していた必須関数の宣言を復旧
     void prepare(double newSampleRate, int samplesPerBlock, int numChannels);
     void reset();
 
-    // 0: Clean SVF, 1: Moog Ladder, 2: Diode Ladder, 3: SEM, 4: Bitcrush/SRR, 5: Formant, 6: Comb, 7: MS-20, 8: Phaser, 9: Wavefolder
+    // 0: Clean SVF, 1: Moog Ladder, 2: Diode Ladder, 3: SEM, 4: Bitcrush/SRR, 5: Formant, 6: Comb, 7: MS-20, 8: Phaser, 9: Wavefolder, 10: Reverb, 11: Kilo All-Pass
     void setModel(int newModel);
     void setCutoff(float newCutoff);
     void setResonance(float newResonance);
@@ -39,38 +40,31 @@ private:
     int slopeIdx = 0;
     int currentStages = 1;
 
-    // SVF & SEM 係数
     float g = 0.0f;
     float R = 0.0f;
     float h = 0.0f;
     float s1[8][2] = { {0.0f} };
     float s2[8][2] = { {0.0f} };
 
-    // Moog & Diode Ladder 係数
     float ladderG = 0.0f;
     float ladderRes = 0.0f;
     float zdfState[8][2][4] = { { {0.0f} } };
 
-    // Bitcrush / SRR 係数
     float srrPhase[2] = { 0.0f, 0.0f };
     float srrHeld[2] = { 0.0f, 0.0f };
 
-    // Formant 係数
     float form_g[3] = { 0.0f };
     float form_R[3] = { 0.0f };
     float form_h[3] = { 0.0f };
     float form_s1[3][2] = { {0.0f} };
     float form_s2[3][2] = { {0.0f} };
 
-    // Comb Filter 係数
     float combBuffer[8][2][4096] = { {{0.0f}} };
     int combWriteIdx[8][2] = { {0} };
 
-    // 【追加】All-Pass Phaser 係数 (16段まで拡張)
     float ap_s[16][2] = { {0.0f} };
     float ap_out_prev[2] = { 0.0f };
 
-    // リアルタイムRMS・動的AGC用ステート
     float rmsIn[2] = { 0.0f, 0.0f };
     float rmsOut[2] = { 0.0f, 0.0f };
     float agcGain[2] = { 1.0f, 1.0f };

@@ -49,10 +49,10 @@ void TptFilter::setType(int newType) { filterType = newType; }
 void TptFilter::setSlope(int index)
 {
     slopeIdx = index;
-    if (filterModel == 5) {
+    if (filterModel == 5 || filterModel == 10) {
         currentStages = 1;
     }
-    else if (filterModel == 8) { // 【追加】Phaser用拡張段数 (2, 4, 8, 16段)
+    else if (filterModel == 8 || filterModel == 11) {
         currentStages = (index == 0) ? 2 : (index == 1) ? 4 : (index == 2) ? 8 : 16;
     }
     else if (filterModel == 0 || filterModel == 3 || filterModel == 4 || filterModel == 6 || filterModel == 7 || filterModel == 9) {
@@ -70,8 +70,7 @@ void TptFilter::updateCoefficients()
 
     if (filterModel == 5) {
         float v = juce::jlimit(0.0f, 4.0f, juce::jmap(std::log10(currentCutoff), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f));
-        int idx = (int)v; float frac = v - idx;
-        if (idx >= 4) { idx = 3; frac = 1.0f; }
+        int idx = (int)v; float frac = v - idx; if (idx >= 4) { idx = 3; frac = 1.0f; }
         float f1_map[5] = { 730.f, 270.f, 300.f, 530.f, 400.f }; float f2_map[5] = { 1090.f, 2290.f, 870.f, 1840.f, 840.f }; float f3_map[5] = { 2440.f, 3010.f, 2240.f, 2480.f, 2800.f };
         float f_arr[3] = { f1_map[idx] + (f1_map[idx + 1] - f1_map[idx]) * frac, f2_map[idx] + (f2_map[idx + 1] - f2_map[idx]) * frac, f3_map[idx] + (f3_map[idx + 1] - f3_map[idx]) * frac };
         for (int f = 0; f < 3; ++f) {
@@ -81,9 +80,10 @@ void TptFilter::updateCoefficients()
     else {
         float wd = juce::MathConstants<float>::pi * currentCutoff / (float)sampleRate;
         g = std::tan(wd); ladderG = g / (1.0f + g);
-        if (filterModel == 0 || filterModel == 3 || filterModel == 4 || filterModel == 6 || filterModel == 7 || filterModel == 9) {
+
+        if (filterModel == 0 || filterModel == 3 || filterModel == 4 || filterModel == 6 || filterModel == 7 || filterModel == 9 || filterModel == 11) {
             float adjustedRes = currentRes;
-            if (filterModel != 7 && currentStages > 1) adjustedRes = currentRes * std::pow(0.6f, std::log2((float)currentStages));
+            if (filterModel != 7 && filterModel != 11 && currentStages > 1) adjustedRes = currentRes * std::pow(0.6f, std::log2((float)currentStages));
             R = 1.0f / (2.0f * adjustedRes); h = 1.0f / (1.0f + 2.0f * R * g + g * g);
         }
         else if (filterModel == 1) {
@@ -110,10 +110,10 @@ void TptFilter::process(juce::AudioBuffer<float>& buffer)
 float TptFilter::processSample(int channel, float x)
 {
     float comp = 1.0f;
-    if (filterModel == 0 || filterModel == 4 || filterModel == 5 || filterModel == 6 || filterModel == 9) comp = 1.0f + resonance.getCurrentValue() * 0.1f;
+    if (filterModel == 0 || filterModel == 4 || filterModel == 5 || filterModel == 6 || filterModel == 9 || filterModel == 11) comp = 1.0f + resonance.getCurrentValue() * 0.1f;
     else if (filterModel == 1) comp = 1.0f + 0.5f * ladderRes;
     else if (filterModel == 2) comp = 1.0f + 0.2f * ladderRes;
-    else if (filterModel == 7) comp = 1.0f + resonance.getCurrentValue() * 0.15f; // MS-20
+    else if (filterModel == 7) comp = 1.0f + resonance.getCurrentValue() * 0.15f;
     x *= comp;
 
     if (filterModel == 4) {
@@ -205,48 +205,76 @@ float TptFilter::processSample(int channel, float x)
             out = combOut;
         }
     }
-    else if (filterModel == 7) { // 【追加】MS-20 (Screaming)
+    else if (filterModel == 7) {
         float ms_res = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 0.0f, 2.5f);
         float r_ms = 1.0f / (2.0f * ms_res + 0.1f);
         float h_ms = 1.0f / (1.0f + 2.0f * r_ms * g + g * g);
         for (int stage = 0; stage < currentStages; ++stage) {
-            float clip_s2 = s2[stage][channel];
-            if (clip_s2 > 0.0f) clip_s2 *= 1.8f; // 強烈な非対称クリップ
-            clip_s2 = std::tanh(clip_s2);
+            float clip_s2 = s2[stage][channel]; if (clip_s2 > 0.0f) clip_s2 *= 1.8f; clip_s2 = std::tanh(clip_s2);
             float hp = (out - (2.0f * r_ms + g) * s1[stage][channel] - clip_s2) * h_ms;
-            float bp = g * hp + s1[stage][channel];
-            float lp = g * bp + s2[stage][channel];
-            s1[stage][channel] = std::tanh(g * hp + bp);
-            s2[stage][channel] = std::tanh(g * bp + lp);
+            float bp = g * hp + s1[stage][channel]; float lp = g * bp + s2[stage][channel];
+            s1[stage][channel] = std::tanh(g * hp + bp); s2[stage][channel] = std::tanh(g * bp + lp);
             if (filterType == 0) out = lp; else if (filterType == 1) out = bp; else if (filterType == 2) out = hp; else out = lp + hp;
         }
     }
-    else if (filterModel == 8) { // 【追加】All-Pass Phaser
+    else if (filterModel == 8) {
         float fb = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 0.0f, 0.95f);
-        if (filterType == 1 || filterType == 3) fb = -fb; // ノッチの位相切替
-        float in_ap = out + fb * ap_out_prev[channel];
-        in_ap = std::tanh(in_ap); // フィードバックサチュレーション
-
+        if (filterType == 1 || filterType == 3) fb = -fb;
+        float in_ap = std::tanh(out + fb * ap_out_prev[channel]);
         for (int stage = 0; stage < currentStages; ++stage) {
-            float v = (in_ap - ap_s[stage][channel]) * ladderG;
-            float lp = v + ap_s[stage][channel];
-            ap_s[stage][channel] = lp + v;
-            in_ap = 2.0f * lp - in_ap; // 1-Pole All-Pass
+            float v = (in_ap - ap_s[stage][channel]) * ladderG; float lp = v + ap_s[stage][channel];
+            ap_s[stage][channel] = lp + v; in_ap = 2.0f * lp - in_ap;
         }
-        ap_out_prev[channel] = in_ap;
-        out = (out + in_ap) * 0.5f; // Dry/Wet ミックスでノッチ生成
+        ap_out_prev[channel] = in_ap; out = (out + in_ap) * 0.5f;
     }
-    else if (filterModel == 9) { // 【追加】Wavefolder
+    else if (filterModel == 9) {
         float fold_gain = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 1.0f, 10.0f);
         for (int stage = 0; stage < currentStages; ++stage) {
             float hp = (out - (2.0f * R + g) * s1[stage][channel] - s2[stage][channel]) * h;
-            float bp = g * hp + s1[stage][channel];
-            float lp = g * bp + s2[stage][channel];
-            s1[stage][channel] = g * hp + bp;
-            s2[stage][channel] = g * bp + lp;
+            float bp = g * hp + s1[stage][channel]; float lp = g * bp + s2[stage][channel];
+            s1[stage][channel] = g * hp + bp; s2[stage][channel] = g * bp + lp;
             if (filterType == 0) out = lp; else if (filterType == 1) out = bp; else if (filterType == 2) out = hp; else out = lp + hp;
         }
-        out = std::sin(out * fold_gain); // Buchlaスタイル Sine Folder
+        out = std::sin(out * fold_gain);
+    }
+    else if (filterModel == 10) {
+        float ms = juce::jmap(cutoff.getCurrentValue(), 20.0f, 20000.0f, 50.0f, 0.5f);
+        float baseSamples = (ms / 1000.0f) * sampleRate;
+        float d1 = juce::jlimit(1.0f, 4095.0f, baseSamples * 1.000f);
+        float d2 = juce::jlimit(1.0f, 4095.0f, baseSamples * 1.313f);
+        float d_ap = juce::jlimit(1.0f, 4095.0f, baseSamples * 0.471f);
+        float fb = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 0.0f, 0.95f);
+
+        auto readDelay = [&](int stage, float delay) {
+            int dInt = (int)delay; float dFrac = delay - dInt;
+            int r1 = combWriteIdx[stage][channel] - dInt; if (r1 < 0) r1 += 4096;
+            int r2 = r1 - 1; if (r2 < 0) r2 += 4096;
+            return combBuffer[stage][channel][r1] + dFrac * (combBuffer[stage][channel][r2] - combBuffer[stage][channel][r1]);
+            };
+
+        float c1_out = readDelay(0, d1); float c2_out = readDelay(1, d2);
+        combBuffer[0][channel][combWriteIdx[0][channel]] = std::tanh(out + c1_out * fb);
+        combBuffer[1][channel][combWriteIdx[1][channel]] = std::tanh(out + c2_out * fb);
+        float mixed = (c1_out + c2_out) * 0.707f;
+
+        float ap_out = readDelay(2, d_ap);
+        combBuffer[2][channel][combWriteIdx[2][channel]] = std::tanh(mixed + ap_out * 0.5f);
+        float reverb_out = ap_out - mixed * 0.5f;
+
+        for (int s = 0; s < 3; ++s) combWriteIdx[s][channel] = (combWriteIdx[s][channel] + 1) % 4096;
+
+        if (filterType == 0) out = reverb_out;
+        else if (filterType == 1) out = (out + reverb_out) * 0.5f;
+        else if (filterType == 2) out = out - reverb_out * 0.5f;
+        else out = std::sin(reverb_out * 3.0f);
+    }
+    else if (filterModel == 11) {
+        for (int stage = 0; stage < currentStages; ++stage) {
+            float hp = (out - (2.0f * R + g) * s1[stage][channel] - s2[stage][channel]) * h;
+            float bp = g * hp + s1[stage][channel]; float lp = g * bp + s2[stage][channel];
+            s1[stage][channel] = g * hp + bp; s2[stage][channel] = g * bp + lp;
+            out = lp - 2.0f * R * bp + hp;
+        }
     }
 
     float envCoefOut = 0.005f;
@@ -279,6 +307,24 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         if (filterType == 1) mag *= w; else if (filterType == 2) mag *= w2; else if (filterType == 3) mag *= std::abs(1.0f - w2);
         return std::pow(mag, currentStages);
     }
+    else if (filterModel == 11) {
+        float d = 1.0f / juce::jlimit(0.1f, 10.0f, res);
+        float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w * d, 2.0f));
+        float bp_mag = (1.0f / den) * w;
+        mag = 1.0f + std::pow(bp_mag, 1.2f) * res * ((float)currentStages * 0.1f);
+        return mag;
+    }
+    else if (filterModel == 10) {
+        float ms = juce::jmap(fc, 20.0f, 20000.0f, 50.0f, 0.5f);
+        float baseD = (ms / 1000.0f);
+        float wD1 = 2.0f * juce::MathConstants<float>::pi * frequency * (baseD * 1.000f);
+        float wD2 = 2.0f * juce::MathConstants<float>::pi * frequency * (baseD * 1.313f);
+        float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.95f);
+        float m1 = 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD1));
+        float m2 = 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD2));
+        mag = (m1 + m2) * 0.5f;
+        return mag;
+    }
     else if (filterModel == 5) {
         float v = juce::jlimit(0.0f, 4.0f, juce::jmap(std::log10(fc), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f));
         int idx = (int)v; float frac = v - idx; if (idx >= 4) { idx = 3; frac = 1.0f; }
@@ -301,7 +347,7 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         float m = (filterType == 0 || filterType == 1) ? (1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD))) : std::sqrt(1.0f + fb * fb + 2.0f * fb * std::cos(wD));
         return std::pow(m, currentStages);
     }
-    else if (filterModel == 7) { // MS-20
+    else if (filterModel == 7) {
         float ms_res = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 2.5f);
         float d = 1.0f / (ms_res + 0.1f);
         float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w * d, 2.0f));
@@ -309,7 +355,7 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         if (filterType == 1) mag *= w; else if (filterType == 2) mag *= w2; else if (filterType == 3) mag *= std::abs(1.0f - w2);
         return std::pow(mag, currentStages);
     }
-    else if (filterModel == 8) { // All-Pass Phaser
+    else if (filterModel == 8) {
         float phi = -2.0f * std::atan(frequency / juce::jlimit(20.0f, 20000.0f, fc));
         float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.95f);
         if (filterType == 1 || filterType == 3) fb = -fb;

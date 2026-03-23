@@ -70,7 +70,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
             float w2 = w_norm * w_norm;
             float mag = 1.0f;
 
-            if (modelIdx == 0 || modelIdx == 3 || modelIdx == 4 || modelIdx == 9) { // SRR, Wavefolder visual
+            if (modelIdx == 0 || modelIdx == 3 || modelIdx == 4 || modelIdx == 9) {
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
                 float adjustedRes = res;
                 if (stages > 1) adjustedRes = res * std::pow(0.6f, std::log2((float)stages));
@@ -80,7 +80,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 if (t == 1) m *= w_norm; else if (t == 2) m *= w2; else if (t == 3) m *= std::abs(1.0f - w2);
                 mag = std::pow(m, stages);
                 if (modelIdx == 0 || modelIdx == 4) mag *= (1.0f + res * 0.1f);
-                if (modelIdx == 9) mag *= juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 1.0f, 5.0f); // Wavefolder visual boost
+                if (modelIdx == 9) mag *= juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 1.0f, 5.0f);
             }
             else if (modelIdx == 1) {
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 1 : (slopeIdx == 2) ? 2 : 4;
@@ -90,6 +90,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 float imag_p = 4.0f * w_norm * (1.0f - w2);
                 mag = std::pow(1.0f / std::sqrt(real_p * real_p + imag_p * imag_p), stages);
                 if (slopeIdx == 0) { if (t == 1) mag *= w_norm; else if (t == 2) mag *= w2; else if (t == 3) mag *= std::abs(1.0f - w2); }
+                // 【完全修正完了】タイポ m *= w2 * w2; -> mag *= w2 * w2; 
                 else { if (t == 1) mag *= w2; else if (t == 2) mag *= w2 * w2; else if (t == 3) mag *= std::abs(1.0f - w2 * w2); }
                 mag *= (1.0f + 0.5f * r_moog);
             }
@@ -126,7 +127,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 float m = (t == 0 || t == 1) ? (1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD))) : std::sqrt(1.0f + fb * fb + 2.0f * fb * std::cos(wD));
                 mag = std::pow(m, stages);
             }
-            else if (modelIdx == 7) { // 【追加】MS-20 Visualizer
+            else if (modelIdx == 7) {
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
                 float ms_res = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 2.5f);
                 float d = 1.0f / (ms_res + 0.1f);
@@ -135,7 +136,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 if (t == 1) m *= w_norm; else if (t == 2) m *= w2; else if (t == 3) m *= std::abs(1.0f - w2);
                 mag = std::pow(m, stages) * (1.0f + ms_res * 0.2f);
             }
-            else if (modelIdx == 8) { // 【追加】All-Pass Phaser Visualizer
+            else if (modelIdx == 8) {
                 int stages = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
                 float phi = -2.0f * std::atan(freq / juce::jlimit(20.0f, 20000.0f, fc));
                 float fb = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 0.95f);
@@ -145,6 +146,23 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 float real_yap = (c_ap - fb) / den2; float imag_yap = s_ap / den2;
                 float real_out = 0.5f * (1.0f + real_yap); float imag_out = 0.5f * imag_yap;
                 mag = std::sqrt(real_out * real_out + imag_out * imag_out);
+            }
+            else if (modelIdx == 10) {
+                float ms = juce::jmap(fc, 20.0f, 20000.0f, 50.0f, 0.5f);
+                float baseD = (ms / 1000.0f);
+                float wD1 = 2.0f * juce::MathConstants<float>::pi * freq * (baseD * 1.000f);
+                float wD2 = 2.0f * juce::MathConstants<float>::pi * freq * (baseD * 1.313f);
+                float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.95f);
+                float m1 = 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD1));
+                float m2 = 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD2));
+                mag = (m1 + m2) * 0.5f;
+            }
+            else if (modelIdx == 11) {
+                int stages = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
+                float d = 1.0f / juce::jlimit(0.1f, 10.0f, res);
+                float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w_norm * d, 2.0f));
+                float bp_mag = (1.0f / den) * w_norm;
+                mag = 1.0f + std::pow(bp_mag, 1.2f) * res * ((float)stages * 0.1f);
             }
             return static_cast<float>(mag);
             };
@@ -282,8 +300,7 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce:
     addAndMakeVisible(g.enableButton);
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, "enable" + s, g.enableButton);
 
-    // 【追加】全10モデルを UI に反映
-    g.model.addItemList({ "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR", "Formant (Vowel)", "Comb Filter", "MS-20 (Screaming)", "All-Pass Phaser", "Wavefolder" }, 1); addAndMakeVisible(g.model);
+    g.model.addItemList({ "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR", "Formant (Vowel)", "Comb Filter", "MS-20 (Screaming)", "All-Pass Phaser", "Wavefolder", "Reverb (Metallic)", "Kilo All-Pass" }, 1); addAndMakeVisible(g.model);
     g.mAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "model" + s, g.model);
 
     g.type.addItemList({ "LP", "BP", "HP", "Notch" }, 1); addAndMakeVisible(g.type);
