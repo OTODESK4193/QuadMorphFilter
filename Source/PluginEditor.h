@@ -5,6 +5,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <memory>
 #include <deque>
+#include <vector>
 #include "PluginProcessor.h"
 
 class FilterVisualizer : public juce::Component, public juce::Timer

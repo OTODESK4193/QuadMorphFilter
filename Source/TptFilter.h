@@ -14,7 +14,7 @@ public:
     void prepare(double newSampleRate, int samplesPerBlock, int numChannels);
     void reset();
 
-    // 0: Clean SVF, 1: Moog Ladder, 2: Diode Ladder, 3: SEM (Oberheim), 4: Bitcrush/SRR
+    // 0: Clean SVF, 1: Moog Ladder, 2: Diode Ladder, 3: SEM, 4: Bitcrush/SRR, 5: Formant
     void setModel(int newModel);
     void setCutoff(float newCutoff);
     void setResonance(float newResonance);
@@ -51,9 +51,16 @@ private:
     float ladderRes = 0.0f;
     float zdfState[8][2][4] = { { {0.0f} } };
 
-    // 【追加】Bitcrusher / SRR 用ステート
+    // Bitcrush / SRR 係数
     float srrPhase[2] = { 0.0f, 0.0f };
     float srrHeld[2] = { 0.0f, 0.0f };
+
+    // 【追加】Formant (Vowel) 係数
+    float form_g[3] = { 0.0f };
+    float form_R[3] = { 0.0f };
+    float form_h[3] = { 0.0f };
+    float form_s1[3][2] = { {0.0f} };
+    float form_s2[3][2] = { {0.0f} };
 
     // リアルタイムRMS・動的AGC用ステート
     float rmsIn[2] = { 0.0f, 0.0f };

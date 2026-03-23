@@ -33,11 +33,11 @@ void TptFilter::reset()
         }
     }
     for (int ch = 0; ch < 2; ++ch) {
-        rmsIn[ch] = 0.0f;
-        rmsOut[ch] = 0.0f;
-        agcGain[ch] = 1.0f;
-        srrPhase[ch] = 0.0f;
-        srrHeld[ch] = 0.0f;
+        rmsIn[ch] = 0.0f; rmsOut[ch] = 0.0f; agcGain[ch] = 1.0f;
+        srrPhase[ch] = 0.0f; srrHeld[ch] = 0.0f;
+        for (int f = 0; f < 3; ++f) {
+            form_s1[f][ch] = 0.0f; form_s2[f][ch] = 0.0f;
+        }
     }
 }
 
@@ -49,10 +49,10 @@ void TptFilter::setType(int newType) { filterType = newType; }
 void TptFilter::setSlope(int index)
 {
     slopeIdx = index;
-    if (filterModel == 0 || filterModel == 3 || filterModel == 4) { // SVF base
+    if (filterModel == 0 || filterModel == 3 || filterModel == 4 || filterModel == 5) {
         currentStages = (index == 0) ? 1 : (index == 1) ? 2 : (index == 2) ? 4 : 8;
     }
-    else { // Ladder base
+    else {
         currentStages = (index == 0) ? 1 : (index == 1) ? 1 : (index == 2) ? 2 : 4;
     }
 }
@@ -62,23 +62,49 @@ void TptFilter::updateCoefficients()
     float currentCutoff = cutoff.getNextValue();
     float currentRes = resonance.getNextValue();
 
-    float wd = juce::MathConstants<float>::pi * currentCutoff / (float)sampleRate;
-    g = std::tan(wd);
-    ladderG = g / (1.0f + g);
+    if (filterModel == 5) { // 【追加】Formant (Vowel) モーフィング係数
+        float v = juce::jmap(std::log10(currentCutoff), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f);
+        v = juce::jlimit(0.0f, 4.0f, v);
+        int idx = (int)v; float frac = v - idx;
+        if (idx >= 4) { idx = 3; frac = 1.0f; }
 
-    if (filterModel == 0 || filterModel == 3 || filterModel == 4) {
-        float adjustedRes = currentRes;
-        if (currentStages > 1) adjustedRes = currentRes * std::pow(0.6f, std::log2((float)currentStages));
-        R = 1.0f / (2.0f * adjustedRes);
-        h = 1.0f / (1.0f + 2.0f * R * g + g * g);
+        // A, I, U, E, O のフォルマント周波数
+        float f1_map[5] = { 730.f, 270.f, 300.f, 530.f, 400.f };
+        float f2_map[5] = { 1090.f, 2290.f, 870.f, 1840.f, 840.f };
+        float f3_map[5] = { 2440.f, 3010.f, 2240.f, 2480.f, 2800.f };
+
+        float f_arr[3] = {
+            f1_map[idx] + (f1_map[idx + 1] - f1_map[idx]) * frac,
+            f2_map[idx] + (f2_map[idx + 1] - f2_map[idx]) * frac,
+            f3_map[idx] + (f3_map[idx + 1] - f3_map[idx]) * frac
+        };
+
+        for (int f = 0; f < 3; ++f) {
+            float wd = juce::MathConstants<float>::pi * f_arr[f] / (float)sampleRate;
+            form_g[f] = std::tan(wd);
+            form_R[f] = 1.0f / (2.0f * currentRes); // ResonanceをQ値として使用
+            form_h[f] = 1.0f / (1.0f + 2.0f * form_R[f] * form_g[f] + form_g[f] * form_g[f]);
+        }
     }
-    else if (filterModel == 1) { // Moog
-        ladderRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, 4.0f);
-        if (currentStages > 1) ladderRes *= std::pow(0.7f, std::log2((float)currentStages));
-    }
-    else if (filterModel == 2) { // Diode
-        ladderRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, 15.0f);
-        if (currentStages > 1) ladderRes *= std::pow(0.7f, std::log2((float)currentStages));
+    else {
+        float wd = juce::MathConstants<float>::pi * currentCutoff / (float)sampleRate;
+        g = std::tan(wd);
+        ladderG = g / (1.0f + g);
+
+        if (filterModel == 0 || filterModel == 3 || filterModel == 4) {
+            float adjustedRes = currentRes;
+            if (currentStages > 1) adjustedRes = currentRes * std::pow(0.6f, std::log2((float)currentStages));
+            R = 1.0f / (2.0f * adjustedRes);
+            h = 1.0f / (1.0f + 2.0f * R * g + g * g);
+        }
+        else if (filterModel == 1) {
+            ladderRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, 4.0f);
+            if (currentStages > 1) ladderRes *= std::pow(0.7f, std::log2((float)currentStages));
+        }
+        else if (filterModel == 2) {
+            ladderRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, 15.0f);
+            if (currentStages > 1) ladderRes *= std::pow(0.7f, std::log2((float)currentStages));
+        }
     }
 }
 
@@ -101,20 +127,17 @@ void TptFilter::process(juce::AudioBuffer<float>& buffer)
 float TptFilter::processSample(int channel, float x)
 {
     float comp = 1.0f;
-    if (filterModel == 0 || filterModel == 4) comp = 1.0f + resonance.getCurrentValue() * 0.1f;
+    if (filterModel == 0 || filterModel == 4 || filterModel == 5) comp = 1.0f + resonance.getCurrentValue() * 0.1f;
     else if (filterModel == 1) comp = 1.0f + 0.5f * ladderRes;
     else if (filterModel == 2) comp = 1.0f + 0.2f * ladderRes;
     x *= comp;
 
-    // 【追加】Bitcrusher / SRR プロセッシング (入力信号を先に破壊する)
     if (filterModel == 4) {
         float targetSR = cutoff.getCurrentValue();
         float phaseInc = targetSR / sampleRate;
         srrPhase[channel] += phaseInc;
-
         if (srrPhase[channel] >= 1.0f) {
             srrPhase[channel] -= std::floor(srrPhase[channel]);
-            // Resonance (0.1 ~ 10.0) を Bit Depth (16bit ~ 2bit) へマッピング
             float bits = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 16.0f, 2.0f);
             float steps = std::pow(2.0f, bits);
             srrHeld[channel] = std::round(x * steps) / steps;
@@ -127,7 +150,7 @@ float TptFilter::processSample(int channel, float x)
 
     float out = x;
 
-    if (filterModel == 0 || filterModel == 4) { // Clean SVF & SRR(破壊後の信号をフィルタリング)
+    if (filterModel == 0 || filterModel == 4) {
         for (int stage = 0; stage < currentStages; ++stage) {
             float hp = (out - (2.0f * R + g) * s1[stage][channel] - s2[stage][channel]) * h;
             float bp = g * hp + s1[stage][channel];
@@ -135,44 +158,31 @@ float TptFilter::processSample(int channel, float x)
             s1[stage][channel] = g * hp + bp;
             s2[stage][channel] = g * bp + lp;
 
-            if (filterType == 0) out = lp;
-            else if (filterType == 1) out = bp;
-            else if (filterType == 2) out = hp;
-            else out = lp + hp;
+            if (filterType == 0) out = lp; else if (filterType == 1) out = bp; else if (filterType == 2) out = hp; else out = lp + hp;
         }
     }
-    else if (filterModel == 1) { // Moog Ladder
+    else if (filterModel == 1) {
         for (int stage = 0; stage < currentStages; ++stage) {
             float s1_ = zdfState[stage][channel][0]; float s2_ = zdfState[stage][channel][1];
             float s3_ = zdfState[stage][channel][2]; float s4_ = zdfState[stage][channel][3];
-
-            float S1 = s1_ / (1.0f + g); float S2 = s2_ / (1.0f + g);
-            float S3 = s3_ / (1.0f + g); float S4 = s4_ / (1.0f + g);
-
+            float S1 = s1_ / (1.0f + g); float S2 = s2_ / (1.0f + g); float S3 = s3_ / (1.0f + g); float S4 = s4_ / (1.0f + g);
             float sigma = ladderG * ladderG * ladderG * S1 + ladderG * ladderG * S2 + ladderG * S3 + S4;
             float u = (out - ladderRes * sigma) / (1.0f + ladderRes * ladderG * ladderG * ladderG * ladderG);
             u = std::tanh(u);
-
             float v1 = (u - s1_) * ladderG; float y1 = v1 + s1_; zdfState[stage][channel][0] = s1_ + 2.0f * v1;
             float v2 = (y1 - s2_) * ladderG; float y2 = v2 + s2_; zdfState[stage][channel][1] = s2_ + 2.0f * v2;
             float v3 = (y2 - s3_) * ladderG; float y3 = v3 + s3_; zdfState[stage][channel][2] = s3_ + 2.0f * v3;
             float v4 = (y3 - s4_) * ladderG; float y4 = v4 + s4_; zdfState[stage][channel][3] = s4_ + 2.0f * v4;
 
             if (slopeIdx == 0) {
-                if (filterType == 0) out = y2;
-                else if (filterType == 1) out = 2.0f * (y1 - y2);
-                else if (filterType == 2) out = out - 2.0f * y1 + y2;
-                else out = y2 + (out - 2.0f * y1 + y2);
+                if (filterType == 0) out = y2; else if (filterType == 1) out = 2.0f * (y1 - y2); else if (filterType == 2) out = out - 2.0f * y1 + y2; else out = y2 + (out - 2.0f * y1 + y2);
             }
             else {
-                if (filterType == 0) out = y4;
-                else if (filterType == 1) out = 4.0f * (y2 - y4);
-                else if (filterType == 2) out = out - 4.0f * y1 + 6.0f * y2 - 4.0f * y3 + y4;
-                else out = y4 + (out - 4.0f * y1 + 6.0f * y2 - 4.0f * y3 + y4);
+                if (filterType == 0) out = y4; else if (filterType == 1) out = 4.0f * (y2 - y4); else if (filterType == 2) out = out - 4.0f * y1 + 6.0f * y2 - 4.0f * y3 + y4; else out = y4 + (out - 4.0f * y1 + 6.0f * y2 - 4.0f * y3 + y4);
             }
         }
     }
-    else if (filterModel == 2) { // Diode Ladder
+    else if (filterModel == 2) {
         for (int stage = 0; stage < currentStages; ++stage) {
             float fb = std::tanh(out - ladderRes * zdfState[stage][channel][3]);
             float v1 = (fb - zdfState[stage][channel][0]) * ladderG; float y1 = v1 + zdfState[stage][channel][0]; zdfState[stage][channel][0] = y1 + v1; y1 = std::tanh(y1);
@@ -180,7 +190,6 @@ float TptFilter::processSample(int channel, float x)
             float v3 = (y2 - zdfState[stage][channel][2]) * ladderG; float y3 = v3 + zdfState[stage][channel][2]; zdfState[stage][channel][2] = y3 + v3; y3 = std::tanh(y3);
             float v4 = (y3 - zdfState[stage][channel][3]) * ladderG; float y4 = v4 + zdfState[stage][channel][3]; zdfState[stage][channel][3] = y4 + v4;
             if (y4 > 0.0f) y4 *= 1.1f; y4 = std::tanh(y4);
-
             if (slopeIdx == 0) {
                 if (filterType == 0) out = y2; else if (filterType == 1) out = y1 - y2; else if (filterType == 2) out = out - y1; else out = y2 + (out - y1);
             }
@@ -189,7 +198,7 @@ float TptFilter::processSample(int channel, float x)
             }
         }
     }
-    else if (filterModel == 3) { // SEM
+    else if (filterModel == 3) {
         for (int stage = 0; stage < currentStages; ++stage) {
             float drivenOut = std::tanh(out * 1.2f);
             float hp = (drivenOut - (2.0f * R + g) * s1[stage][channel] - s2[stage][channel]) * h;
@@ -197,8 +206,26 @@ float TptFilter::processSample(int channel, float x)
             float lp = g * bp + s2[stage][channel];
             s1[stage][channel] = std::tanh(g * hp + bp);
             s2[stage][channel] = std::tanh(g * bp + lp);
-
             if (filterType == 0) out = lp; else if (filterType == 1) out = bp; else if (filterType == 2) out = hp; else out = lp + hp;
+        }
+    }
+    else if (filterModel == 5) { // 【追加】Formant 処理
+        float out_formant = 0.0f;
+        float gains[3] = { 1.0f, 0.5f, 0.2f };
+        for (int stage = 0; stage < currentStages; ++stage) {
+            float stage_in = out; out_formant = 0.0f;
+            for (int f = 0; f < 3; ++f) {
+                float hp = (stage_in - (2.0f * form_R[f] + form_g[f]) * form_s1[f][channel] - form_s2[f][channel]) * form_h[f];
+                float bp = form_g[f] * hp + form_s1[f][channel];
+                float lp = form_g[f] * bp + form_s2[f][channel];
+                form_s1[f][channel] = form_g[f] * hp + bp;
+                form_s2[f][channel] = form_g[f] * bp + lp;
+
+                float bandOut = bp;
+                if (filterType == 0) bandOut = lp; else if (filterType == 1) bandOut = bp; else if (filterType == 2) bandOut = hp; else bandOut = lp + hp;
+                out_formant += bandOut * gains[f];
+            }
+            out = out_formant;
         }
     }
 
@@ -231,6 +258,36 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         mag = 1.0f / den;
         if (filterType == 1) mag *= w; else if (filterType == 2) mag *= w2; else if (filterType == 3) mag *= std::abs(1.0f - w2);
         return std::pow(mag, currentStages);
+    }
+    else if (filterModel == 5) { // FormantのMagnitude計算
+        float v = juce::jmap(std::log10(fc), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f);
+        v = juce::jlimit(0.0f, 4.0f, v);
+        int idx = (int)v; float frac = v - idx;
+        if (idx >= 4) { idx = 3; frac = 1.0f; }
+
+        float f1_map[5] = { 730.f, 270.f, 300.f, 530.f, 400.f };
+        float f2_map[5] = { 1090.f, 2290.f, 870.f, 1840.f, 840.f };
+        float f3_map[5] = { 2440.f, 3010.f, 2240.f, 2480.f, 2800.f };
+
+        float f_arr[3] = {
+            f1_map[idx] + (f1_map[idx + 1] - f1_map[idx]) * frac,
+            f2_map[idx] + (f2_map[idx + 1] - f2_map[idx]) * frac,
+            f3_map[idx] + (f3_map[idx + 1] - f3_map[idx]) * frac
+        };
+
+        float mag_sum = 0.0f;
+        float gains[3] = { 1.0f, 0.5f, 0.2f };
+
+        for (int f = 0; f < 3; ++f) {
+            float w_f = frequency / juce::jlimit(20.0f, 20000.0f, f_arr[f]);
+            float w2_f = w_f * w_f;
+            float d_f = 1.0f / juce::jlimit(0.1f, 10.0f, res);
+            float den_f = std::sqrt(std::pow(1.0f - w2_f, 2.0f) + std::pow(w_f * d_f, 2.0f));
+            float m_f = 1.0f / den_f;
+            if (filterType == 1) m_f *= w_f; else if (filterType == 2) m_f *= w2_f; else if (filterType == 3) m_f *= std::abs(1.0f - w2_f);
+            mag_sum += m_f * gains[f];
+        }
+        return std::pow(mag_sum, currentStages);
     }
     else {
         float r_scale = (filterModel == 1) ? 4.0f : 15.0f;

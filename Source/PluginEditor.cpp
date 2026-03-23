@@ -47,10 +47,12 @@ void FilterVisualizer::paint(juce::Graphics& g) {
     std::array<float, 4> cM = getM(cPos, lfo1Mod4, lfo1_isRand1);
     std::array<float, 4> rM = getM(rPos, lfo2Mod4, lfo2_isRand1);
 
-    juce::Path path;
-    // 【修正】x軸を 0.25f 刻みにすることで解像度を4倍（オーバーサンプリング描画）にし、角張りを根絶
-    for (float px = 0.0f; px <= w; px += 0.25f) {
-        float freq = 20.0f * std::pow(1000.0f, px / w);
+    int wInt = (int)w;
+    std::vector<float> rawMag(wInt + 1, 0.0f);
+
+    // Step 1: 元の解像度（1px刻み）で生のMagnitudeを計算
+    for (int px = 0; px <= wInt; ++px) {
+        float freq = 20.0f * std::pow(1000.0f, (float)px / w);
 
         auto calc = [&](juce::String s, int idx) -> float {
             if (processor.apvts.getRawParameterValue("enable" + s)->load() < 0.5f) return 0.0f;
@@ -69,7 +71,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
             float w2 = w_norm * w_norm;
             float mag = 1.0f;
 
-            if (modelIdx == 0 || modelIdx == 3 || modelIdx == 4) { // Clean, SEM, SRR (Draws SVF envelope)
+            if (modelIdx == 0 || modelIdx == 3 || modelIdx == 4) {
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
                 float adjustedRes = res;
                 if (stages > 1) adjustedRes = res * std::pow(0.6f, std::log2((float)stages));
@@ -80,16 +82,14 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 mag = std::pow(m, stages);
                 if (modelIdx == 0 || modelIdx == 4) mag *= (1.0f + res * 0.1f);
             }
-            else if (modelIdx == 1) { // Moog
+            else if (modelIdx == 1) {
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 1 : (slopeIdx == 2) ? 2 : 4;
                 float r_moog = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 4.0f);
                 if (stages > 1) r_moog *= std::pow(0.7f, std::log2((float)stages));
-
                 float real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + r_moog;
                 float imag_p = 4.0f * w_norm * (1.0f - w2);
                 float den2 = real_p * real_p + imag_p * imag_p;
                 float m = 1.0f / std::sqrt(den2);
-
                 if (slopeIdx == 0) {
                     if (t == 1) m *= w_norm; else if (t == 2) m *= w2; else if (t == 3) m *= std::abs(1.0f - w2);
                 }
@@ -99,16 +99,14 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 mag = std::pow(m, stages);
                 mag *= (1.0f + 0.5f * r_moog);
             }
-            else if (modelIdx == 2) { // Diode
+            else if (modelIdx == 2) {
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 1 : (slopeIdx == 2) ? 2 : 4;
                 float r_diode = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 15.0f);
                 if (stages > 1) r_diode *= std::pow(0.7f, std::log2((float)stages));
-
                 float real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + r_diode;
                 float imag_p = 3.5f * w_norm * (1.0f - w2);
                 float den2 = real_p * real_p + imag_p * imag_p;
                 float m = 1.0f / std::sqrt(den2);
-
                 if (slopeIdx == 0) {
                     if (t == 1) m *= w_norm; else if (t == 2) m *= w2; else if (t == 3) m *= std::abs(1.0f - w2);
                 }
@@ -118,17 +116,51 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 mag = std::pow(m, stages);
                 mag *= (1.0f + 0.2f * r_diode);
             }
+            else if (modelIdx == 5) { // 【追加】Formant Visualizer
+                float v = juce::jmap(std::log10(freqLimit), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f);
+                v = juce::jlimit(0.0f, 4.0f, v);
+                int idx_v = (int)v; float frac = v - idx_v;
+                if (idx_v >= 4) { idx_v = 3; frac = 1.0f; }
+                float f1_m[5] = { 730.f, 270.f, 300.f, 530.f, 400.f };
+                float f2_m[5] = { 1090.f, 2290.f, 870.f, 1840.f, 840.f };
+                float f3_m[5] = { 2440.f, 3010.f, 2240.f, 2480.f, 2800.f };
+                float f_arr[3] = { f1_m[idx_v] + (f1_m[idx_v + 1] - f1_m[idx_v]) * frac, f2_m[idx_v] + (f2_m[idx_v + 1] - f2_m[idx_v]) * frac, f3_m[idx_v] + (f3_m[idx_v + 1] - f3_m[idx_v]) * frac };
+
+                float mag_sum = 0.0f; float gains[3] = { 1.0f, 0.5f, 0.2f };
+                int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
+                for (int f = 0; f < 3; ++f) {
+                    float w_f = freq / juce::jlimit(20.0f, 20000.0f, f_arr[f]);
+                    float d_f = 1.0f / juce::jlimit(0.1f, 10.0f, res);
+                    float m_f = 1.0f / std::sqrt(std::pow(1.0f - w_f * w_f, 2.0f) + std::pow(w_f * d_f, 2.0f));
+                    if (t == 1) m_f *= w_f; else if (t == 2) m_f *= w_f * w_f; else if (t == 3) m_f *= std::abs(1.0f - w_f * w_f);
+                    mag_sum += m_f * gains[f];
+                }
+                mag = std::pow(mag_sum, stages) * (1.0f + res * 0.1f);
+            }
             return static_cast<float>(mag);
             };
 
         auto mPos = processor.getLfoPos(0); float x = mPos.x; float y = mPos.y;
-        float mag = (calc("A", 0) * (1 - x) * (1 - y)) + (calc("B", 1) * x * (1 - y)) + (calc("C", 2) * (1 - x) * y) + (calc("D", 3) * x * y);
+        rawMag[px] = (calc("A", 0) * (1 - x) * (1 - y)) + (calc("B", 1) * x * (1 - y)) + (calc("C", 2) * (1 - x) * y) + (calc("D", 3) * x * y);
+    }
 
-        float db = 20.0f * std::log10(mag + 1e-5f);
+    // Step 2: 【流体スムージング】 移動平均フィルターで角を美しく溶かす
+    juce::Path path;
+    int smoothRadius = 8; // 溶かす幅（プロ品質の有機的なカーブを生成）
+    for (int px = 0; px <= wInt; ++px) {
+        float sum = 0.0f; int count = 0;
+        for (int k = -smoothRadius; k <= smoothRadius; ++k) {
+            int idx = px + k;
+            if (idx >= 0 && idx <= wInt) { sum += rawMag[idx]; count++; }
+        }
+        float smoothedMag = sum / (float)count;
+
+        float db = 20.0f * std::log10(smoothedMag + 1e-5f);
         float yPos = juce::jmap(db, 40.0f, -60.0f, 0.0f, h);
 
-        if (px == 0.0f) path.startNewSubPath(0, yPos); else path.lineTo(px, yPos);
+        if (px == 0) path.startNewSubPath((float)px, yPos); else path.lineTo((float)px, yPos);
     }
+
     g.strokePath(path, juce::PathStrokeType(2.0f));
 }
 
@@ -242,7 +274,8 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce:
     addAndMakeVisible(g.enableButton);
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, "enable" + s, g.enableButton);
 
-    g.model.addItemList({ "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR" }, 1); addAndMakeVisible(g.model);
+    // 【追加】Formant を選択肢に追加
+    g.model.addItemList({ "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR", "Formant (Vowel)" }, 1); addAndMakeVisible(g.model);
     g.mAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "model" + s, g.model);
 
     g.type.addItemList({ "LP", "BP", "HP", "Notch" }, 1); addAndMakeVisible(g.type);
