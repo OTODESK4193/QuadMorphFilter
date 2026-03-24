@@ -70,7 +70,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
             float w2 = w_norm * w_norm;
             float mag = 1.0f;
 
-            if (modelIdx == 0 || modelIdx == 3 || modelIdx == 4 || modelIdx == 9 || modelIdx == 14 || modelIdx == 16) {
+            if (modelIdx == 0 || modelIdx == 3 || modelIdx == 4 || modelIdx == 9 || modelIdx == 14 || modelIdx == 16 || modelIdx == 23) {
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
                 float adjustedRes = res;
                 if (modelIdx != 14 && stages > 1) adjustedRes = res * std::pow(0.6f, std::log2((float)stages));
@@ -79,7 +79,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 float m = 1.0f / den;
                 if (t == 1) m *= w_norm; else if (t == 2) m *= w2; else if (t == 3) m *= std::abs(1.0f - w2);
                 mag = std::pow(m, stages);
-                if (modelIdx == 0 || modelIdx == 4 || modelIdx == 16) mag *= (1.0f + res * 0.1f);
+                if (modelIdx == 0 || modelIdx == 4 || modelIdx == 16 || modelIdx == 23) mag *= (1.0f + res * 0.1f);
                 if (modelIdx == 9) mag *= juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 1.0f, 5.0f);
             }
             else if (modelIdx == 1 || modelIdx == 12 || modelIdx == 13 || modelIdx == 15) {
@@ -164,7 +164,7 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 float bp_mag = (1.0f / den) * w_norm;
                 mag = 1.0f + std::pow(bp_mag, 1.2f) * res * ((float)stages * 0.1f);
             }
-            else if (modelIdx >= 17) { // 【追加】デジタル精密シリーズ Visualizer
+            else if (modelIdx >= 17 && modelIdx <= 20) {
                 int order = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
                 int sections = order / 2;
                 float rippleDb = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.1f, 3.0f);
@@ -175,46 +175,78 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                     float theta = juce::MathConstants<float>::pi * (2.0f * k + 1.0f) / (2.0f * order);
                     float stage_q = 0.707f; float freqScale = 1.0f;
 
-                    if (modelIdx == 17) { // Butterworth
+                    if (modelIdx == 17) {
                         stage_q = 1.0f / (2.0f * std::sin(theta));
                     }
-                    else if (modelIdx == 18) { // Chebyshev
+                    else if (modelIdx == 18) {
                         float a = 1.0f / order * std::asinh(1.0f / eps);
-                        float real_p = -std::sinh(a) * std::sin(theta);
-                        float imag_p = std::cosh(a) * std::cos(theta);
-                        float wn2 = real_p * real_p + imag_p * imag_p;
-                        freqScale = std::sqrt(wn2);
-                        stage_q = std::sqrt(wn2) / (-2.0f * real_p);
+                        float real_p = -std::sinh(a) * std::sin(theta); float imag_p = std::cosh(a) * std::cos(theta);
+                        float wn2 = real_p * real_p + imag_p * imag_p; freqScale = std::sqrt(wn2); stage_q = std::sqrt(wn2) / (-2.0f * real_p);
                     }
-                    else if (modelIdx == 19) { // Bessel
-                        stage_q = 1.0f / (2.0f * std::sin(theta)) * 0.577f;
-                        freqScale = 1.0f + (float)order * 0.1f;
+                    else if (modelIdx == 19) {
+                        stage_q = 1.0f / (2.0f * std::sin(theta)) * 0.577f; freqScale = 1.0f + (float)order * 0.1f;
                     }
-                    else if (modelIdx == 20) { // Elliptic
+                    else if (modelIdx == 20) {
                         float a = 1.0f / order * std::asinh(1.0f / (eps * 0.5f));
-                        float real_p = -std::sinh(a) * std::sin(theta);
-                        float imag_p = std::cosh(a) * std::cos(theta);
-                        float wn2 = real_p * real_p + imag_p * imag_p;
-                        freqScale = std::sqrt(wn2);
-                        stage_q = std::sqrt(wn2) / (-2.0f * real_p) * 1.2f;
+                        float real_p = -std::sinh(a) * std::sin(theta); float imag_p = std::cosh(a) * std::cos(theta);
+                        float wn2 = real_p * real_p + imag_p * imag_p; freqScale = std::sqrt(wn2); stage_q = std::sqrt(wn2) / (-2.0f * real_p) * 1.2f;
                     }
 
                     float stage_w = freq / juce::jlimit(20.0f, 20000.0f, freqLimit * freqScale);
-                    float stage_w2 = stage_w * stage_w;
-                    float stage_d = 1.0f / stage_q;
+                    float stage_w2 = stage_w * stage_w; float stage_d = 1.0f / stage_q;
                     float den = std::sqrt(std::pow(1.0f - stage_w2, 2.0f) + std::pow(stage_w * stage_d, 2.0f));
                     float m = 1.0f / den;
 
-                    if (modelIdx == 20) {
-                        m = std::abs(1.0f - stage_w2 * 0.5f) / den;
-                    }
-                    else {
-                        if (t == 1) m *= stage_w; else if (t == 2) m *= stage_w2; else if (t == 3) m *= std::abs(1.0f - stage_w2);
-                    }
+                    if (modelIdx == 20) { m = std::abs(1.0f - stage_w2 * 0.5f) / den; }
+                    else { if (t == 1) m *= stage_w; else if (t == 2) m *= stage_w2; else if (t == 3) m *= std::abs(1.0f - stage_w2); }
                     mag_total *= m;
                 }
                 mag = mag_total;
             }
+            else if (modelIdx == 21) {
+                float lpgFc = juce::jlimit(20.0f, 15000.0f, 20.0f * std::pow(1000.0f, processor.getLfoPos(1).x)); // Dummy vis
+                float d = 1.0f / 0.707f; float w_lpg = freq / lpgFc;
+                mag = (1.0f / std::sqrt(std::pow(1.0f - w_lpg * w_lpg, 2.0f) + std::pow(w_lpg * d, 2.0f)));
+            }
+            else if (modelIdx == 22) {
+                float inharmonicity = juce::jmap(res, 0.1f, 10.0f, 1.0f, 2.5f); float mag_sum = 0.0f;
+                for (int b = 0; b < 8; ++b) {
+                    float bFreq = std::clamp(fc * std::pow((float)(b + 1), inharmonicity), 20.0f, 20000.0f);
+                    float stage_w = freq / bFreq; float q = 50.0f / std::sqrt((float)(b + 1)); float d = 1.0f / q;
+                    mag_sum += (1.0f / std::sqrt(std::pow(1.0f - stage_w * stage_w, 2.0f) + std::pow(stage_w * d, 2.0f))) * stage_w * (1.0f / std::sqrt((float)(b + 1)));
+                }
+                mag = mag_sum;
+            }
+            else if (modelIdx == 24) {
+                float shiftHz = juce::jmap(fc, 20.0f, 20000.0f, -1000.0f, 1000.0f);
+                if (std::abs(freq - (1000.0f + shiftHz)) < 100.0f) mag = 5.0f; else mag = 1.0f;
+            }
+            else if (modelIdx == 25) {
+                float mag_total = 1.0f;
+                for (int k = 0; k < 7; ++k) {
+                    float cur_g = std::tan(juce::MathConstants<float>::pi * 1000.0f / 44100.0f); // Dummy visual
+                    float stage_fc = std::atan(cur_g) * 44100.0f / juce::MathConstants<float>::pi;
+                    float stage_w = freq / juce::jlimit(20.0f, 20000.0f, stage_fc);
+                    float den = std::sqrt(std::pow(1.0f - stage_w * stage_w, 2.0f) + std::pow(stage_w * 2.0f, 2.0f));
+                    mag_total *= (1.0f / den);
+                }
+                mag = mag_total;
+            }
+            else if (modelIdx == 26) {
+                int stages = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
+                float phi = -2.0f * std::atan(w_norm);
+                float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.8f);
+                float c_ap = std::cos(stages * phi); float s_ap = std::sin(stages * phi);
+                float den2 = (1.0f - fb * c_ap) * (1.0f - fb * c_ap) + (fb * s_ap) * (fb * s_ap);
+                float real_yap = (c_ap - fb) / den2; float imag_yap = s_ap / den2;
+                mag = std::sqrt(real_yap * real_yap + imag_yap * imag_yap);
+            }
+            else if (modelIdx == 27) {
+                float d = 1.0f / 1.5f;
+                float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w_norm * d, 2.0f));
+                mag = std::pow(1.0f / den, 4.0f);
+            }
+
             return static_cast<float>(mag);
             };
 
@@ -356,7 +388,8 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce:
         "Formant (Vowel)", "Comb Filter", "MS-20 (Screaming)", "All-Pass Phaser", "Wavefolder",
         "Reverb (Metallic)", "Kilo All-Pass",
         "Prophet (Curtis)", "SSM 2040", "CS-80 (Yamaha)", "Jupiter (Roland)", "EDP Wasp (CMOS)",
-        "Butterworth (Flat)", "Chebyshev (Ripple)", "Bessel (Phase)", "Elliptic (Notch)"
+        "Butterworth (Flat)", "Chebyshev (Ripple)", "Bessel (Phase)", "Elliptic (Notch)",
+        "Vactrol LPG", "Modal Resonator", "Waveguide Mesh", "Bode Freq Shifter", "Z-Plane (Procedural)", "Phased Array", "Nyquist Anti-alias"
         }, 1); addAndMakeVisible(g.model);
     g.mAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "model" + s, g.model);
 
