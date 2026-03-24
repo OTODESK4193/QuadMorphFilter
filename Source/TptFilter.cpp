@@ -34,18 +34,27 @@ void TptFilter::reset()
             sk_s1[stage][ch] = 0.0f; sk_s2[stage][ch] = 0.0f;
             dp_s1[stage][ch] = 0.0f; dp_s2[stage][ch] = 0.0f;
             for (int pole = 0; pole < 4; ++pole) zdfState[stage][ch][pole] = 0.0f;
-            combWriteIdx[stage][ch] = 0;
-            comb_ap_state[stage][ch] = 0.0f;
+            combWriteIdx[stage][ch] = 0; comb_ap_state[stage][ch] = 0.0f;
             for (int i = 0; i < 16384; ++i) combBuffer[stage][ch][i] = 0.0f;
             pa_s[stage][ch] = 0.0f;
         }
     }
     for (int stage = 0; stage < 16; ++stage) {
-        for (int ch = 0; ch < 2; ++ch) ap_s[stage][ch] = 0.0f;
+        for (int ch = 0; ch < 2; ++ch) {
+            ap_s[stage][ch] = 0.0f;
+            kilo_s1[stage][ch] = 0.0f; kilo_s2[stage][ch] = 0.0f; // 【追加】
+        }
     }
     for (int stage = 0; stage < 7; ++stage) {
         for (int ch = 0; ch < 2; ++ch) { zplane_s1[stage][ch] = 0.0f; zplane_s2[stage][ch] = 0.0f; }
         zp_fc[stage] = 1000.0f; zp_q[stage] = 0.707f;
+    }
+    // 【追加】FDNリバーブのバッファ初期化
+    for (int stage = 0; stage < 4; ++stage) {
+        for (int ch = 0; ch < 2; ++ch) {
+            fdnWriteIdx[stage][ch] = 0; fdn_ap_state[stage][ch] = 0.0f;
+            for (int i = 0; i < 16384; ++i) fdnBuffer[stage][ch][i] = 0.0f;
+        }
     }
     for (int ch = 0; ch < 2; ++ch) {
         rmsIn[ch] = 0.0f; rmsOut[ch] = 0.0f; agcGain[ch] = 1.0f;
@@ -70,7 +79,7 @@ void TptFilter::setSlope(int index)
 {
     slopeIdx = index;
     if (filterModel == 5 || filterModel == 10 || filterModel == 21 || filterModel == 22 || filterModel == 24 || filterModel == 25 || filterModel == 27) {
-        currentStages = 1; filterOrder = 2;
+        currentStages = 1; filterOrder = 2; // Model 10 (Reverb) は内部で4段固定だがUI制御上は1
     }
     else if (filterModel == 8 || filterModel == 11 || filterModel == 26) {
         currentStages = (index == 0) ? 2 : (index == 1) ? 4 : (index == 2) ? 8 : 16; filterOrder = currentStages * 2;
@@ -156,7 +165,6 @@ void TptFilter::updateCoefficients()
     float targetCutoff = cutoff.getTargetValue();
     float targetRes = resonance.getTargetValue();
 
-    // 【K-Rate処理】16サンプルごとに到達するようにスムージング係数を調整（約10msのワンポール）
     float smoothCoef = 1.0f - std::exp(-1.0f / (0.01f * (sampleRate / 16.0f)));
     smoothedDigitalCutoff = smoothedDigitalCutoff + smoothCoef * (targetCutoff - smoothedDigitalCutoff);
     float currentRes = lastRes + smoothCoef * (targetRes - lastRes);
@@ -190,14 +198,32 @@ void TptFilter::updateCoefficients()
         else if (filterModel == 25) {
             updateZPlaneCoeffs(smoothedDigitalCutoff, currentRes);
         }
+        else if (filterModel == 11) { // 【修正】Kilo All-Pass (Staggering Coefficients) 
+            float maxSafeFreq = (float)sampleRate * 0.45f;
+            // Resonance を周波数の分散幅（Spread）として使用
+            float spread = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, 2.5f);
+            for (int k = 0; k < currentStages; ++k) {
+                // 中心周波数から上下に散らす（1段なら中心のみ）
+                float offset = (currentStages > 1) ? ((float)k / (currentStages - 1)) * 2.0f - 1.0f : 0.0f;
+                float st_fc = smoothedDigitalCutoff * std::pow(2.0f, offset * spread);
+                st_fc = std::clamp(st_fc, 20.0f, maxSafeFreq);
+
+                float wd = juce::MathConstants<float>::pi * st_fc / (float)sampleRate;
+                kilo_g[k] = std::tan(wd);
+                // 各段のQ値はSpreadが広いほど高く（ピーキーに）してスミアリングを強調
+                float q = 0.5f + (spread * 2.0f);
+                kilo_R[k] = 1.0f / (2.0f * q);
+                kilo_h[k] = 1.0f / (1.0f + 2.0f * kilo_R[k] * kilo_g[k] + kilo_g[k] * kilo_g[k]);
+            }
+        }
         else {
             float maxSafeFreq = (float)sampleRate * 0.45f;
             float safeCutoff = std::clamp(smoothedDigitalCutoff, 20.0f, maxSafeFreq);
             float wd = juce::MathConstants<float>::pi * safeCutoff / (float)sampleRate;
             g = std::tan(wd); ladderG = g / (1.0f + g);
 
-            if (filterModel == 0 || filterModel == 3 || filterModel == 4 || filterModel == 6 || filterModel == 7 || filterModel == 9 || filterModel == 11 || filterModel == 14 || filterModel == 16 || filterModel == 21 || filterModel == 23 || filterModel == 26 || filterModel == 27) {
-                float adjustedRes = currentRes * ((filterModel != 7 && filterModel != 11 && filterModel != 14 && filterModel != 21) ? scalerSVF : 1.0f);
+            if (filterModel == 0 || filterModel == 3 || filterModel == 4 || filterModel == 6 || filterModel == 7 || filterModel == 9 || filterModel == 14 || filterModel == 16 || filterModel == 21 || filterModel == 23 || filterModel == 26 || filterModel == 27) {
+                float adjustedRes = currentRes * ((filterModel != 7 && filterModel != 14 && filterModel != 21) ? scalerSVF : 1.0f);
                 R = 1.0f / (2.0f * adjustedRes); h = 1.0f / (1.0f + 2.0f * R * g + g * g);
             }
             else if (filterModel == 1 || filterModel == 12 || filterModel == 13 || filterModel == 15) {
@@ -220,7 +246,6 @@ void TptFilter::process(juce::AudioBuffer<float>& buffer)
     for (int ch = 0; ch < numChannels; ++ch) writePointers[ch] = buffer.getWritePointer(ch);
 
     for (int i = 0; i < numSamples; ++i) {
-        // 【K-Rate処理】16サンプルごとに重い係数計算を実行しCPUを最適化
         if (i % 16 == 0) {
             updateCoefficients();
         }
@@ -319,9 +344,7 @@ float TptFilter::processSample(int channel, float x)
         for (int stage = 0; stage < currentStages; ++stage) {
             float delaySamples = sampleRate / juce::jlimit(20.0f, 20000.0f, cutoff.getCurrentValue());
             int dInt = (int)delaySamples; float dFrac = delaySamples - dInt;
-            int readIdx1 = (combWriteIdx[stage][channel] - dInt) & 16383;
-            int readIdx2 = (readIdx1 - 1) & 16383;
-            // 【変更】オールパス補間 (高域減衰防止)
+            int readIdx1 = (combWriteIdx[stage][channel] - dInt) & 16383; int readIdx2 = (readIdx1 - 1) & 16383;
             float eta = (1.0f - dFrac) / (1.0f + dFrac);
             float delayed = combBuffer[stage][channel][readIdx2] + eta * (combBuffer[stage][channel][readIdx1] - comb_ap_state[stage][channel]);
             comb_ap_state[stage][channel] = delayed;
@@ -363,32 +386,50 @@ float TptFilter::processSample(int channel, float x)
         out = std::sin(out * fold_gain);
     }
     else if (filterModel == 10) {
-        float ms = juce::jmap(cutoff.getCurrentValue(), 20.0f, 20000.0f, 50.0f, 0.5f);
+        // 【完全修正】Reverb (4x4 Feedback Delay Network) 
+        float ms = juce::jmap(smoothedDigitalCutoff, 20.0f, 20000.0f, 50.0f, 0.5f);
         float baseSamples = (ms / 1000.0f) * sampleRate;
-        float d1 = juce::jlimit(1.0f, 16383.0f, baseSamples * 1.000f); float d2 = juce::jlimit(1.0f, 16383.0f, baseSamples * 1.313f); float d_ap = juce::jlimit(1.0f, 16383.0f, baseSamples * 0.471f);
-        float fb = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 0.0f, 0.95f);
-        auto readDelay = [&](int stage, float delay) {
-            int dInt = (int)delay; float dFrac = delay - dInt;
-            int r1 = (combWriteIdx[stage][channel] - dInt) & 16383; int r2 = (r1 - 1) & 16383;
+        float fb = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 0.0f, 0.98f);
+
+        // 4本のディレイラインからの読み出し (All-Pass Interpolation)
+        float d_out[4];
+        for (int i = 0; i < 4; ++i) {
+            float delaySamples = juce::jlimit(1.0f, 16383.0f, baseSamples * fdnDelayTimes[i]);
+            int dInt = (int)delaySamples; float dFrac = delaySamples - dInt;
+            int r1 = (fdnWriteIdx[i][channel] - dInt) & 16383; int r2 = (r1 - 1) & 16383;
             float eta = (1.0f - dFrac) / (1.0f + dFrac);
-            float delayed = combBuffer[stage][channel][r2] + eta * (combBuffer[stage][channel][r1] - comb_ap_state[stage][channel]);
-            comb_ap_state[stage][channel] = delayed;
-            return delayed;
-            };
-        float c1_out = readDelay(0, d1); float c2_out = readDelay(1, d2);
-        combBuffer[0][channel][combWriteIdx[0][channel]] = std::tanh(out + c1_out * fb); combBuffer[1][channel][combWriteIdx[1][channel]] = std::tanh(out + c2_out * fb);
-        float mixed = (c1_out + c2_out) * 0.707f;
-        float ap_out = readDelay(2, d_ap);
-        combBuffer[2][channel][combWriteIdx[2][channel]] = std::tanh(mixed + ap_out * 0.5f); float reverb_out = ap_out - mixed * 0.5f;
-        for (int s = 0; s < 3; ++s) combWriteIdx[s][channel] = (combWriteIdx[s][channel] + 1) & 16383;
-        if (filterType == 0) out = reverb_out; else if (filterType == 1) out = (out + reverb_out) * 0.5f; else if (filterType == 2) out = out - reverb_out * 0.5f; else out = std::sin(reverb_out * 3.0f);
+            d_out[i] = fdnBuffer[i][channel][r2] + eta * (fdnBuffer[i][channel][r1] - fdn_ap_state[i][channel]);
+            fdn_ap_state[i][channel] = d_out[i];
+        }
+
+        // Householder Matrix による無損失散乱ミックス (1/2 * [1 1 1 1; 1 -1 1 -1; 1 1 -1 -1; 1 -1 -1 1])
+        float m0 = 0.5f * (d_out[0] + d_out[1] + d_out[2] + d_out[3]);
+        float m1 = 0.5f * (d_out[0] - d_out[1] + d_out[2] - d_out[3]);
+        float m2 = 0.5f * (d_out[0] + d_out[1] - d_out[2] - d_out[3]);
+        float m3 = 0.5f * (d_out[0] - d_out[1] - d_out[2] + d_out[3]);
+
+        // ディレイラインへの書き込み（入力 + フィードバック）
+        fdnBuffer[0][channel][fdnWriteIdx[0][channel]] = std::tanh(out + m0 * fb);
+        fdnBuffer[1][channel][fdnWriteIdx[1][channel]] = std::tanh(out + m1 * fb);
+        fdnBuffer[2][channel][fdnWriteIdx[2][channel]] = std::tanh(out + m2 * fb);
+        fdnBuffer[3][channel][fdnWriteIdx[3][channel]] = std::tanh(out + m3 * fb);
+
+        for (int s = 0; s < 4; ++s) fdnWriteIdx[s][channel] = (fdnWriteIdx[s][channel] + 1) & 16383;
+
+        float reverb_out = m0; // 出力はシンプルに1本目から取るかミックスする
+        if (filterType == 0) out = reverb_out;
+        else if (filterType == 1) out = (out + reverb_out) * 0.5f;
+        else if (filterType == 2) out = out - reverb_out * 0.5f;
+        else out = std::sin(reverb_out * 3.0f);
     }
     else if (filterModel == 11) {
+        // 【完全修正】Kilo All-Pass (Frequency Staggered APF Chain)
         for (int stage = 0; stage < currentStages; ++stage) {
-            float hp = (out - (2.0f * R + g) * s1[stage][channel] - s2[stage][channel]) * h;
-            float bp = g * hp + s1[stage][channel]; float lp = g * bp + s2[stage][channel];
-            s1[stage][channel] = g * hp + bp; s2[stage][channel] = g * bp + lp;
-            out = lp - 2.0f * R * bp + hp;
+            float cur_g = kilo_g[stage]; float cur_R = kilo_R[stage]; float cur_h = kilo_h[stage];
+            float hp = (out - (2.0f * cur_R + cur_g) * kilo_s1[stage][channel] - kilo_s2[stage][channel]) * cur_h;
+            float bp = cur_g * hp + kilo_s1[stage][channel]; float lp = cur_g * bp + kilo_s2[stage][channel];
+            kilo_s1[stage][channel] = cur_g * hp + bp; kilo_s2[stage][channel] = cur_g * bp + lp;
+            out = lp - 2.0f * cur_R * bp + hp; // All-Pass Output
         }
     }
     else if (filterModel == 16) {
@@ -444,7 +485,6 @@ float TptFilter::processSample(int channel, float x)
         float delaySamples = sampleRate / juce::jlimit(20.0f, 20000.0f, smoothedDigitalCutoff);
         int dInt = (int)delaySamples; float dFrac = delaySamples - dInt;
         int r1 = (wgWriteIdx[channel] - dInt) & 16383; int r2 = (r1 - 1) & 16383;
-        // 【変更】オールパス補間
         float eta = (1.0f - dFrac) / (1.0f + dFrac);
         float wgDelayed = wgBuffer[channel][r2] + eta * (wgBuffer[channel][r1] - wg_ap_state[channel]);
         wg_ap_state[channel] = wgDelayed;
@@ -554,22 +594,31 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         return mag_total;
     }
     else if (filterModel == 11) {
-        float d = 1.0f / juce::jlimit(0.1f, 10.0f, res);
-        float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w * d, 2.0f));
-        float bp_mag = (1.0f / den) * w;
-        mag = 1.0f + std::pow(bp_mag, 1.2f) * res * ((float)currentStages * 0.1f);
-        return mag;
+        // Visualizer for Kilo All-Pass
+        float mag_total = 1.0f;
+        float spread = juce::jmap(res, 0.1f, 10.0f, 0.0f, 2.5f);
+        for (int k = 0; k < currentStages; ++k) {
+            float offset = (currentStages > 1) ? ((float)k / (currentStages - 1)) * 2.0f - 1.0f : 0.0f;
+            float st_fc = std::clamp(fc * std::pow(2.0f, offset * spread), 20.0f, (float)sampleRate * 0.45f);
+            float st_w = frequency / st_fc; float st_w2 = st_w * st_w;
+            float q = 0.5f + (spread * 2.0f); float d = 1.0f / q;
+            float den = std::sqrt(std::pow(1.0f - st_w2, 2.0f) + std::pow(st_w * d, 2.0f));
+            float bp_mag = (1.0f / den) * st_w;
+            mag_total *= (1.0f + std::pow(bp_mag, 1.2f) * res * 0.1f);
+        }
+        return mag_total;
     }
     else if (filterModel == 10) {
+        // Visualizer for FDN Reverb
         float ms = juce::jmap(fc, 20.0f, 20000.0f, 50.0f, 0.5f);
         float baseD = (ms / 1000.0f);
-        float wD1 = 2.0f * juce::MathConstants<float>::pi * frequency * (baseD * 1.000f);
-        float wD2 = 2.0f * juce::MathConstants<float>::pi * frequency * (baseD * 1.313f);
-        float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.95f);
-        float m1 = 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD1));
-        float m2 = 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD2));
-        mag = (m1 + m2) * 0.5f;
-        return mag;
+        float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.98f);
+        float mag_total = 0.0f;
+        for (int i = 0; i < 4; ++i) {
+            float wD = 2.0f * juce::MathConstants<float>::pi * frequency * (baseD * fdnDelayTimes[i]);
+            mag_total += 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD));
+        }
+        return mag_total * 0.25f;
     }
     else if (filterModel == 5) {
         float v = juce::jlimit(0.0f, 4.0f, juce::jmap(std::log10(fc), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f));

@@ -4,18 +4,95 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+// ==========================================
+// QuadMorphLookAndFeel (Modern Light Theme)
+// ==========================================
+QuadMorphLookAndFeel::QuadMorphLookAndFeel()
+{
+    // 【修正】文字色・背景色をライトテーマに合わせて完全に上書き
+    setColour(juce::Label::textColourId, juce::Colour(0xff2C3E50));
+    setColour(juce::Slider::textBoxTextColourId, juce::Colour(0xff2C3E50));
+    setColour(juce::ComboBox::textColourId, juce::Colour(0xff2C3E50));
+    setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+
+    // トグルボタンOFF時の文字色（透明化バグの修正）
+    setColour(juce::TextButton::textColourOffId, juce::Colour(0xff2C3E50));
+
+    // ポップアップメニュー（コンボボックスのドロップダウン）もライトテーマ化
+    setColour(juce::PopupMenu::backgroundColourId, juce::Colour(0xffFFFFFF));
+    setColour(juce::PopupMenu::textColourId, juce::Colour(0xff2C3E50));
+    setColour(juce::PopupMenu::highlightedBackgroundColourId, juce::Colour(0xffE0E6ED));
+    setColour(juce::PopupMenu::highlightedTextColourId, juce::Colour(0xff2C3E50));
+}
+
+void QuadMorphLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, int y, int width, int height,
+    float sliderPos, float minSliderPos, float maxSliderPos,
+    const juce::Slider::SliderStyle style, juce::Slider& slider)
+{
+    auto trackRect = juce::Rectangle<float>(static_cast<float>(x), (float)y + (float)height * 0.5f - 1.5f, (float)width, 3.0f);
+
+    g.setColour(juce::Colour(0xffE0E6ED));
+    g.fillRoundedRectangle(trackRect, 1.5f);
+
+    auto activeColour = slider.findColour(juce::Slider::thumbColourId);
+    if (activeColour.isTransparent()) activeColour = juce::Colour(0xff7F8C8D);
+    g.setColour(activeColour.withAlpha(0.7f));
+
+    auto fillRect = trackRect.withWidth(sliderPos - (float)x);
+    g.fillRoundedRectangle(fillRect, 1.5f);
+
+    g.setColour(activeColour);
+    g.fillEllipse(sliderPos - 6.0f, (float)y + (float)height * 0.5f - 6.0f, 12.0f, 12.0f);
+}
+
+void QuadMorphLookAndFeel::drawComboBox(juce::Graphics& g, int width, int height, bool isButtonDown,
+    int buttonX, int buttonY, int buttonW, int buttonH, juce::ComboBox& box)
+{
+    juce::Rectangle<int> boxBounds(0, 0, width, height);
+    g.setColour(juce::Colour(0xffFFFFFF));
+    g.fillRoundedRectangle(boxBounds.toFloat(), 4.0f);
+
+    g.setColour(juce::Colour(0xffD5DDE5));
+    g.drawRoundedRectangle(boxBounds.toFloat().reduced(0.5f), 4.0f, 1.0f);
+
+    juce::Path path;
+    float arrowX = width - 15.0f;
+    float arrowY = height * 0.45f;
+    path.addTriangle(arrowX, arrowY, arrowX + 8.0f, arrowY, arrowX + 4.0f, arrowY + 5.0f);
+    g.setColour(juce::Colour(0xff95A5A6));
+    g.fillPath(path);
+}
+
+void QuadMorphLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& button, const juce::Colour& backgroundColour,
+    bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown)
+{
+    auto bounds = button.getLocalBounds().toFloat().reduced(1.0f);
+    bool isOn = button.getToggleState();
+
+    auto baseColour = isOn ? button.findColour(juce::TextButton::textColourOnId).withAlpha(0.15f) : juce::Colour(0xffFFFFFF);
+    auto borderColour = isOn ? button.findColour(juce::TextButton::textColourOnId) : juce::Colour(0xffD5DDE5);
+
+    g.setColour(baseColour);
+    g.fillRoundedRectangle(bounds, 4.0f);
+
+    g.setColour(borderColour);
+    g.drawRoundedRectangle(bounds, 4.0f, 1.2f);
+}
+
+// ==========================================
+// Visualizer & XY Pad
+// ==========================================
 void FilterVisualizer::paint(juce::Graphics& g) {
-    g.fillAll(juce::Colours::black.withAlpha(0.8f));
+    g.fillAll(juce::Colour(0xff1E272E));
     auto w = (float)getWidth();
     auto h = (float)getHeight();
 
     float y0dB = juce::jmap(0.0f, 40.0f, -60.0f, 0.0f, h);
-    g.setColour(juce::Colours::white.withAlpha(0.1f));
+    g.setColour(juce::Colours::white.withAlpha(0.15f));
     g.drawHorizontalLine((int)y0dB, 0.0f, w);
     g.setFont(10.0f);
     g.drawText("0dB", 2, (int)y0dB - 12, 30, 10, juce::Justification::left);
 
-    g.setColour(juce::Colours::white.withAlpha(0.15f));
     float freqs[] = { 100.0f, 500.0f, 1000.0f, 5000.0f, 10000.0f };
     juce::String labels[] = { "100Hz", "500Hz", "1kHz", "5kHz", "10kHz" };
 
@@ -27,15 +104,13 @@ void FilterVisualizer::paint(juce::Graphics& g) {
         g.setColour(juce::Colours::white.withAlpha(0.15f));
     }
 
-    g.setColour(juce::Colours::cyan);
-    auto cPos = processor.getLfoPos(1);
-    auto rPos = processor.getLfoPos(2);
+    g.setColour(juce::Colour(0xff00D2D3));
+    auto cPos = processor.getLfoPos(1); auto rPos = processor.getLfoPos(2);
 
     bool lfo1_isRand1 = ((int)processor.apvts.getRawParameterValue("lfo2wave")->load() == 3) && (processor.apvts.getRawParameterValue("lfo2en")->load() > 0.5f);
     bool lfo2_isRand1 = ((int)processor.apvts.getRawParameterValue("lfo3wave")->load() == 3) && (processor.apvts.getRawParameterValue("lfo3en")->load() > 0.5f);
 
-    auto lfo1Mod4 = processor.getLfoMod4(1);
-    auto lfo2Mod4 = processor.getLfoMod4(2);
+    auto lfo1Mod4 = processor.getLfoMod4(1); auto lfo2Mod4 = processor.getLfoMod4(2);
 
     auto getM = [](juce::Point<float> p, const std::array<float, 4>& m4, bool isRand1) -> std::array<float, 4> {
         std::array<float, 4> res;
@@ -52,43 +127,30 @@ void FilterVisualizer::paint(juce::Graphics& g) {
 
     for (int px = 0; px <= wInt; ++px) {
         float freq = 20.0f * std::pow(1000.0f, (float)px / w);
-
         auto calc = [&](juce::String s, int idx) -> float {
             if (processor.apvts.getRawParameterValue("enable" + s)->load() < 0.5f) return 0.0f;
-
             float baseCutoff = processor.apvts.getRawParameterValue("cutoff" + s)->load();
             float fc = baseCutoff * std::pow(2.0f, 4.0f * cM[idx]);
             float baseRes = processor.apvts.getRawParameterValue("res" + s)->load();
             float res = baseRes * std::pow(2.0f, 2.0f * rM[idx]);
-
             int modelIdx = (int)processor.apvts.getRawParameterValue("model" + s)->load();
             int slopeIdx = (int)processor.apvts.getRawParameterValue("slope" + s)->load();
             int t = (int)processor.apvts.getRawParameterValue("type" + s)->load();
 
-            float freqLimit = juce::jlimit(20.0f, 20000.0f, fc);
-            float w_norm = freq / freqLimit;
-            float w2 = w_norm * w_norm;
-            float mag = 1.0f;
-
+            float freqLimit = juce::jlimit(20.0f, 20000.0f, fc); float w_norm = freq / freqLimit; float w2 = w_norm * w_norm; float mag = 1.0f;
             if (modelIdx == 0 || modelIdx == 3 || modelIdx == 4 || modelIdx == 9 || modelIdx == 14 || modelIdx == 16 || modelIdx == 23) {
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
-                float adjustedRes = res;
-                if (modelIdx != 14 && stages > 1) adjustedRes = res * std::pow(0.6f, std::log2((float)stages));
-                float d = 1.0f / juce::jlimit(0.1f, 10.0f, adjustedRes);
-                float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w_norm * d, 2.0f));
-                float m = 1.0f / den;
-                if (t == 1) m *= w_norm; else if (t == 2) m *= w2; else if (t == 3) m *= std::abs(1.0f - w2);
-                mag = std::pow(m, stages);
-                if (modelIdx == 0 || modelIdx == 4 || modelIdx == 16 || modelIdx == 23) mag *= (1.0f + res * 0.1f);
+                float adjustedRes = res; if (modelIdx != 14 && stages > 1) adjustedRes = res * std::pow(0.6f, std::log2((float)stages));
+                float d = 1.0f / juce::jlimit(0.1f, 10.0f, adjustedRes); float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w_norm * d, 2.0f));
+                float m = 1.0f / den; if (t == 1) m *= w_norm; else if (t == 2) m *= w2; else if (t == 3) m *= std::abs(1.0f - w2);
+                mag = std::pow(m, stages); if (modelIdx == 0 || modelIdx == 4 || modelIdx == 16 || modelIdx == 23) mag *= (1.0f + res * 0.1f);
                 if (modelIdx == 9) mag *= juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 1.0f, 5.0f);
             }
             else if (modelIdx == 1 || modelIdx == 12 || modelIdx == 13 || modelIdx == 15) {
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 1 : (slopeIdx == 2) ? 2 : 4;
                 float r_scale = (modelIdx == 13) ? 5.0f : 4.0f;
-                float r_moog = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, r_scale);
-                if (stages > 1) r_moog *= std::pow(0.7f, std::log2((float)stages));
-                float real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + r_moog;
-                float imag_p = 4.0f * w_norm * (1.0f - w2);
+                float r_moog = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, r_scale); if (stages > 1) r_moog *= std::pow(0.7f, std::log2((float)stages));
+                float real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + r_moog; float imag_p = 4.0f * w_norm * (1.0f - w2);
                 mag = std::pow(1.0f / std::sqrt(real_p * real_p + imag_p * imag_p), stages);
                 if (slopeIdx == 0) { if (t == 1) mag *= w_norm; else if (t == 2) mag *= w2; else if (t == 3) mag *= std::abs(1.0f - w2); }
                 else { if (t == 1) mag *= w2; else if (t == 2) mag *= w2 * w2; else if (t == 3) mag *= std::abs(1.0f - w2 * w2); }
@@ -96,18 +158,15 @@ void FilterVisualizer::paint(juce::Graphics& g) {
             }
             else if (modelIdx == 2) {
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 1 : (slopeIdx == 2) ? 2 : 4;
-                float r_diode = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 15.0f);
-                if (stages > 1) r_diode *= std::pow(0.7f, std::log2((float)stages));
-                float real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + r_diode;
-                float imag_p = 3.5f * w_norm * (1.0f - w2);
+                float r_diode = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 15.0f); if (stages > 1) r_diode *= std::pow(0.7f, std::log2((float)stages));
+                float real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + r_diode; float imag_p = 3.5f * w_norm * (1.0f - w2);
                 mag = std::pow(1.0f / std::sqrt(real_p * real_p + imag_p * imag_p), stages);
                 if (slopeIdx == 0) { if (t == 1) mag *= w_norm; else if (t == 2) mag *= w2; else if (t == 3) mag *= std::abs(1.0f - w2); }
                 else { if (t == 1) mag *= w2 * w_norm; else if (t == 2) mag *= w2 * w2; else if (t == 3) mag *= std::abs(1.0f - w2 * w_norm); }
                 mag *= (1.0f + 0.2f * r_diode);
             }
             else if (modelIdx == 5) {
-                float v = juce::jmap(std::log10(freqLimit), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f);
-                v = juce::jlimit(0.0f, 4.0f, v); int idx_v = (int)v; float frac = v - idx_v; if (idx_v >= 4) { idx_v = 3; frac = 1.0f; }
+                float v = juce::jmap(std::log10(freqLimit), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f); int idx_v = (int)v; float frac = v - idx_v; if (idx_v >= 4) { idx_v = 3; frac = 1.0f; }
                 float f1_m[5] = { 730.f, 270.f, 300.f, 530.f, 400.f }; float f2_m[5] = { 1090.f, 2290.f, 870.f, 1840.f, 840.f }; float f3_m[5] = { 2440.f, 3010.f, 2240.f, 2480.f, 2800.f };
                 float f_arr[3] = { f1_m[idx_v] + (f1_m[idx_v + 1] - f1_m[idx_v]) * frac, f2_m[idx_v] + (f2_m[idx_v + 1] - f2_m[idx_v]) * frac, f3_m[idx_v] + (f3_m[idx_v + 1] - f3_m[idx_v]) * frac };
                 float mag_sum = 0.0f; float gains[3] = { 1.0f, 0.5f, 0.2f };
@@ -121,82 +180,51 @@ void FilterVisualizer::paint(juce::Graphics& g) {
             }
             else if (modelIdx == 6) {
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
-                float delaySamples = 44100.0f / juce::jlimit(20.0f, 20000.0f, fc);
-                float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.95f); if (t == 1 || t == 3) fb = -fb;
+                float delaySamples = 44100.0f / juce::jlimit(20.0f, 20000.0f, fc); float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.95f); if (t == 1 || t == 3) fb = -fb;
                 float wD = 2.0f * juce::MathConstants<float>::pi * freq * (delaySamples / 44100.0f);
                 float m = (t == 0 || t == 1) ? (1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD))) : std::sqrt(1.0f + fb * fb + 2.0f * fb * std::cos(wD));
                 mag = std::pow(m, stages);
             }
             else if (modelIdx == 7) {
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
-                float ms_res = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 2.5f);
-                float d = 1.0f / (ms_res + 0.1f);
-                float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w_norm * d, 2.0f));
-                float m = 1.0f / den;
+                float ms_res = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 2.5f); float d = 1.0f / (ms_res + 0.1f);
+                float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w_norm * d, 2.0f)); float m = 1.0f / den;
                 if (t == 1) m *= w_norm; else if (t == 2) m *= w2; else if (t == 3) m *= std::abs(1.0f - w2);
                 mag = std::pow(m, stages) * (1.0f + ms_res * 0.2f);
             }
             else if (modelIdx == 8) {
                 int stages = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
-                float phi = -2.0f * std::atan(freq / juce::jlimit(20.0f, 20000.0f, fc));
-                float fb = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 0.95f);
-                if (t == 1 || t == 3) fb = -fb;
+                float phi = -2.0f * std::atan(freq / juce::jlimit(20.0f, 20000.0f, fc)); float fb = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 0.95f); if (t == 1 || t == 3) fb = -fb;
                 float c_ap = std::cos(stages * phi); float s_ap = std::sin(stages * phi);
                 float den2 = (1.0f - fb * c_ap) * (1.0f - fb * c_ap) + (fb * s_ap) * (fb * s_ap);
-                float real_yap = (c_ap - fb) / den2; float imag_yap = s_ap / den2;
-                float real_out = 0.5f * (1.0f + real_yap); float imag_out = 0.5f * imag_yap;
+                float real_yap = (c_ap - fb) / den2; float imag_yap = s_ap / den2; float real_out = 0.5f * (1.0f + real_yap); float imag_out = 0.5f * imag_yap;
                 mag = std::sqrt(real_out * real_out + imag_out * imag_out);
             }
             else if (modelIdx == 10) {
-                float ms = juce::jmap(fc, 20.0f, 20000.0f, 50.0f, 0.5f);
-                float baseD = (ms / 1000.0f);
-                float wD1 = 2.0f * juce::MathConstants<float>::pi * freq * (baseD * 1.000f);
-                float wD2 = 2.0f * juce::MathConstants<float>::pi * freq * (baseD * 1.313f);
+                float ms = juce::jmap(fc, 20.0f, 20000.0f, 50.0f, 0.5f); float baseD = (ms / 1000.0f);
+                float wD1 = 2.0f * juce::MathConstants<float>::pi * freq * (baseD * 1.000f); float wD2 = 2.0f * juce::MathConstants<float>::pi * freq * (baseD * 1.313f);
                 float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.95f);
-                float m1 = 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD1));
-                float m2 = 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD2));
+                float m1 = 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD1)); float m2 = 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD2));
                 mag = (m1 + m2) * 0.5f;
             }
             else if (modelIdx == 11) {
                 int stages = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
-                float d = 1.0f / juce::jlimit(0.1f, 10.0f, res);
-                float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w_norm * d, 2.0f));
-                float bp_mag = (1.0f / den) * w_norm;
-                mag = 1.0f + std::pow(bp_mag, 1.2f) * res * ((float)stages * 0.1f);
+                float d = 1.0f / juce::jlimit(0.1f, 10.0f, res); float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w_norm * d, 2.0f));
+                float bp_mag = (1.0f / den) * w_norm; mag = 1.0f + std::pow(bp_mag, 1.2f) * res * ((float)stages * 0.1f);
             }
             else if (modelIdx >= 17 && modelIdx <= 20) {
-                int order = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
-                int sections = order / 2;
-                float rippleDb = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.1f, 3.0f);
-                float eps = std::sqrt(std::pow(10.0f, rippleDb / 10.0f) - 1.0f);
+                int order = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16; int sections = order / 2;
+                float rippleDb = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.1f, 3.0f); float eps = std::sqrt(std::pow(10.0f, rippleDb / 10.0f) - 1.0f);
                 float mag_total = 1.0f;
-
                 for (int k = 0; k < sections; ++k) {
                     float theta = juce::MathConstants<float>::pi * (2.0f * k + 1.0f) / (2.0f * order);
                     float stage_q = 0.707f; float freqScale = 1.0f;
-
-                    if (modelIdx == 17) {
-                        stage_q = 1.0f / (2.0f * std::sin(theta));
-                    }
-                    else if (modelIdx == 18) {
-                        float a = 1.0f / order * std::asinh(1.0f / eps);
-                        float real_p = -std::sinh(a) * std::sin(theta); float imag_p = std::cosh(a) * std::cos(theta);
-                        float wn2 = real_p * real_p + imag_p * imag_p; freqScale = std::sqrt(wn2); stage_q = std::sqrt(wn2) / (-2.0f * real_p);
-                    }
-                    else if (modelIdx == 19) {
-                        stage_q = 1.0f / (2.0f * std::sin(theta)) * 0.577f; freqScale = 1.0f + (float)order * 0.1f;
-                    }
-                    else if (modelIdx == 20) {
-                        float a = 1.0f / order * std::asinh(1.0f / (eps * 0.5f));
-                        float real_p = -std::sinh(a) * std::sin(theta); float imag_p = std::cosh(a) * std::cos(theta);
-                        float wn2 = real_p * real_p + imag_p * imag_p; freqScale = std::sqrt(wn2); stage_q = std::sqrt(wn2) / (-2.0f * real_p) * 1.2f;
-                    }
-
-                    float stage_w = freq / juce::jlimit(20.0f, 20000.0f, freqLimit * freqScale);
-                    float stage_w2 = stage_w * stage_w; float stage_d = 1.0f / stage_q;
-                    float den = std::sqrt(std::pow(1.0f - stage_w2, 2.0f) + std::pow(stage_w * stage_d, 2.0f));
-                    float m = 1.0f / den;
-
+                    if (modelIdx == 17) { stage_q = 1.0f / (2.0f * std::sin(theta)); }
+                    else if (modelIdx == 18) { float a = 1.0f / order * std::asinh(1.0f / eps); float real_p = -std::sinh(a) * std::sin(theta); float imag_p = std::cosh(a) * std::cos(theta); float wn2 = real_p * real_p + imag_p * imag_p; freqScale = std::sqrt(wn2); stage_q = std::sqrt(wn2) / (-2.0f * real_p); }
+                    else if (modelIdx == 19) { stage_q = 1.0f / (2.0f * std::sin(theta)) * 0.577f; freqScale = 1.0f + (float)order * 0.1f; }
+                    else if (modelIdx == 20) { float a = 1.0f / order * std::asinh(1.0f / (eps * 0.5f)); float real_p = -std::sinh(a) * std::sin(theta); float imag_p = std::cosh(a) * std::cos(theta); float wn2 = real_p * real_p + imag_p * imag_p; freqScale = std::sqrt(wn2); stage_q = std::sqrt(wn2) / (-2.0f * real_p) * 1.2f; }
+                    float stage_w = freq / juce::jlimit(20.0f, 20000.0f, freqLimit * freqScale); float stage_w2 = stage_w * stage_w; float stage_d = 1.0f / stage_q;
+                    float den = std::sqrt(std::pow(1.0f - stage_w2, 2.0f) + std::pow(stage_w * stage_d, 2.0f)); float m = 1.0f / den;
                     if (modelIdx == 20) { m = std::abs(1.0f - stage_w2 * 0.5f) / den; }
                     else { if (t == 1) m *= stage_w; else if (t == 2) m *= stage_w2; else if (t == 3) m *= std::abs(1.0f - stage_w2); }
                     mag_total *= m;
@@ -291,21 +319,23 @@ void XYPadComponent::timerCallback() {
 
 void XYPadComponent::paint(juce::Graphics& g) {
     auto b = getLocalBounds().toFloat();
-    g.setColour(juce::Colours::black.withAlpha(0.6f)); g.fillRoundedRectangle(b, 10.0f);
-    g.setColour(juce::Colours::white.withAlpha(0.2f)); g.drawRoundedRectangle(b, 10.0f, 2.0f);
+    g.setColour(juce::Colour(0xff1E272E));
+    g.fillRoundedRectangle(b, 8.0f);
+    g.setColour(juce::Colour(0xffD5DDE5));
+    g.drawRoundedRectangle(b, 8.0f, 1.5f);
 
-    g.setColour(juce::Colours::white.withAlpha(0.4f)); g.setFont(14.0f);
+    g.setColour(juce::Colours::white.withAlpha(0.3f)); g.setFont(14.0f);
     g.drawText("A", 10, 10, 20, 20, juce::Justification::centred);
     g.drawText("B", getWidth() - 30, 10, 20, 20, juce::Justification::centred);
     g.drawText("C", 10, getHeight() - 30, 20, 20, juce::Justification::centred);
     g.drawText("D", getWidth() - 30, getHeight() - 30, 20, 20, juce::Justification::centred);
 
-    juce::Colour colors[] = { juce::Colours::cyan, juce::Colours::magenta, juce::Colours::yellow };
+    juce::Colour colors[] = { juce::Colour(0xff00D2D3), juce::Colour(0xffFF9FF3), juce::Colour(0xffFEECA1) };
     for (int i = 0; i < 3; ++i) {
         if (processor.apvts.getRawParameterValue("lfo" + juce::String(i + 1) + "en")->load() < 0.5f) continue;
 
         for (int t = 0; t < 30; ++t) {
-            int idx = (trailIdx[i] + t) % 30; auto pt = trails[i][idx]; float alpha = (float)t / 30.0f * 0.4f;
+            int idx = (trailIdx[i] + t) % 30; auto pt = trails[i][idx]; float alpha = (float)t / 30.0f * 0.5f;
             g.setColour(colors[i].withAlpha(alpha)); g.fillEllipse(pt.x * getWidth() - 3, pt.y * getHeight() - 3, 6, 6);
         }
 
@@ -375,6 +405,8 @@ void XYPadComponent::updatePosition(const juce::MouseEvent& e) {
 QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(QuadMorphFilterAudioProcessor& p)
     : AudioProcessorEditor(&p), audioProcessor(p), visualizer(p), xyPad(p)
 {
+    juce::LookAndFeel::setDefaultLookAndFeel(&customLookAndFeel);
+
     addAndMakeVisible(visualizer); addAndMakeVisible(xyPad);
     setupFilterGroup(groupA, "A", "Filter A"); setupFilterGroup(groupB, "B", "Filter B");
     setupFilterGroup(groupC, "C", "Filter C"); setupFilterGroup(groupD, "D", "Filter D");
@@ -383,18 +415,19 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(QuadMor
     auto setupMaster = [&](juce::Label& l, juce::Slider& sl, juce::String txt, juce::String id, std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& att) {
         l.setText(txt, juce::dontSendNotification); l.setJustificationType(juce::Justification::centredRight); addAndMakeVisible(l);
         sl.setSliderStyle(juce::Slider::LinearHorizontal); sl.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
+        sl.setColour(juce::Slider::thumbColourId, juce::Colour(0xff2980B9));
         addAndMakeVisible(sl); att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, id, sl);
         };
     setupMaster(masterGainLabel, masterGainSlider, "Out Gain", "masterGain", mgAtt);
     setupMaster(dryWetLabel, dryWetSlider, "Dry/Wet", "dryWet", dwAtt);
     setupMaster(ceilingLabel, ceilingSlider, "Limit Ceil", "limiterCeiling", clAtt);
 
-    setSize(1000, 900);
+    setSize(1000, 680);
 }
 
 void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce::String s, juce::String name) {
     g.enableButton.setButtonText(name); g.enableButton.setClickingTogglesState(true);
-    g.enableButton.setColour(juce::TextButton::textColourOnId, juce::Colours::cyan);
+    g.enableButton.setColour(juce::TextButton::textColourOnId, juce::Colour(0xff00D2D3));
     addAndMakeVisible(g.enableButton);
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, "enable" + s, g.enableButton);
 
@@ -417,6 +450,7 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce:
     auto setup = [&](juce::Label& l, juce::Slider& sl, juce::String txt, juce::String id, std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& att) {
         l.setText(txt, juce::dontSendNotification); addAndMakeVisible(l);
         sl.setSliderStyle(juce::Slider::LinearHorizontal); sl.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
+        sl.setColour(juce::Slider::thumbColourId, juce::Colour(0xff00D2D3));
         addAndMakeVisible(sl); att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, id + s, sl);
         };
     setup(g.cutoffLabel, g.cutoff, "Cut", "cutoff", g.cAtt); setup(g.resLabel, g.res, "Res", "res", g.rAtt);
@@ -424,7 +458,7 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce:
 
 void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, juce::String name) {
     juce::String id = "lfo" + juce::String(idx);
-    juce::Colour lfoCols[] = { juce::Colours::cyan, juce::Colours::magenta, juce::Colours::yellow };
+    juce::Colour lfoCols[] = { juce::Colour(0xff00D2D3), juce::Colour(0xffFF9FF3), juce::Colour(0xffFEECA1) };
 
     g.enableButton.setButtonText(name); g.enableButton.setClickingTogglesState(true);
     g.enableButton.setColour(juce::TextButton::textColourOnId, lfoCols[idx - 1]);
@@ -459,22 +493,24 @@ void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, ju
     g.rateSync.addItemList(syncRates, 1); addAndMakeVisible(g.rateSync);
     g.rsAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, id + "rateSync", g.rateSync);
 
-    g.rateFree.setSliderStyle(juce::Slider::LinearHorizontal); g.rateFree.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 45, 18);
-    addAndMakeVisible(g.rateFree);
-    g.rfAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, id + "rateFree", g.rateFree);
+    auto setupSlider = [&](juce::Slider& sl, std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& att, juce::String paramId) {
+        sl.setSliderStyle(juce::Slider::LinearHorizontal); sl.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 45, 18);
+        sl.setColour(juce::Slider::thumbColourId, lfoCols[idx - 1]);
+        addAndMakeVisible(sl); att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, paramId, sl);
+        };
 
-    g.minSlider.setSliderStyle(juce::Slider::LinearHorizontal); g.minSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 45, 18);
-    addAndMakeVisible(g.minSlider);
-    g.minAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, id + "min", g.minSlider);
-
-    g.maxSlider.setSliderStyle(juce::Slider::LinearHorizontal); g.maxSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 45, 18);
-    addAndMakeVisible(g.maxSlider);
-    g.maxAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, id + "max", g.maxSlider);
+    setupSlider(g.rateFree, g.rfAtt, id + "rateFree");
+    setupSlider(g.minSlider, g.minAtt, id + "min");
+    setupSlider(g.maxSlider, g.maxAtt, id + "max");
 }
 
-QuadMorphFilterAudioProcessorEditor::~QuadMorphFilterAudioProcessorEditor() {}
+QuadMorphFilterAudioProcessorEditor::~QuadMorphFilterAudioProcessorEditor() {
+    juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
+}
 
-void QuadMorphFilterAudioProcessorEditor::paint(juce::Graphics& g) { g.fillAll(juce::Colours::darkgrey.darker(0.9f)); }
+void QuadMorphFilterAudioProcessorEditor::paint(juce::Graphics& g) {
+    g.fillAll(juce::Colour(0xffF0F4F8));
+}
 
 void QuadMorphFilterAudioProcessorEditor::resized() {
     auto b = getLocalBounds().reduced(15);
@@ -483,8 +519,9 @@ void QuadMorphFilterAudioProcessorEditor::resized() {
     xyPad.setBounds(top.reduced(5));
 
     b.removeFromTop(10);
+
     for (auto* g : { &groupA, &groupB, &groupC, &groupD }) {
-        auto r = b.removeFromTop(40).reduced(5, 2);
+        auto r = b.removeFromTop(38).reduced(5, 2);
         g->enableButton.setBounds(r.removeFromLeft(60).reduced(0, 5));
         g->model.setBounds(r.removeFromLeft(115).reduced(2, 5));
         g->type.setBounds(r.removeFromLeft(60).reduced(2, 5));
@@ -495,9 +532,9 @@ void QuadMorphFilterAudioProcessorEditor::resized() {
         g->resLabel.setBounds(resArea.removeFromLeft(30)); g->res.setBounds(resArea);
     }
 
-    b.removeFromTop(15);
+    b.removeFromTop(10);
     for (int i = 0; i < 3; ++i) {
-        auto r = b.removeFromTop(40).reduced(5, 2);
+        auto r = b.removeFromTop(38).reduced(5, 2);
         lfos[i].enableButton.setBounds(r.removeFromLeft(100).reduced(0, 5));
         lfos[i].wave.setBounds(r.removeFromLeft(120).withSizeKeepingCentre(115, 22));
         lfos[i].boundCombo.setBounds(r.removeFromLeft(70).withSizeKeepingCentre(65, 22));
@@ -519,7 +556,7 @@ void QuadMorphFilterAudioProcessorEditor::resized() {
     }
 
     b.removeFromTop(15);
-    auto masterArea = b.removeFromTop(40).reduced(5, 2);
+    auto masterArea = b.removeFromTop(38).reduced(5, 2);
     auto cellW = masterArea.getWidth() / 3;
 
     auto gainRect = masterArea.removeFromLeft(cellW);
