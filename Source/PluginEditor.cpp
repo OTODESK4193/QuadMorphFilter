@@ -70,27 +70,27 @@ void FilterVisualizer::paint(juce::Graphics& g) {
             float w2 = w_norm * w_norm;
             float mag = 1.0f;
 
-            if (modelIdx == 0 || modelIdx == 3 || modelIdx == 4 || modelIdx == 9) {
+            if (modelIdx == 0 || modelIdx == 3 || modelIdx == 4 || modelIdx == 9 || modelIdx == 14 || modelIdx == 16) {
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
                 float adjustedRes = res;
-                if (stages > 1) adjustedRes = res * std::pow(0.6f, std::log2((float)stages));
+                if (modelIdx != 14 && stages > 1) adjustedRes = res * std::pow(0.6f, std::log2((float)stages));
                 float d = 1.0f / juce::jlimit(0.1f, 10.0f, adjustedRes);
                 float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w_norm * d, 2.0f));
                 float m = 1.0f / den;
                 if (t == 1) m *= w_norm; else if (t == 2) m *= w2; else if (t == 3) m *= std::abs(1.0f - w2);
                 mag = std::pow(m, stages);
-                if (modelIdx == 0 || modelIdx == 4) mag *= (1.0f + res * 0.1f);
+                if (modelIdx == 0 || modelIdx == 4 || modelIdx == 16) mag *= (1.0f + res * 0.1f);
                 if (modelIdx == 9) mag *= juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 1.0f, 5.0f);
             }
-            else if (modelIdx == 1) {
+            else if (modelIdx == 1 || modelIdx == 12 || modelIdx == 13 || modelIdx == 15) {
                 int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 1 : (slopeIdx == 2) ? 2 : 4;
-                float r_moog = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 4.0f);
+                float r_scale = (modelIdx == 13) ? 5.0f : 4.0f;
+                float r_moog = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, r_scale);
                 if (stages > 1) r_moog *= std::pow(0.7f, std::log2((float)stages));
                 float real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + r_moog;
                 float imag_p = 4.0f * w_norm * (1.0f - w2);
                 mag = std::pow(1.0f / std::sqrt(real_p * real_p + imag_p * imag_p), stages);
                 if (slopeIdx == 0) { if (t == 1) mag *= w_norm; else if (t == 2) mag *= w2; else if (t == 3) mag *= std::abs(1.0f - w2); }
-                // 【完全修正完了】タイポ m *= w2 * w2; -> mag *= w2 * w2; 
                 else { if (t == 1) mag *= w2; else if (t == 2) mag *= w2 * w2; else if (t == 3) mag *= std::abs(1.0f - w2 * w2); }
                 mag *= (1.0f + 0.5f * r_moog);
             }
@@ -300,7 +300,7 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce:
     addAndMakeVisible(g.enableButton);
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, "enable" + s, g.enableButton);
 
-    g.model.addItemList({ "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR", "Formant (Vowel)", "Comb Filter", "MS-20 (Screaming)", "All-Pass Phaser", "Wavefolder", "Reverb (Metallic)", "Kilo All-Pass" }, 1); addAndMakeVisible(g.model);
+    g.model.addItemList({ "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR", "Formant (Vowel)", "Comb Filter", "MS-20 (Screaming)", "All-Pass Phaser", "Wavefolder", "Reverb (Metallic)", "Kilo All-Pass", "Prophet (Curtis)", "SSM 2040", "CS-80 (Yamaha)", "Jupiter (Roland)", "EDP Wasp (CMOS)" }, 1); addAndMakeVisible(g.model);
     g.mAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "model" + s, g.model);
 
     g.type.addItemList({ "LP", "BP", "HP", "Notch" }, 1); addAndMakeVisible(g.type);

@@ -26,7 +26,7 @@ void TptFilter::reset()
     for (int stage = 0; stage < 8; ++stage) {
         for (int ch = 0; ch < 2; ++ch) {
             s1[stage][ch] = 0.0f; s2[stage][ch] = 0.0f;
-            sk_s1[stage][ch] = 0.0f; sk_s2[stage][ch] = 0.0f; // MS-20 State
+            sk_s1[stage][ch] = 0.0f; sk_s2[stage][ch] = 0.0f;
             for (int pole = 0; pole < 4; ++pole) zdfState[stage][ch][pole] = 0.0f;
             combWriteIdx[stage][ch] = 0;
             for (int i = 0; i < 4096; ++i) combBuffer[stage][ch][i] = 0.0f;
@@ -57,18 +57,19 @@ void TptFilter::setSlope(int index)
     else if (filterModel == 8 || filterModel == 11) {
         currentStages = (index == 0) ? 2 : (index == 1) ? 4 : (index == 2) ? 8 : 16;
     }
-    else if (filterModel == 0 || filterModel == 3 || filterModel == 4 || filterModel == 6 || filterModel == 7 || filterModel == 9) {
+    else if (filterModel == 0 || filterModel == 3 || filterModel == 4 || filterModel == 6 || filterModel == 7 || filterModel == 9 || filterModel == 14 || filterModel == 16) {
+        // SVF Base (CS-80, Wasp added)
         currentStages = (index == 0) ? 1 : (index == 1) ? 2 : (index == 2) ? 4 : 8;
     }
     else {
+        // Ladder Base (Moog, Diode, Prophet, SSM, Jupiter)
         currentStages = (index == 0) ? 1 : (index == 1) ? 1 : (index == 2) ? 2 : 4;
     }
 
-    // 【CPU最適化】段数に依存する激重な数学演算を1回だけ計算してキャッシュする
     scalerSVF = (currentStages > 1) ? std::pow(0.6f, std::log2((float)currentStages)) : 1.0f;
     scalerMoog = (currentStages > 1) ? std::pow(0.7f, std::log2((float)currentStages)) : 1.0f;
     scalerDiode = (currentStages > 1) ? std::pow(0.7f, std::log2((float)currentStages)) : 1.0f;
-    lastCutoff = -1.0f; // 強制アップデートフラグ
+    lastCutoff = -1.0f;
 }
 
 void TptFilter::updateCoefficients()
@@ -76,10 +77,9 @@ void TptFilter::updateCoefficients()
     float currentCutoff = cutoff.getNextValue();
     float currentRes = resonance.getNextValue();
 
-    // 【CPU最適化】カットオフかレゾナンスが変動した時のみ重い演算（tan, log10）を実行する
     if (std::abs(currentCutoff - lastCutoff) > 0.01f || std::abs(currentRes - lastRes) > 0.001f) {
 
-        if (filterModel == 5) { // Formant
+        if (filterModel == 5) {
             float v = juce::jlimit(0.0f, 4.0f, juce::jmap(std::log10(currentCutoff), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f));
             int idx = (int)v; float frac = v - idx; if (idx >= 4) { idx = 3; frac = 1.0f; }
             float f1_map[5] = { 730.f, 270.f, 300.f, 530.f, 400.f }; float f2_map[5] = { 1090.f, 2290.f, 870.f, 1840.f, 840.f }; float f3_map[5] = { 2440.f, 3010.f, 2240.f, 2480.f, 2800.f };
@@ -92,12 +92,13 @@ void TptFilter::updateCoefficients()
             float wd = juce::MathConstants<float>::pi * currentCutoff / (float)sampleRate;
             g = std::tan(wd); ladderG = g / (1.0f + g);
 
-            if (filterModel == 0 || filterModel == 3 || filterModel == 4 || filterModel == 6 || filterModel == 7 || filterModel == 9 || filterModel == 11) {
-                float adjustedRes = currentRes * ((filterModel != 7 && filterModel != 11) ? scalerSVF : 1.0f);
+            if (filterModel == 0 || filterModel == 3 || filterModel == 4 || filterModel == 6 || filterModel == 7 || filterModel == 9 || filterModel == 11 || filterModel == 14 || filterModel == 16) {
+                float adjustedRes = currentRes * ((filterModel != 7 && filterModel != 11 && filterModel != 14) ? scalerSVF : 1.0f);
                 R = 1.0f / (2.0f * adjustedRes); h = 1.0f / (1.0f + 2.0f * R * g + g * g);
             }
-            else if (filterModel == 1) {
-                ladderRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, 4.0f) * scalerMoog;
+            else if (filterModel == 1 || filterModel == 12 || filterModel == 13 || filterModel == 15) {
+                float r_scale = (filterModel == 13) ? 5.0f : 4.0f; // SSM2040 is driven harder
+                ladderRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, r_scale) * scalerMoog;
             }
             else if (filterModel == 2) {
                 ladderRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, 15.0f) * scalerDiode;
@@ -122,13 +123,14 @@ void TptFilter::process(juce::AudioBuffer<float>& buffer)
 float TptFilter::processSample(int channel, float x)
 {
     float comp = 1.0f;
-    if (filterModel == 0 || filterModel == 4 || filterModel == 5 || filterModel == 6 || filterModel == 9 || filterModel == 11) comp = 1.0f + resonance.getCurrentValue() * 0.1f;
-    else if (filterModel == 1) comp = 1.0f + 0.5f * ladderRes;
+    if (filterModel == 0 || filterModel == 4 || filterModel == 5 || filterModel == 6 || filterModel == 9 || filterModel == 11 || filterModel == 16) comp = 1.0f + resonance.getCurrentValue() * 0.1f;
+    else if (filterModel == 1 || filterModel == 12 || filterModel == 13 || filterModel == 15) comp = 1.0f + 0.5f * ladderRes;
     else if (filterModel == 2) comp = 1.0f + 0.2f * ladderRes;
     else if (filterModel == 7) comp = 1.0f + resonance.getCurrentValue() * 0.15f;
+    // SEM(3) と CS-80(14) は低域補償なし (自然な特性を維持)
     x *= comp;
 
-    if (filterModel == 4) { // SRR
+    if (filterModel == 4) {
         float targetSR = cutoff.getCurrentValue(); float phaseInc = targetSR / sampleRate; srrPhase[channel] += phaseInc;
         if (srrPhase[channel] >= 1.0f) {
             srrPhase[channel] -= std::floor(srrPhase[channel]); float bits = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 16.0f, 2.0f);
@@ -141,7 +143,7 @@ float TptFilter::processSample(int channel, float x)
     rmsIn[channel] = (1.0f - envCoefIn) * rmsIn[channel] + envCoefIn * (x * x);
     float out = x;
 
-    if (filterModel == 0 || filterModel == 4) {
+    if (filterModel == 0 || filterModel == 4) { // Clean / SRR
         for (int stage = 0; stage < currentStages; ++stage) {
             float hp = (out - (2.0f * R + g) * s1[stage][channel] - s2[stage][channel]) * h;
             float bp = g * hp + s1[stage][channel]; float lp = g * bp + s2[stage][channel];
@@ -149,44 +151,62 @@ float TptFilter::processSample(int channel, float x)
             if (filterType == 0) out = lp; else if (filterType == 1) out = bp; else if (filterType == 2) out = hp; else out = lp + hp;
         }
     }
-    else if (filterModel == 1) {
+    else if (filterModel == 1 || filterModel == 12 || filterModel == 13 || filterModel == 15) { // Ladder Series (Moog, Prophet, SSM, Jupiter)
         for (int stage = 0; stage < currentStages; ++stage) {
             float s1_ = zdfState[stage][channel][0]; float s2_ = zdfState[stage][channel][1]; float s3_ = zdfState[stage][channel][2]; float s4_ = zdfState[stage][channel][3];
             float S1 = s1_ / (1.0f + g); float S2 = s2_ / (1.0f + g); float S3 = s3_ / (1.0f + g); float S4 = s4_ / (1.0f + g);
             float sigma = ladderG * ladderG * ladderG * S1 + ladderG * ladderG * S2 + ladderG * S3 + S4;
-            float u = std::tanh((out - ladderRes * sigma) / (1.0f + ladderRes * ladderG * ladderG * ladderG * ladderG));
-            float v1 = (u - s1_) * ladderG; float y1 = v1 + s1_; zdfState[stage][channel][0] = s1_ + 2.0f * v1;
-            float v2 = (y1 - s2_) * ladderG; float y2 = v2 + s2_; zdfState[stage][channel][1] = s2_ + 2.0f * v2;
-            float v3 = (y2 - s3_) * ladderG; float y3 = v3 + s3_; zdfState[stage][channel][2] = s3_ + 2.0f * v3;
-            float v4 = (y3 - s4_) * ladderG; float y4 = v4 + s4_; zdfState[stage][channel][3] = s4_ + 2.0f * v4;
+
+            float u = out - ladderRes * sigma;
+            // 回路ごとのサチュレーションモデリング
+            if (filterModel == 1) u = std::tanh(u / (1.0f + ladderRes * ladderG * ladderG * ladderG * ladderG)); // Moog
+            else if (filterModel == 12) u = std::tanh(u * 1.1f) / 1.1f; // Prophet (Curtis): 洗練されたクリップ
+            else if (filterModel == 13) u = std::tanh(u * 1.5f) / 1.5f; // SSM2040: ドライブ強め
+            else if (filterModel == 15) u = u / (1.0f + std::abs(u * 0.5f)); // Jupiter: IR3109風のソフトクリップ
+
+            float v1 = (u - s1_) * ladderG; float y1 = v1 + s1_;
+            if (filterModel == 15) y1 = std::tanh(y1); // Jupiterは各段OTAサチュレーション
+            zdfState[stage][channel][0] = s1_ + 2.0f * v1;
+
+            float v2 = (y1 - s2_) * ladderG; float y2 = v2 + s2_;
+            if (filterModel == 15) y2 = std::tanh(y2);
+            zdfState[stage][channel][1] = s2_ + 2.0f * v2;
+
+            float v3 = (y2 - s3_) * ladderG; float y3 = v3 + s3_;
+            if (filterModel == 15) y3 = std::tanh(y3);
+            zdfState[stage][channel][2] = s3_ + 2.0f * v3;
+
+            float v4 = (y3 - s4_) * ladderG; float y4 = v4 + s4_;
+            if (filterModel == 15) y4 = std::tanh(y4);
+            zdfState[stage][channel][3] = s4_ + 2.0f * v4;
+
             if (slopeIdx == 0) { if (filterType == 0) out = y2; else if (filterType == 1) out = 2.0f * (y1 - y2); else if (filterType == 2) out = out - 2.0f * y1 + y2; else out = y2 + (out - 2.0f * y1 + y2); }
             else { if (filterType == 0) out = y4; else if (filterType == 1) out = 4.0f * (y2 - y4); else if (filterType == 2) out = out - 4.0f * y1 + 6.0f * y2 - 4.0f * y3 + y4; else out = y4 + (out - 4.0f * y1 + 6.0f * y2 - 4.0f * y3 + y4); }
         }
     }
     else if (filterModel == 2) {
-        // 【アルゴリズム刷新】Diode Ladder の真のローディング近似 (ZDF Implicit Topology)
         for (int stage = 0; stage < currentStages; ++stage) {
-            // 前段への負荷を模倣する非線形フィードバックパス
             float fb = std::tanh(out - ladderRes * zdfState[stage][channel][3]);
-            float G_half = ladderG * 0.5f;
-
-            // 各極間のローディングを反映させたマトリクス近似
-            float v1 = (fb - zdfState[stage][channel][0]) * ladderG; float y1 = v1 + zdfState[stage][channel][0]; zdfState[stage][channel][0] = y1 + v1 - G_half * zdfState[stage][channel][1]; y1 = std::tanh(y1);
-            float v2 = (y1 - zdfState[stage][channel][1]) * ladderG; float y2 = v2 + zdfState[stage][channel][1]; zdfState[stage][channel][1] = y2 + v2 - G_half * zdfState[stage][channel][2]; y2 = std::tanh(y2);
-            float v3 = (y2 - zdfState[stage][channel][2]) * ladderG; float y3 = v3 + zdfState[stage][channel][2]; zdfState[stage][channel][2] = y3 + v3 - G_half * zdfState[stage][channel][3]; y3 = std::tanh(y3);
+            float G_h = ladderG * 0.5f;
+            float v1 = (fb - zdfState[stage][channel][0]) * ladderG; float y1 = v1 + zdfState[stage][channel][0]; zdfState[stage][channel][0] = y1 + v1 - G_h * zdfState[stage][channel][1]; y1 = std::tanh(y1);
+            float v2 = (y1 - zdfState[stage][channel][1]) * ladderG; float y2 = v2 + zdfState[stage][channel][1]; zdfState[stage][channel][1] = y2 + v2 - G_h * zdfState[stage][channel][2]; y2 = std::tanh(y2);
+            float v3 = (y2 - zdfState[stage][channel][2]) * ladderG; float y3 = v3 + zdfState[stage][channel][2]; zdfState[stage][channel][2] = y3 + v3 - G_h * zdfState[stage][channel][3]; y3 = std::tanh(y3);
             float v4 = (y3 - zdfState[stage][channel][3]) * ladderG; float y4 = v4 + zdfState[stage][channel][3]; zdfState[stage][channel][3] = y4 + v4;
-
-            if (y4 > 0.0f) y4 *= 1.2f; y4 = std::tanh(y4); // アシッド特有の非対称波形
+            if (y4 > 0.0f) y4 *= 1.2f; y4 = std::tanh(y4);
             if (slopeIdx == 0) { if (filterType == 0) out = y2; else if (filterType == 1) out = y1 - y2; else if (filterType == 2) out = out - y1; else out = y2 + (out - y1); }
             else { if (filterType == 0) out = y4; else if (filterType == 1) out = y2 - y4; else if (filterType == 2) out = out - y2; else out = y4 + (out - y2); }
         }
     }
-    else if (filterModel == 3) {
+    else if (filterModel == 3 || filterModel == 14) { // SEM & CS-80
         for (int stage = 0; stage < currentStages; ++stage) {
-            float drivenOut = std::tanh(out * 1.2f);
+            float drivenOut = (filterModel == 14) ? out : std::tanh(out * 1.2f); // CS-80は入力歪みを抑える
             float hp = (drivenOut - (2.0f * R + g) * s1[stage][channel] - s2[stage][channel]) * h;
             float bp = g * hp + s1[stage][channel]; float lp = g * bp + s2[stage][channel];
-            s1[stage][channel] = std::tanh(g * hp + bp); s2[stage][channel] = std::tanh(g * bp + lp);
+
+            // CS-80は極めてクリーンだが僅かな非対称性を持つ
+            if (filterModel == 14) { s1[stage][channel] = g * hp + bp; s2[stage][channel] = g * bp + lp; }
+            else { s1[stage][channel] = std::tanh(g * hp + bp); s2[stage][channel] = std::tanh(g * bp + lp); }
+
             if (filterType == 0) out = lp; else if (filterType == 1) out = bp; else if (filterType == 2) out = hp; else out = lp + hp;
         }
     }
@@ -224,34 +244,14 @@ float TptFilter::processSample(int channel, float x)
         }
     }
     else if (filterModel == 7) {
-        // 【アルゴリズム刷新】MS-20 真のZDF Sallen-Key トポロジー
-        float ms_k = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 0.0f, 2.5f); // Korg35 Resonance K
+        float ms_k = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 0.0f, 2.5f);
         for (int stage = 0; stage < currentStages; ++stage) {
-            float g_sk = g;
-
-            // Korg35特有の非対称フィードバッククリッピング
             float fb = sk_s2[stage][channel] * ms_k;
-            if (fb > 0.0f) fb = std::tanh(fb * 1.5f);
-            else fb = std::tanh(fb * 0.8f);
-
-            // Sallen-Key ZDF 解析解
-            float v1 = (out - fb - sk_s1[stage][channel]) * g_sk / (1.0f + g_sk);
-            float y1 = v1 + sk_s1[stage][channel];
-            sk_s1[stage][channel] = y1 + v1;
-
-            float v2 = (y1 - sk_s2[stage][channel]) * g_sk / (1.0f + g_sk);
-            float y2 = v2 + sk_s2[stage][channel];
-            sk_s2[stage][channel] = y2 + v2;
-
-            // MS-20のマルチモード抽出 (HPFは入力とLPFの差分)
-            float lp = y2;
-            float hp = out - y1; // 簡易抽出
-            float bp = y1 - y2;
-
-            if (filterType == 0) out = lp;
-            else if (filterType == 1) out = bp;
-            else if (filterType == 2) out = hp;
-            else out = lp + hp;
+            if (fb > 0.0f) fb = std::tanh(fb * 1.5f); else fb = std::tanh(fb * 0.8f);
+            float v1 = (out - fb - sk_s1[stage][channel]) * g / (1.0f + g); float y1 = v1 + sk_s1[stage][channel]; sk_s1[stage][channel] = y1 + v1;
+            float v2 = (y1 - sk_s2[stage][channel]) * g / (1.0f + g); float y2 = v2 + sk_s2[stage][channel]; sk_s2[stage][channel] = y2 + v2;
+            float lp = y2; float hp = out - y1; float bp = y1 - y2;
+            if (filterType == 0) out = lp; else if (filterType == 1) out = bp; else if (filterType == 2) out = hp; else out = lp + hp;
         }
     }
     else if (filterModel == 8) {
@@ -277,9 +277,7 @@ float TptFilter::processSample(int channel, float x)
     else if (filterModel == 10) {
         float ms = juce::jmap(cutoff.getCurrentValue(), 20.0f, 20000.0f, 50.0f, 0.5f);
         float baseSamples = (ms / 1000.0f) * sampleRate;
-        float d1 = juce::jlimit(1.0f, 4095.0f, baseSamples * 1.000f);
-        float d2 = juce::jlimit(1.0f, 4095.0f, baseSamples * 1.313f);
-        float d_ap = juce::jlimit(1.0f, 4095.0f, baseSamples * 0.471f);
+        float d1 = juce::jlimit(1.0f, 4095.0f, baseSamples * 1.000f); float d2 = juce::jlimit(1.0f, 4095.0f, baseSamples * 1.313f); float d_ap = juce::jlimit(1.0f, 4095.0f, baseSamples * 0.471f);
         float fb = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 0.0f, 0.95f);
 
         auto readDelay = [&](int stage, float delay) {
@@ -290,8 +288,7 @@ float TptFilter::processSample(int channel, float x)
             };
 
         float c1_out = readDelay(0, d1); float c2_out = readDelay(1, d2);
-        combBuffer[0][channel][combWriteIdx[0][channel]] = std::tanh(out + c1_out * fb);
-        combBuffer[1][channel][combWriteIdx[1][channel]] = std::tanh(out + c2_out * fb);
+        combBuffer[0][channel][combWriteIdx[0][channel]] = std::tanh(out + c1_out * fb); combBuffer[1][channel][combWriteIdx[1][channel]] = std::tanh(out + c2_out * fb);
         float mixed = (c1_out + c2_out) * 0.707f;
 
         float ap_out = readDelay(2, d_ap);
@@ -299,11 +296,7 @@ float TptFilter::processSample(int channel, float x)
         float reverb_out = ap_out - mixed * 0.5f;
 
         for (int s = 0; s < 3; ++s) combWriteIdx[s][channel] = (combWriteIdx[s][channel] + 1) % 4096;
-
-        if (filterType == 0) out = reverb_out;
-        else if (filterType == 1) out = (out + reverb_out) * 0.5f;
-        else if (filterType == 2) out = out - reverb_out * 0.5f;
-        else out = std::sin(reverb_out * 3.0f);
+        if (filterType == 0) out = reverb_out; else if (filterType == 1) out = (out + reverb_out) * 0.5f; else if (filterType == 2) out = out - reverb_out * 0.5f; else out = std::sin(reverb_out * 3.0f);
     }
     else if (filterModel == 11) {
         for (int stage = 0; stage < currentStages; ++stage) {
@@ -312,6 +305,17 @@ float TptFilter::processSample(int channel, float x)
             s1[stage][channel] = g * hp + bp; s2[stage][channel] = g * bp + lp;
             out = lp - 2.0f * R * bp + hp;
         }
+    }
+    else if (filterModel == 16) { // 【追加】EDP Wasp (CMOS)
+        auto waspClip = [](float v) { return v / (1.0f + std::abs(v * 2.5f)); }; // CMOSの激しい歪み
+        for (int stage = 0; stage < currentStages; ++stage) {
+            float hp = (out - (2.0f * R + g) * s1[stage][channel] - s2[stage][channel]) * h;
+            float bp = g * hp + s1[stage][channel]; float lp = g * bp + s2[stage][channel];
+            s1[stage][channel] = waspClip(g * hp + bp); // 積分器内部で電源電圧に張り付く
+            s2[stage][channel] = waspClip(g * bp + lp);
+            if (filterType == 0) out = lp; else if (filterType == 1) out = bp; else if (filterType == 2) out = hp; else out = lp + hp;
+        }
+        out = std::clamp(out * 1.5f, -1.0f, 1.0f); // 最終段もハードクリップ
     }
 
     float envCoefOut = 0.005f;
@@ -335,8 +339,8 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
     float w2 = w * w;
     float mag = 1.0f;
 
-    if (filterModel == 0 || filterModel == 3 || filterModel == 4 || filterModel == 9) {
-        float adjustedRes = res * scalerSVF;
+    if (filterModel == 0 || filterModel == 3 || filterModel == 4 || filterModel == 9 || filterModel == 14 || filterModel == 16) {
+        float adjustedRes = res * ((filterModel != 14) ? scalerSVF : 1.0f);
         float d = 1.0f / juce::jlimit(0.1f, 10.0f, adjustedRes);
         float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w * d, 2.0f));
         mag = 1.0f / den;
@@ -405,16 +409,17 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         return std::sqrt(real_out * real_out + imag_out * imag_out);
     }
     else {
-        float r_scale = (filterModel == 1) ? 4.0f : 15.0f;
-        float r_val = juce::jmap(res, 0.1f, 10.0f, 0.0f, r_scale) * ((filterModel == 1) ? scalerMoog : scalerDiode);
-        float real_p = std::pow(1.0f - w2, 2.0f) - ((filterModel == 1) ? 4.0f : 3.5f) * w2 + r_val;
-        float imag_p = ((filterModel == 1) ? 4.0f : 3.5f) * w * (1.0f - w2);
+        // 1, 2, 12, 13, 15 (Ladder Variants)
+        float r_scale = (filterModel == 13) ? 5.0f : (filterModel == 2) ? 15.0f : 4.0f;
+        float r_val = juce::jmap(res, 0.1f, 10.0f, 0.0f, r_scale) * ((filterModel == 2) ? scalerDiode : scalerMoog);
+        float real_p = std::pow(1.0f - w2, 2.0f) - ((filterModel == 2) ? 3.5f : 4.0f) * w2 + r_val;
+        float imag_p = ((filterModel == 2) ? 3.5f : 4.0f) * w * (1.0f - w2);
         mag = 1.0f / std::sqrt(real_p * real_p + imag_p * imag_p);
         if (slopeIdx == 0) {
             if (filterType == 1) mag *= w; else if (filterType == 2) mag *= w2; else if (filterType == 3) mag *= std::abs(1.0f - w2);
         }
         else {
-            if (filterModel == 1) {
+            if (filterModel == 1 || filterModel == 12 || filterModel == 13 || filterModel == 15) {
                 if (filterType == 1) mag *= w2; else if (filterType == 2) mag *= w2 * w2; else if (filterType == 3) mag *= std::abs(1.0f - w2 * w2);
             }
             else {

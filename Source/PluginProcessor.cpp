@@ -40,10 +40,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout QuadMorphFilterAudioProcesso
     }
 
     juce::StringArray suffixes = { "A", "B", "C", "D" };
+    // 【更新】全17モデル
     juce::StringArray models = {
         "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR",
         "Formant (Vowel)", "Comb Filter", "MS-20 (Screaming)", "All-Pass Phaser", "Wavefolder",
-        "Reverb (Metallic)", "Kilo All-Pass"
+        "Reverb (Metallic)", "Kilo All-Pass",
+        "Prophet (Curtis)", "SSM 2040", "CS-80 (Yamaha)", "Jupiter (Roland)", "EDP Wasp (CMOS)"
     };
     juce::StringArray slopes = { "12 dB/oct", "24 dB/oct", "48 dB/oct", "96 dB/oct" };
 
