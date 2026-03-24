@@ -204,7 +204,8 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 mag = mag_total;
             }
             else if (modelIdx == 21) {
-                float lpgFc = juce::jlimit(20.0f, 15000.0f, 20.0f * std::pow(1000.0f, processor.getLfoPos(1).x)); // Dummy vis
+                // Vactrol LPG Visualizer (Shows target position based on cutoff)
+                float lpgFc = juce::jlimit(20.0f, 15000.0f, fc);
                 float d = 1.0f / 0.707f; float w_lpg = freq / lpgFc;
                 mag = (1.0f / std::sqrt(std::pow(1.0f - w_lpg * w_lpg, 2.0f) + std::pow(w_lpg * d, 2.0f)));
             }
@@ -222,12 +223,19 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 if (std::abs(freq - (1000.0f + shiftHz)) < 100.0f) mag = 5.0f; else mag = 1.0f;
             }
             else if (modelIdx == 25) {
+                // Z-Plane Visualizer based on deterministic UI positions
+                float x_zp = juce::jlimit(0.0f, 1.0f, juce::jmap(std::log10(fc), std::log10(20.0f), std::log10(20000.0f), 0.0f, 1.0f));
+                float y_zp = juce::jlimit(0.0f, 1.0f, juce::jmap(res, 0.1f, 10.0f, 0.0f, 1.0f));
+                const float fA[7] = { 730, 1090, 2440, 4000, 6000, 8000, 10000 }; const float qA[7] = { 4.0f, 4.0f, 3.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+                const float fB[7] = { 200, 500, 1200, 2800, 5000, 8500, 12000 };  const float qB[7] = { 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f };
+                const float fC[7] = { 300, 870, 2240, 4000, 6000, 8000, 10000 };  const float qC[7] = { 5.0f, 4.0f, 2.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+                const float fD[7] = { 80, 120, 200, 4000, 8000, 12000, 16000 };   const float qD[7] = { 3.0f, 2.0f, 1.0f, 1.0f, 2.0f, 3.0f, 4.0f };
                 float mag_total = 1.0f;
                 for (int k = 0; k < 7; ++k) {
-                    float cur_g = std::tan(juce::MathConstants<float>::pi * 1000.0f / 44100.0f); // Dummy visual
-                    float stage_fc = std::atan(cur_g) * 44100.0f / juce::MathConstants<float>::pi;
+                    float stage_fc = fA[k] * (1 - x_zp) * (1 - y_zp) + fB[k] * x_zp * (1 - y_zp) + fC[k] * (1 - x_zp) * y_zp + fD[k] * x_zp * y_zp;
+                    float stage_q = std::max(0.5f, qA[k] * (1 - x_zp) * (1 - y_zp) + qB[k] * x_zp * (1 - y_zp) + qC[k] * (1 - x_zp) * y_zp + qD[k] * x_zp * y_zp);
                     float stage_w = freq / juce::jlimit(20.0f, 20000.0f, stage_fc);
-                    float den = std::sqrt(std::pow(1.0f - stage_w * stage_w, 2.0f) + std::pow(stage_w * 2.0f, 2.0f));
+                    float den = std::sqrt(std::pow(1.0f - stage_w * stage_w, 2.0f) + std::pow(stage_w * (1.0f / stage_q), 2.0f));
                     mag_total *= (1.0f / den);
                 }
                 mag = mag_total;
@@ -374,7 +382,17 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(QuadMor
     setupFilterGroup(groupC, "C", "Filter C"); setupFilterGroup(groupD, "D", "Filter D");
     setupLfoGroup(lfos[0], 1, "LFO 1 (Morph)"); setupLfoGroup(lfos[1], 2, "LFO 2 (Cutoff)"); setupLfoGroup(lfos[2], 3, "LFO 3 (Reso)");
 
-    setSize(1000, 850);
+    // 【追加】Master Controls
+    auto setupMaster = [&](juce::Label& l, juce::Slider& sl, juce::String txt, juce::String id, std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& att) {
+        l.setText(txt, juce::dontSendNotification); l.setJustificationType(juce::Justification::centredRight); addAndMakeVisible(l);
+        sl.setSliderStyle(juce::Slider::LinearHorizontal); sl.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
+        addAndMakeVisible(sl); att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, id, sl);
+        };
+    setupMaster(masterGainLabel, masterGainSlider, "Out Gain", "masterGain", mgAtt);
+    setupMaster(dryWetLabel, dryWetSlider, "Dry/Wet", "dryWet", dwAtt);
+    setupMaster(ceilingLabel, ceilingSlider, "Limit Ceil", "limiterCeiling", clAtt);
+
+    setSize(1000, 900); // Master用のスペースを確保するため縦を拡張
 }
 
 void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce::String s, juce::String name) {
@@ -389,7 +407,7 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce:
         "Reverb (Metallic)", "Kilo All-Pass",
         "Prophet (Curtis)", "SSM 2040", "CS-80 (Yamaha)", "Jupiter (Roland)", "EDP Wasp (CMOS)",
         "Butterworth (Flat)", "Chebyshev (Ripple)", "Bessel (Phase)", "Elliptic (Notch)",
-        "Vactrol LPG", "Modal Resonator", "Waveguide Mesh", "Bode Freq Shifter", "Z-Plane (Procedural)", "Phased Array", "Nyquist Anti-alias"
+        "Vactrol LPG", "Modal Resonator", "Waveguide Mesh", "Bode Freq Shifter", "Z-Plane (2D Morph)", "Phased Array", "Nyquist Anti-alias"
         }, 1); addAndMakeVisible(g.model);
     g.mAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "model" + s, g.model);
 
@@ -470,29 +488,22 @@ void QuadMorphFilterAudioProcessorEditor::resized() {
     b.removeFromTop(10);
     for (auto* g : { &groupA, &groupB, &groupC, &groupD }) {
         auto r = b.removeFromTop(40).reduced(5, 2);
-
         g->enableButton.setBounds(r.removeFromLeft(60).reduced(0, 5));
         g->model.setBounds(r.removeFromLeft(115).reduced(2, 5));
         g->type.setBounds(r.removeFromLeft(60).reduced(2, 5));
         g->slope.setBounds(r.removeFromLeft(85).reduced(2, 5));
-
         auto cutArea = r.removeFromLeft(r.getWidth() / 2).reduced(5, 0);
         auto resArea = r.reduced(5, 0);
-
-        g->cutoffLabel.setBounds(cutArea.removeFromLeft(30));
-        g->cutoff.setBounds(cutArea);
-        g->resLabel.setBounds(resArea.removeFromLeft(30));
-        g->res.setBounds(resArea);
+        g->cutoffLabel.setBounds(cutArea.removeFromLeft(30)); g->cutoff.setBounds(cutArea);
+        g->resLabel.setBounds(resArea.removeFromLeft(30)); g->res.setBounds(resArea);
     }
 
     b.removeFromTop(15);
     for (int i = 0; i < 3; ++i) {
         auto r = b.removeFromTop(40).reduced(5, 2);
         lfos[i].enableButton.setBounds(r.removeFromLeft(100).reduced(0, 5));
-
         lfos[i].wave.setBounds(r.removeFromLeft(120).withSizeKeepingCentre(115, 22));
         lfos[i].boundCombo.setBounds(r.removeFromLeft(70).withSizeKeepingCentre(65, 22));
-
         lfos[i].stepMode.setBounds(r.removeFromLeft(50).reduced(2, 5));
         lfos[i].syncToggle.setBounds(r.removeFromLeft(50).reduced(2, 5));
 
@@ -502,15 +513,25 @@ void QuadMorphFilterAudioProcessorEditor::resized() {
         auto maxArea = r;
 
         if (audioProcessor.apvts.getRawParameterValue("lfo" + juce::String(i + 1) + "sync")->load() > 0.5f) {
-            lfos[i].rateSync.setBounds(rateArea.withSizeKeepingCentre(rateArea.getWidth() - 5, 22));
-            lfos[i].rateFree.setVisible(false); lfos[i].rateSync.setVisible(true);
+            lfos[i].rateSync.setBounds(rateArea.withSizeKeepingCentre(rateArea.getWidth() - 5, 22)); lfos[i].rateFree.setVisible(false); lfos[i].rateSync.setVisible(true);
         }
         else {
-            lfos[i].rateFree.setBounds(rateArea.reduced(2, 8));
-            lfos[i].rateFree.setVisible(true); lfos[i].rateSync.setVisible(false);
+            lfos[i].rateFree.setBounds(rateArea.reduced(2, 8)); lfos[i].rateFree.setVisible(true); lfos[i].rateSync.setVisible(false);
         }
-
-        lfos[i].minSlider.setBounds(minArea.reduced(2, 8));
-        lfos[i].maxSlider.setBounds(maxArea.reduced(2, 8));
+        lfos[i].minSlider.setBounds(minArea.reduced(2, 8)); lfos[i].maxSlider.setBounds(maxArea.reduced(2, 8));
     }
+
+    // 【追加】Master Controls Layout
+    b.removeFromTop(15);
+    auto masterArea = b.removeFromTop(40).reduced(5, 2);
+    auto cellW = masterArea.getWidth() / 3;
+
+    auto gainRect = masterArea.removeFromLeft(cellW);
+    masterGainLabel.setBounds(gainRect.removeFromLeft(60)); masterGainSlider.setBounds(gainRect);
+
+    auto dwRect = masterArea.removeFromLeft(cellW);
+    dryWetLabel.setBounds(dwRect.removeFromLeft(60)); dryWetSlider.setBounds(dwRect);
+
+    auto ceilRect = masterArea;
+    ceilingLabel.setBounds(ceilRect.removeFromLeft(60)); ceilingSlider.setBounds(ceilRect);
 }

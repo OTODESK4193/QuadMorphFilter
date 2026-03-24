@@ -3,7 +3,6 @@
 // ==========================================
 #include "TptFilter.h"
 #include <cmath>
-#include <random>
 #include <algorithm>
 
 TptFilter::TptFilter()
@@ -44,14 +43,12 @@ void TptFilter::reset()
     }
     for (int stage = 0; stage < 7; ++stage) {
         for (int ch = 0; ch < 2; ++ch) { zplane_s1[stage][ch] = 0.0f; zplane_s2[stage][ch] = 0.0f; }
-        float theta = juce::MathConstants<float>::pi * (2.0f * stage + 1.0f) / 14.0f;
-        zplaneTargetZ[stage][0] = -std::sin(theta); zplaneTargetZ[stage][1] = std::cos(theta);
-        zplaneCurrentZ[stage][0] = zplaneTargetZ[stage][0]; zplaneCurrentZ[stage][1] = zplaneTargetZ[stage][1];
+        zp_fc[stage] = 1000.0f; zp_q[stage] = 0.707f;
     }
     for (int ch = 0; ch < 2; ++ch) {
         rmsIn[ch] = 0.0f; rmsOut[ch] = 0.0f; agcGain[ch] = 1.0f;
         srrPhase[ch] = 0.0f; srrHeld[ch] = 0.0f; ap_out_prev[ch] = 0.0f;
-        lpgEnv[ch] = 0.0f; lpgTriggerState[ch] = 0.0f; bodePhase[ch] = 0.0f; wgWriteIdx[ch] = 0;
+        lpgEnv[ch] = 0.0f; bodePhase[ch] = 0.0f; wgWriteIdx[ch] = 0;
         for (int i = 0; i < 4096; ++i) wgBuffer[ch][i] = 0.0f;
         for (int f = 0; f < 3; ++f) { form_s1[f][ch] = 0.0f; form_s2[f][ch] = 0.0f; }
         for (int b = 0; b < numModalBands; ++b) { modal_s1[b][ch] = 0.0f; modal_s2[b][ch] = 0.0f; }
@@ -130,29 +127,29 @@ void TptFilter::calcDigitalPrecisionCoeffs(float fc, float res) {
 
 void TptFilter::updateZPlaneCoeffs(float fc, float res) {
     float maxSafeFreq = (float)sampleRate * 0.45f;
-    // 【修正】std::mt19random_device のタイポを std::random_device に完全修正
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<float> dis(-1.0f, 1.0f);
+    // X, Y座標としてCutoffとResonanceを0.0~1.0に正規化
+    float x = juce::jmap(std::log10(fc), std::log10(20.0f), std::log10(20000.0f), 0.0f, 1.0f);
+    float y = juce::jmap(res, 0.1f, 10.0f, 0.0f, 1.0f);
+    x = std::clamp(x, 0.0f, 1.0f); y = std::clamp(y, 0.0f, 1.0f);
 
-    float zplaneMorphSpeed = juce::jmap(res, 0.1f, 10.0f, 0.0001f, 0.05f);
+    // Frame A: Vocal 'Ah'
+    const float fA[7] = { 730, 1090, 2440, 4000, 6000, 8000, 10000 }; const float qA[7] = { 4.0f, 4.0f, 3.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+    // Frame B: Deep Phaser
+    const float fB[7] = { 200, 500, 1200, 2800, 5000, 8500, 12000 };  const float qB[7] = { 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f };
+    // Frame C: Vocal 'Oo'
+    const float fC[7] = { 300, 870, 2240, 4000, 6000, 8000, 10000 };  const float qC[7] = { 5.0f, 4.0f, 2.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+    // Frame D: Don-shari (Scooped)
+    const float fD[7] = { 80, 120, 200, 4000, 8000, 12000, 16000 };   const float qD[7] = { 3.0f, 2.0f, 1.0f, 1.0f, 2.0f, 3.0f, 4.0f };
 
     for (int k = 0; k < 7; ++k) {
-        if (std::abs(fc - lastCutoff) > 500.0f) {
-            zplaneTargetZ[k][0] = dis(gen) * 0.9f;
-            zplaneTargetZ[k][1] = dis(gen) * 0.9f;
-        }
-        zplaneCurrentZ[k][0] += (zplaneTargetZ[k][0] - zplaneCurrentZ[k][0]) * zplaneMorphSpeed;
-        zplaneCurrentZ[k][1] += (zplaneTargetZ[k][1] - zplaneCurrentZ[k][1]) * zplaneMorphSpeed;
+        float interpFc = fA[k] * (1 - x) * (1 - y) + fB[k] * x * (1 - y) + fC[k] * (1 - x) * y + fD[k] * x * y;
+        float interpQ = qA[k] * (1 - x) * (1 - y) + qB[k] * x * (1 - y) + qC[k] * (1 - x) * y + qD[k] * x * y;
 
-        float real_p = zplaneCurrentZ[k][0]; float imag_p = zplaneCurrentZ[k][1];
-        float wn2 = real_p * real_p + imag_p * imag_p;
-        float freqScale = std::sqrt(wn2) + 0.1f;
-        float q = std::max(0.5f, std::min(20.0f, std::sqrt(wn2) / (-2.0f * real_p + 1e-5f)));
+        zp_fc[k] = std::clamp(interpFc, 20.0f, maxSafeFreq);
+        zp_q[k] = std::max(0.5f, interpQ);
 
-        float sectionFreq = std::clamp(fc * freqScale, 20.0f, maxSafeFreq);
-        float sectionWd = juce::MathConstants<float>::pi * sectionFreq / (float)sampleRate;
-        zplaneCoeffs[k].g = std::tan(sectionWd); zplaneCoeffs[k].R = 1.0f / (2.0f * q);
+        float wd = juce::MathConstants<float>::pi * zp_fc[k] / (float)sampleRate;
+        zplaneCoeffs[k].g = std::tan(wd); zplaneCoeffs[k].R = 1.0f / (2.0f * zp_q[k]);
         zplaneCoeffs[k].h = 1.0f / (1.0f + 2.0f * zplaneCoeffs[k].R * zplaneCoeffs[k].g + zplaneCoeffs[k].g * zplaneCoeffs[k].g);
     }
 }
@@ -399,18 +396,24 @@ float TptFilter::processSample(int channel, float x)
         }
     }
     else if (filterModel == 21) {
-        float currentTrigger = smoothedDigitalCutoff / 20000.0f;
-        if (currentTrigger > lpgTriggerState[channel] + 0.05f) { lpgEnv[channel] += 0.5f; if (lpgEnv[channel] > 1.0f) lpgEnv[channel] = 1.0f; }
-        lpgTriggerState[channel] = currentTrigger;
-        float decay = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 0.0005f, 0.00001f);
-        lpgEnv[channel] *= (1.0f - decay);
+        // 【完全修正】Vactrol LPG (CutoffをLED目標値とした1Poleエンベロープ)
+        float targetEnv = std::log10(smoothedDigitalCutoff / 20.0f) / 3.0f; // 0~1
+        float currentEnv = lpgEnv[channel];
+        float attackCoef = 1.0f - std::exp(-1.0f / (0.005f * sampleRate)); // Fast Attack (5ms)
+        float releaseTime = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 0.05f, 2.0f);
+        float releaseCoef = 1.0f - std::exp(-1.0f / (releaseTime * sampleRate)); // Slow Release mapped to Reso
+
+        float coef = (targetEnv > currentEnv) ? attackCoef : releaseCoef;
+        lpgEnv[channel] = currentEnv + coef * (targetEnv - currentEnv);
+
         float lpgFc = juce::jlimit(20.0f, 15000.0f, 20.0f * std::pow(1000.0f, lpgEnv[channel]));
         float lpgWd = juce::MathConstants<float>::pi * lpgFc / (float)sampleRate;
         float lpgG = std::tan(lpgWd); float lpgR = 1.0f / (2.0f * 0.707f); float lpgH = 1.0f / (1.0f + 2.0f * lpgR * lpgG + lpgG * lpgG);
+
         float hp = (out - (2.0f * lpgR + lpgG) * s1[0][channel] - s2[0][channel]) * lpgH;
         float bp = lpgG * hp + s1[0][channel]; float lp = lpgG * bp + s2[0][channel];
         s1[0][channel] = lpgG * hp + bp; s2[0][channel] = lpgG * bp + lp;
-        out = lp * (lpgEnv[channel] * lpgEnv[channel]);
+        out = lp * (lpgEnv[channel] * lpgEnv[channel] + 0.001f); // Lowpass + VCA
     }
     else if (filterModel == 22) {
         float modalMix = 0.0f;
@@ -458,6 +461,7 @@ float TptFilter::processSample(int channel, float x)
         out = std::tanh(shifted * (1.0f + fb));
     }
     else if (filterModel == 25) {
+        // 【完全修正】Z-Plane Deterministic Morphing (2D Interpolation)
         for (int stage = 0; stage < 7; ++stage) {
             float cur_g = zplaneCoeffs[stage].g; float cur_R = zplaneCoeffs[stage].R; float cur_h = zplaneCoeffs[stage].h;
             float hp = (out - (2.0f * cur_R + cur_g) * zplane_s1[stage][channel] - zplane_s2[stage][channel]) * cur_h;
@@ -615,12 +619,12 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         return 1.0f;
     }
     else if (filterModel == 25) {
+        // 【完全修正】Z-Plane Deterministic Morphing Visualizer
         float mag_total = 1.0f;
         for (int k = 0; k < 7; ++k) {
-            float cur_g = zplaneCoeffs[k].g; float cur_R = zplaneCoeffs[k].R;
-            float stage_fc = std::atan(cur_g) * sampleRate / juce::MathConstants<float>::pi;
-            float stage_w = frequency / juce::jlimit(20.0f, 20000.0f, stage_fc);
-            float den = std::sqrt(std::pow(1.0f - stage_w * stage_w, 2.0f) + std::pow(stage_w * 2.0f * cur_R, 2.0f));
+            float stage_fc = std::clamp(zp_fc[k], 20.0f, (float)sampleRate * 0.45f);
+            float stage_w = frequency / stage_fc;
+            float den = std::sqrt(std::pow(1.0f - stage_w * stage_w, 2.0f) + std::pow(stage_w * (1.0f / zp_q[k]), 2.0f));
             mag_total *= (1.0f / den);
         }
         return mag_total;
