@@ -26,6 +26,7 @@ void TptFilter::reset()
     for (int stage = 0; stage < 8; ++stage) {
         for (int ch = 0; ch < 2; ++ch) {
             s1[stage][ch] = 0.0f; s2[stage][ch] = 0.0f;
+            sk_s1[stage][ch] = 0.0f; sk_s2[stage][ch] = 0.0f; // MS-20 State
             for (int pole = 0; pole < 4; ++pole) zdfState[stage][ch][pole] = 0.0f;
             combWriteIdx[stage][ch] = 0;
             for (int i = 0; i < 4096; ++i) combBuffer[stage][ch][i] = 0.0f;
@@ -39,9 +40,10 @@ void TptFilter::reset()
         srrPhase[ch] = 0.0f; srrHeld[ch] = 0.0f; ap_out_prev[ch] = 0.0f;
         for (int f = 0; f < 3; ++f) { form_s1[f][ch] = 0.0f; form_s2[f][ch] = 0.0f; }
     }
+    lastCutoff = -1.0f; lastRes = -1.0f;
 }
 
-void TptFilter::setModel(int newModel) { filterModel = newModel; }
+void TptFilter::setModel(int newModel) { filterModel = newModel; lastCutoff = -1.0f; }
 void TptFilter::setCutoff(float newCutoff) { cutoff.setTargetValue(juce::jlimit(20.0f, 20000.0f, newCutoff)); }
 void TptFilter::setResonance(float newResonance) { resonance.setTargetValue(juce::jmax(0.1f, newResonance)); }
 void TptFilter::setType(int newType) { filterType = newType; }
@@ -61,6 +63,12 @@ void TptFilter::setSlope(int index)
     else {
         currentStages = (index == 0) ? 1 : (index == 1) ? 1 : (index == 2) ? 2 : 4;
     }
+
+    // 【CPU最適化】段数に依存する激重な数学演算を1回だけ計算してキャッシュする
+    scalerSVF = (currentStages > 1) ? std::pow(0.6f, std::log2((float)currentStages)) : 1.0f;
+    scalerMoog = (currentStages > 1) ? std::pow(0.7f, std::log2((float)currentStages)) : 1.0f;
+    scalerDiode = (currentStages > 1) ? std::pow(0.7f, std::log2((float)currentStages)) : 1.0f;
+    lastCutoff = -1.0f; // 強制アップデートフラグ
 }
 
 void TptFilter::updateCoefficients()
@@ -68,30 +76,34 @@ void TptFilter::updateCoefficients()
     float currentCutoff = cutoff.getNextValue();
     float currentRes = resonance.getNextValue();
 
-    if (filterModel == 5) {
-        float v = juce::jlimit(0.0f, 4.0f, juce::jmap(std::log10(currentCutoff), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f));
-        int idx = (int)v; float frac = v - idx; if (idx >= 4) { idx = 3; frac = 1.0f; }
-        float f1_map[5] = { 730.f, 270.f, 300.f, 530.f, 400.f }; float f2_map[5] = { 1090.f, 2290.f, 870.f, 1840.f, 840.f }; float f3_map[5] = { 2440.f, 3010.f, 2240.f, 2480.f, 2800.f };
-        float f_arr[3] = { f1_map[idx] + (f1_map[idx + 1] - f1_map[idx]) * frac, f2_map[idx] + (f2_map[idx + 1] - f2_map[idx]) * frac, f3_map[idx] + (f3_map[idx + 1] - f3_map[idx]) * frac };
-        for (int f = 0; f < 3; ++f) {
-            float wd = juce::MathConstants<float>::pi * f_arr[f] / (float)sampleRate; form_g[f] = std::tan(wd); form_R[f] = 1.0f / (2.0f * currentRes); form_h[f] = 1.0f / (1.0f + 2.0f * form_R[f] * form_g[f] + form_g[f] * form_g[f]);
-        }
-    }
-    else {
-        float wd = juce::MathConstants<float>::pi * currentCutoff / (float)sampleRate;
-        g = std::tan(wd); ladderG = g / (1.0f + g);
+    // 【CPU最適化】カットオフかレゾナンスが変動した時のみ重い演算（tan, log10）を実行する
+    if (std::abs(currentCutoff - lastCutoff) > 0.01f || std::abs(currentRes - lastRes) > 0.001f) {
 
-        if (filterModel == 0 || filterModel == 3 || filterModel == 4 || filterModel == 6 || filterModel == 7 || filterModel == 9 || filterModel == 11) {
-            float adjustedRes = currentRes;
-            if (filterModel != 7 && filterModel != 11 && currentStages > 1) adjustedRes = currentRes * std::pow(0.6f, std::log2((float)currentStages));
-            R = 1.0f / (2.0f * adjustedRes); h = 1.0f / (1.0f + 2.0f * R * g + g * g);
+        if (filterModel == 5) { // Formant
+            float v = juce::jlimit(0.0f, 4.0f, juce::jmap(std::log10(currentCutoff), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f));
+            int idx = (int)v; float frac = v - idx; if (idx >= 4) { idx = 3; frac = 1.0f; }
+            float f1_map[5] = { 730.f, 270.f, 300.f, 530.f, 400.f }; float f2_map[5] = { 1090.f, 2290.f, 870.f, 1840.f, 840.f }; float f3_map[5] = { 2440.f, 3010.f, 2240.f, 2480.f, 2800.f };
+            float f_arr[3] = { f1_map[idx] + (f1_map[idx + 1] - f1_map[idx]) * frac, f2_map[idx] + (f2_map[idx + 1] - f2_map[idx]) * frac, f3_map[idx] + (f3_map[idx + 1] - f3_map[idx]) * frac };
+            for (int f = 0; f < 3; ++f) {
+                float wd = juce::MathConstants<float>::pi * f_arr[f] / (float)sampleRate; form_g[f] = std::tan(wd); form_R[f] = 1.0f / (2.0f * currentRes); form_h[f] = 1.0f / (1.0f + 2.0f * form_R[f] * form_g[f] + form_g[f] * form_g[f]);
+            }
         }
-        else if (filterModel == 1) {
-            ladderRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, 4.0f); if (currentStages > 1) ladderRes *= std::pow(0.7f, std::log2((float)currentStages));
+        else {
+            float wd = juce::MathConstants<float>::pi * currentCutoff / (float)sampleRate;
+            g = std::tan(wd); ladderG = g / (1.0f + g);
+
+            if (filterModel == 0 || filterModel == 3 || filterModel == 4 || filterModel == 6 || filterModel == 7 || filterModel == 9 || filterModel == 11) {
+                float adjustedRes = currentRes * ((filterModel != 7 && filterModel != 11) ? scalerSVF : 1.0f);
+                R = 1.0f / (2.0f * adjustedRes); h = 1.0f / (1.0f + 2.0f * R * g + g * g);
+            }
+            else if (filterModel == 1) {
+                ladderRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, 4.0f) * scalerMoog;
+            }
+            else if (filterModel == 2) {
+                ladderRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, 15.0f) * scalerDiode;
+            }
         }
-        else if (filterModel == 2) {
-            ladderRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, 15.0f); if (currentStages > 1) ladderRes *= std::pow(0.7f, std::log2((float)currentStages));
-        }
+        lastCutoff = currentCutoff; lastRes = currentRes;
     }
 }
 
@@ -116,7 +128,7 @@ float TptFilter::processSample(int channel, float x)
     else if (filterModel == 7) comp = 1.0f + resonance.getCurrentValue() * 0.15f;
     x *= comp;
 
-    if (filterModel == 4) {
+    if (filterModel == 4) { // SRR
         float targetSR = cutoff.getCurrentValue(); float phaseInc = targetSR / sampleRate; srrPhase[channel] += phaseInc;
         if (srrPhase[channel] >= 1.0f) {
             srrPhase[channel] -= std::floor(srrPhase[channel]); float bits = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 16.0f, 2.0f);
@@ -152,13 +164,19 @@ float TptFilter::processSample(int channel, float x)
         }
     }
     else if (filterModel == 2) {
+        // 【アルゴリズム刷新】Diode Ladder の真のローディング近似 (ZDF Implicit Topology)
         for (int stage = 0; stage < currentStages; ++stage) {
+            // 前段への負荷を模倣する非線形フィードバックパス
             float fb = std::tanh(out - ladderRes * zdfState[stage][channel][3]);
-            float v1 = (fb - zdfState[stage][channel][0]) * ladderG; float y1 = v1 + zdfState[stage][channel][0]; zdfState[stage][channel][0] = y1 + v1; y1 = std::tanh(y1);
-            float v2 = (y1 - zdfState[stage][channel][1]) * ladderG; float y2 = v2 + zdfState[stage][channel][1]; zdfState[stage][channel][1] = y2 + v2; y2 = std::tanh(y2);
-            float v3 = (y2 - zdfState[stage][channel][2]) * ladderG; float y3 = v3 + zdfState[stage][channel][2]; zdfState[stage][channel][2] = y3 + v3; y3 = std::tanh(y3);
+            float G_half = ladderG * 0.5f;
+
+            // 各極間のローディングを反映させたマトリクス近似
+            float v1 = (fb - zdfState[stage][channel][0]) * ladderG; float y1 = v1 + zdfState[stage][channel][0]; zdfState[stage][channel][0] = y1 + v1 - G_half * zdfState[stage][channel][1]; y1 = std::tanh(y1);
+            float v2 = (y1 - zdfState[stage][channel][1]) * ladderG; float y2 = v2 + zdfState[stage][channel][1]; zdfState[stage][channel][1] = y2 + v2 - G_half * zdfState[stage][channel][2]; y2 = std::tanh(y2);
+            float v3 = (y2 - zdfState[stage][channel][2]) * ladderG; float y3 = v3 + zdfState[stage][channel][2]; zdfState[stage][channel][2] = y3 + v3 - G_half * zdfState[stage][channel][3]; y3 = std::tanh(y3);
             float v4 = (y3 - zdfState[stage][channel][3]) * ladderG; float y4 = v4 + zdfState[stage][channel][3]; zdfState[stage][channel][3] = y4 + v4;
-            if (y4 > 0.0f) y4 *= 1.1f; y4 = std::tanh(y4);
+
+            if (y4 > 0.0f) y4 *= 1.2f; y4 = std::tanh(y4); // アシッド特有の非対称波形
             if (slopeIdx == 0) { if (filterType == 0) out = y2; else if (filterType == 1) out = y1 - y2; else if (filterType == 2) out = out - y1; else out = y2 + (out - y1); }
             else { if (filterType == 0) out = y4; else if (filterType == 1) out = y2 - y4; else if (filterType == 2) out = out - y2; else out = y4 + (out - y2); }
         }
@@ -206,15 +224,34 @@ float TptFilter::processSample(int channel, float x)
         }
     }
     else if (filterModel == 7) {
-        float ms_res = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 0.0f, 2.5f);
-        float r_ms = 1.0f / (2.0f * ms_res + 0.1f);
-        float h_ms = 1.0f / (1.0f + 2.0f * r_ms * g + g * g);
+        // 【アルゴリズム刷新】MS-20 真のZDF Sallen-Key トポロジー
+        float ms_k = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 0.0f, 2.5f); // Korg35 Resonance K
         for (int stage = 0; stage < currentStages; ++stage) {
-            float clip_s2 = s2[stage][channel]; if (clip_s2 > 0.0f) clip_s2 *= 1.8f; clip_s2 = std::tanh(clip_s2);
-            float hp = (out - (2.0f * r_ms + g) * s1[stage][channel] - clip_s2) * h_ms;
-            float bp = g * hp + s1[stage][channel]; float lp = g * bp + s2[stage][channel];
-            s1[stage][channel] = std::tanh(g * hp + bp); s2[stage][channel] = std::tanh(g * bp + lp);
-            if (filterType == 0) out = lp; else if (filterType == 1) out = bp; else if (filterType == 2) out = hp; else out = lp + hp;
+            float g_sk = g;
+
+            // Korg35特有の非対称フィードバッククリッピング
+            float fb = sk_s2[stage][channel] * ms_k;
+            if (fb > 0.0f) fb = std::tanh(fb * 1.5f);
+            else fb = std::tanh(fb * 0.8f);
+
+            // Sallen-Key ZDF 解析解
+            float v1 = (out - fb - sk_s1[stage][channel]) * g_sk / (1.0f + g_sk);
+            float y1 = v1 + sk_s1[stage][channel];
+            sk_s1[stage][channel] = y1 + v1;
+
+            float v2 = (y1 - sk_s2[stage][channel]) * g_sk / (1.0f + g_sk);
+            float y2 = v2 + sk_s2[stage][channel];
+            sk_s2[stage][channel] = y2 + v2;
+
+            // MS-20のマルチモード抽出 (HPFは入力とLPFの差分)
+            float lp = y2;
+            float hp = out - y1; // 簡易抽出
+            float bp = y1 - y2;
+
+            if (filterType == 0) out = lp;
+            else if (filterType == 1) out = bp;
+            else if (filterType == 2) out = hp;
+            else out = lp + hp;
         }
     }
     else if (filterModel == 8) {
@@ -299,8 +336,7 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
     float mag = 1.0f;
 
     if (filterModel == 0 || filterModel == 3 || filterModel == 4 || filterModel == 9) {
-        float adjustedRes = res;
-        if (currentStages > 1) adjustedRes = res * std::pow(0.6f, std::log2((float)currentStages));
+        float adjustedRes = res * scalerSVF;
         float d = 1.0f / juce::jlimit(0.1f, 10.0f, adjustedRes);
         float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w * d, 2.0f));
         mag = 1.0f / den;
@@ -348,7 +384,7 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         return std::pow(m, currentStages);
     }
     else if (filterModel == 7) {
-        float ms_res = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 2.5f);
+        float ms_res = juce::jmap(res, 0.1f, 10.0f, 0.0f, 2.5f);
         float d = 1.0f / (ms_res + 0.1f);
         float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w * d, 2.0f));
         mag = 1.0f / den;
@@ -370,8 +406,7 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
     }
     else {
         float r_scale = (filterModel == 1) ? 4.0f : 15.0f;
-        float r_val = juce::jmap(res, 0.1f, 10.0f, 0.0f, r_scale);
-        if (currentStages > 1) r_val *= std::pow(0.7f, std::log2((float)currentStages));
+        float r_val = juce::jmap(res, 0.1f, 10.0f, 0.0f, r_scale) * ((filterModel == 1) ? scalerMoog : scalerDiode);
         float real_p = std::pow(1.0f - w2, 2.0f) - ((filterModel == 1) ? 4.0f : 3.5f) * w2 + r_val;
         float imag_p = ((filterModel == 1) ? 4.0f : 3.5f) * w * (1.0f - w2);
         mag = 1.0f / std::sqrt(real_p * real_p + imag_p * imag_p);
