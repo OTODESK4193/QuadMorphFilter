@@ -61,7 +61,11 @@ private:
     float srrPhase[2] = { 0.0f, 0.0f }; float srrHeld[2] = { 0.0f, 0.0f };
     float form_g[3] = { 0.0f }; float form_R[3] = { 0.0f }; float form_h[3] = { 0.0f };
     float form_s1[3][2] = { {0.0f} }; float form_s2[3][2] = { {0.0f} };
-    float combBuffer[8][2][4096] = { {{0.0f}} }; int combWriteIdx[8][2] = { {0} };
+
+    // 【バッファ拡張】192kHz対応のため 4096 -> 16384
+    float combBuffer[8][2][16384] = { {{0.0f}} }; int combWriteIdx[8][2] = { {0} };
+    float comb_ap_state[8][2] = { {0.0f} }; // 【追加】オールパス分数ディレイ状態
+
     float sk_s1[8][2] = { {0.0f} }; float sk_s2[8][2] = { {0.0f} };
     float ap_s[16][2] = { {0.0f} }; float ap_out_prev[2] = { 0.0f };
 
@@ -69,10 +73,8 @@ private:
     std::vector<BiquadCoeffs> dpCoeffs;
     float dp_s1[8][2] = { {0.0f} }; float dp_s2[8][2] = { {0.0f} };
 
-    // Vactrol LPG
     float lpgEnv[2] = { 0.0f, 0.0f };
 
-    // Modal Resonator
     static const int numModalBands = 8;
     float modal_g[numModalBands] = { 0.0f };
     float modal_R[numModalBands] = { 0.0f };
@@ -80,28 +82,24 @@ private:
     float modal_s1[numModalBands][2] = { {0.0f} };
     float modal_s2[numModalBands][2] = { {0.0f} };
 
-    // Waveguide Mesh
-    float wgBuffer[2][4096] = { {0.0f} };
+    // 【バッファ拡張】
+    float wgBuffer[2][16384] = { {0.0f} };
     int wgWriteIdx[2] = { 0 };
+    float wg_ap_state[2] = { 0.0f }; // 【追加】
 
-    // Bode Frequency Shifter
     const float hilbertCoeffsA[4] = { 0.4794008656f, 0.8762184935f, 0.9765975895f, 0.9974992559f };
     const float hilbertCoeffsB[4] = { 0.1617584983f, 0.7330289323f, 0.9453497003f, 0.9905991567f };
     float hilbertStateA[4][2] = { {0.0f} };
     float hilbertStateB[4][2] = { {0.0f} };
     float bodePhase[2] = { 0.0f, 0.0f };
 
-    // Z-Plane (Deterministic 2D Morphing)
     std::vector<BiquadCoeffs> zplaneCoeffs;
     float zplane_s1[7][2] = { {0.0f} };
     float zplane_s2[7][2] = { {0.0f} };
     float zp_fc[7] = { 0.0f };
     float zp_q[7] = { 0.0f };
 
-    // Phased Array
     float pa_s[8][2] = { {0.0f} };
-
-    // Nyquist Anti-alias
     float aa_s1[4][2] = { {0.0f} };
     float aa_s2[4][2] = { {0.0f} };
 

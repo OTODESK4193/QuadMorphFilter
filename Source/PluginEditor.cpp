@@ -204,7 +204,6 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 mag = mag_total;
             }
             else if (modelIdx == 21) {
-                // Vactrol LPG Visualizer (Shows target position based on cutoff)
                 float lpgFc = juce::jlimit(20.0f, 15000.0f, fc);
                 float d = 1.0f / 0.707f; float w_lpg = freq / lpgFc;
                 mag = (1.0f / std::sqrt(std::pow(1.0f - w_lpg * w_lpg, 2.0f) + std::pow(w_lpg * d, 2.0f)));
@@ -223,7 +222,6 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 if (std::abs(freq - (1000.0f + shiftHz)) < 100.0f) mag = 5.0f; else mag = 1.0f;
             }
             else if (modelIdx == 25) {
-                // Z-Plane Visualizer based on deterministic UI positions
                 float x_zp = juce::jlimit(0.0f, 1.0f, juce::jmap(std::log10(fc), std::log10(20.0f), std::log10(20000.0f), 0.0f, 1.0f));
                 float y_zp = juce::jlimit(0.0f, 1.0f, juce::jmap(res, 0.1f, 10.0f, 0.0f, 1.0f));
                 const float fA[7] = { 730, 1090, 2440, 4000, 6000, 8000, 10000 }; const float qA[7] = { 4.0f, 4.0f, 3.0f, 1.0f, 1.0f, 1.0f, 1.0f };
@@ -382,7 +380,6 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(QuadMor
     setupFilterGroup(groupC, "C", "Filter C"); setupFilterGroup(groupD, "D", "Filter D");
     setupLfoGroup(lfos[0], 1, "LFO 1 (Morph)"); setupLfoGroup(lfos[1], 2, "LFO 2 (Cutoff)"); setupLfoGroup(lfos[2], 3, "LFO 3 (Reso)");
 
-    // 【追加】Master Controls
     auto setupMaster = [&](juce::Label& l, juce::Slider& sl, juce::String txt, juce::String id, std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& att) {
         l.setText(txt, juce::dontSendNotification); l.setJustificationType(juce::Justification::centredRight); addAndMakeVisible(l);
         sl.setSliderStyle(juce::Slider::LinearHorizontal); sl.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
@@ -392,7 +389,7 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(QuadMor
     setupMaster(dryWetLabel, dryWetSlider, "Dry/Wet", "dryWet", dwAtt);
     setupMaster(ceilingLabel, ceilingSlider, "Limit Ceil", "limiterCeiling", clAtt);
 
-    setSize(1000, 900); // Master用のスペースを確保するため縦を拡張
+    setSize(1000, 900);
 }
 
 void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce::String s, juce::String name) {
@@ -521,7 +518,6 @@ void QuadMorphFilterAudioProcessorEditor::resized() {
         lfos[i].minSlider.setBounds(minArea.reduced(2, 8)); lfos[i].maxSlider.setBounds(maxArea.reduced(2, 8));
     }
 
-    // 【追加】Master Controls Layout
     b.removeFromTop(15);
     auto masterArea = b.removeFromTop(40).reduced(5, 2);
     auto cellW = masterArea.getWidth() / 3;

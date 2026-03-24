@@ -51,9 +51,8 @@ private:
 
     TptFilter filterA, filterB, filterC, filterD;
     std::array<juce::AudioBuffer<float>, 4> filterBuffers;
-    juce::AudioBuffer<float> dryBuffer; // 【追加】Dry/Wet 用バッファ
+    juce::AudioBuffer<float> dryBuffer;
 
-    // 【追加】Limiter 用ステート
     float currentGainReduction[2] = { 1.0f, 1.0f };
 
     struct LfoState {

@@ -11,7 +11,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout QuadMorphFilterAudioProcesso
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "posX", 1 }, "Base X", 0.0f, 1.0f, 0.5f));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "posY", 1 }, "Base Y", 0.0f, 1.0f, 0.5f));
 
-    // 【追加】Master Section パラメータ
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "masterGain", 1 }, "Output Gain", juce::NormalisableRange<float>(-36.0f, 24.0f, 0.1f), 0.0f));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "dryWet", 1 }, "Dry/Wet", juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 100.0f));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "limiterCeiling", 1 }, "Ceiling", juce::NormalisableRange<float>(-36.0f, 0.0f, 0.1f), -0.1f));
@@ -51,7 +50,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout QuadMorphFilterAudioProcesso
         "Reverb (Metallic)", "Kilo All-Pass",
         "Prophet (Curtis)", "SSM 2040", "CS-80 (Yamaha)", "Jupiter (Roland)", "EDP Wasp (CMOS)",
         "Butterworth (Flat)", "Chebyshev (Ripple)", "Bessel (Phase)", "Elliptic (Notch)",
-        "Vactrol LPG", "Modal Resonator", "Waveguide Mesh", "Bode Freq Shifter", "Z-Plane (Procedural)", "Phased Array", "Nyquist Anti-alias"
+        "Vactrol LPG", "Modal Resonator", "Waveguide Mesh", "Bode Freq Shifter", "Z-Plane (2D Morph)", "Phased Array", "Nyquist Anti-alias"
     };
     juce::StringArray slopes = { "12 dB/oct", "24 dB/oct", "48 dB/oct", "96 dB/oct" };
 
@@ -82,7 +81,7 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
     filterD.prepare(sampleRate, samplesPerBlock, 2);
 
     for (auto& buf : filterBuffers) buf.setSize(2, samplesPerBlock, false, false, true);
-    dryBuffer.setSize(2, samplesPerBlock, false, false, true); // 【追加】
+    dryBuffer.setSize(2, samplesPerBlock, false, false, true);
 
     currentGainReduction[0] = 1.0f;
     currentGainReduction[1] = 1.0f;
@@ -105,7 +104,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     auto numChannels = buffer.getNumChannels();
     float dt = numSamples / (float)sampleRate;
 
-    // 【追加】Dry信号の保存
     for (int ch = 0; ch < numChannels; ++ch) {
         dryBuffer.copyFrom(ch, 0, buffer, ch, 0, numSamples);
     }
@@ -280,39 +278,32 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         if (enD) buffer.addFrom(ch, 0, filterBuffers[3], ch, 0, numSamples, wMix[3]);
     }
 
-    // 【完全追加】Master Section: Dry/Wet, Output Gain, and Zero-Attack Transparent Limiter
     float mixRatio = apvts.getRawParameterValue("dryWet")->load() / 100.0f;
     float gainLinear = juce::Decibels::decibelsToGain(apvts.getRawParameterValue("masterGain")->load());
     float ceilingLinear = juce::Decibels::decibelsToGain(apvts.getRawParameterValue("limiterCeiling")->load());
-    float limiterReleaseCoef = 1.0f - std::exp(-1.0f / (0.050f * sampleRate)); // 50ms Fixed Transparent Release
+    float limiterReleaseCoef = 1.0f - std::exp(-1.0f / (0.050f * sampleRate));
 
     for (int ch = 0; ch < numChannels; ++ch) {
         auto* out = buffer.getWritePointer(ch);
         auto* dry = dryBuffer.getReadPointer(ch);
 
         for (int i = 0; i < numSamples; ++i) {
-            // 1. Dry / Wet Mix
             float mixedSignal = dry[i] * (1.0f - mixRatio) + out[i] * mixRatio;
-
-            // 2. Output Gain
             float gainedSignal = mixedSignal * gainLinear;
 
-            // 3. Zero-Attack Transparent Limiter
             float absSignal = std::abs(gainedSignal);
             float targetGr = 1.0f;
             if (absSignal > ceilingLinear) {
-                targetGr = ceilingLinear / absSignal; // 超えた分だけ瞬時に潰す (Zero-Attack)
+                targetGr = ceilingLinear / absSignal;
             }
 
-            // Smoothing the Gain Reduction (Release phase)
             if (targetGr < currentGainReduction[ch]) {
-                currentGainReduction[ch] = targetGr; // Attack is instantaneous
+                currentGainReduction[ch] = targetGr;
             }
             else {
-                currentGainReduction[ch] += limiterReleaseCoef * (targetGr - currentGainReduction[ch]); // Smooth release
+                currentGainReduction[ch] += limiterReleaseCoef * (targetGr - currentGainReduction[ch]);
             }
 
-            // Apply Limiter and write to buffer
             out[i] = gainedSignal * currentGainReduction[ch];
         }
     }

@@ -73,7 +73,6 @@ private:
     };
     LfoGroup lfos[3];
 
-    // 【追加】Master Section UI
     juce::Label masterGainLabel, dryWetLabel, ceilingLabel;
     juce::Slider masterGainSlider, dryWetSlider, ceilingSlider;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mgAtt, dwAtt, clAtt;
