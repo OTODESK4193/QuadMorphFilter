@@ -164,6 +164,57 @@ void FilterVisualizer::paint(juce::Graphics& g) {
                 float bp_mag = (1.0f / den) * w_norm;
                 mag = 1.0f + std::pow(bp_mag, 1.2f) * res * ((float)stages * 0.1f);
             }
+            else if (modelIdx >= 17) { // 【追加】デジタル精密シリーズ Visualizer
+                int order = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
+                int sections = order / 2;
+                float rippleDb = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.1f, 3.0f);
+                float eps = std::sqrt(std::pow(10.0f, rippleDb / 10.0f) - 1.0f);
+                float mag_total = 1.0f;
+
+                for (int k = 0; k < sections; ++k) {
+                    float theta = juce::MathConstants<float>::pi * (2.0f * k + 1.0f) / (2.0f * order);
+                    float stage_q = 0.707f; float freqScale = 1.0f;
+
+                    if (modelIdx == 17) { // Butterworth
+                        stage_q = 1.0f / (2.0f * std::sin(theta));
+                    }
+                    else if (modelIdx == 18) { // Chebyshev
+                        float a = 1.0f / order * std::asinh(1.0f / eps);
+                        float real_p = -std::sinh(a) * std::sin(theta);
+                        float imag_p = std::cosh(a) * std::cos(theta);
+                        float wn2 = real_p * real_p + imag_p * imag_p;
+                        freqScale = std::sqrt(wn2);
+                        stage_q = std::sqrt(wn2) / (-2.0f * real_p);
+                    }
+                    else if (modelIdx == 19) { // Bessel
+                        stage_q = 1.0f / (2.0f * std::sin(theta)) * 0.577f;
+                        freqScale = 1.0f + (float)order * 0.1f;
+                    }
+                    else if (modelIdx == 20) { // Elliptic
+                        float a = 1.0f / order * std::asinh(1.0f / (eps * 0.5f));
+                        float real_p = -std::sinh(a) * std::sin(theta);
+                        float imag_p = std::cosh(a) * std::cos(theta);
+                        float wn2 = real_p * real_p + imag_p * imag_p;
+                        freqScale = std::sqrt(wn2);
+                        stage_q = std::sqrt(wn2) / (-2.0f * real_p) * 1.2f;
+                    }
+
+                    float stage_w = freq / juce::jlimit(20.0f, 20000.0f, freqLimit * freqScale);
+                    float stage_w2 = stage_w * stage_w;
+                    float stage_d = 1.0f / stage_q;
+                    float den = std::sqrt(std::pow(1.0f - stage_w2, 2.0f) + std::pow(stage_w * stage_d, 2.0f));
+                    float m = 1.0f / den;
+
+                    if (modelIdx == 20) {
+                        m = std::abs(1.0f - stage_w2 * 0.5f) / den;
+                    }
+                    else {
+                        if (t == 1) m *= stage_w; else if (t == 2) m *= stage_w2; else if (t == 3) m *= std::abs(1.0f - stage_w2);
+                    }
+                    mag_total *= m;
+                }
+                mag = mag_total;
+            }
             return static_cast<float>(mag);
             };
 
@@ -300,7 +351,13 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g, juce:
     addAndMakeVisible(g.enableButton);
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, "enable" + s, g.enableButton);
 
-    g.model.addItemList({ "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR", "Formant (Vowel)", "Comb Filter", "MS-20 (Screaming)", "All-Pass Phaser", "Wavefolder", "Reverb (Metallic)", "Kilo All-Pass", "Prophet (Curtis)", "SSM 2040", "CS-80 (Yamaha)", "Jupiter (Roland)", "EDP Wasp (CMOS)" }, 1); addAndMakeVisible(g.model);
+    g.model.addItemList({
+        "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR",
+        "Formant (Vowel)", "Comb Filter", "MS-20 (Screaming)", "All-Pass Phaser", "Wavefolder",
+        "Reverb (Metallic)", "Kilo All-Pass",
+        "Prophet (Curtis)", "SSM 2040", "CS-80 (Yamaha)", "Jupiter (Roland)", "EDP Wasp (CMOS)",
+        "Butterworth (Flat)", "Chebyshev (Ripple)", "Bessel (Phase)", "Elliptic (Notch)"
+        }, 1); addAndMakeVisible(g.model);
     g.mAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "model" + s, g.model);
 
     g.type.addItemList({ "LP", "BP", "HP", "Notch" }, 1); addAndMakeVisible(g.type);

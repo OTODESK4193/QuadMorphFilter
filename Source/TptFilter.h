@@ -4,6 +4,7 @@
 #pragma once
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_dsp/juce_dsp.h>
+#include <vector>
 
 class TptFilter
 {
@@ -14,8 +15,8 @@ public:
     void prepare(double newSampleRate, int samplesPerBlock, int numChannels);
     void reset();
 
-    // 0: Clean SVF, 1: Moog, 2: Diode, 3: SEM, 4: Bitcrush, 5: Formant, 6: Comb, 7: MS-20, 8: Phaser, 9: Wavefolder, 10: Reverb, 11: Kilo AP
-    // 【Wave 1 追加】12: Prophet(Curtis), 13: SSM2040, 14: CS-80, 15: Jupiter, 16: EDP Wasp
+    // 0~16: (既存モデル)
+    // 17: Butterworth, 18: Chebyshev I, 19: Bessel, 20: Elliptic
     void setModel(int newModel);
     void setCutoff(float newCutoff);
     void setResonance(float newResonance);
@@ -28,6 +29,8 @@ public:
 private:
     float processSample(int channel, float x);
     void updateCoefficients();
+
+    void calcDigitalPrecisionCoeffs(float fc, float res);
 
     double sampleRate = 44100.0;
     int maxChannels = 2;
@@ -45,15 +48,18 @@ private:
     int filterType = 0;
     int slopeIdx = 0;
     int currentStages = 1;
+    int filterOrder = 2;
 
-    // SVF & SEM & CS-80 & Wasp 係数
+    // 【追加】デジタル精密シリーズ用・内部変調スムーザー
+    float smoothedDigitalCutoff = 1000.0f;
+
+    // SVF & アナログ系係数
     float g = 0.0f;
     float R = 0.0f;
     float h = 0.0f;
     float s1[8][2] = { {0.0f} };
     float s2[8][2] = { {0.0f} };
 
-    // Ladder 系係数 (Moog, Diode, Prophet, SSM, Jupiter)
     float ladderG = 0.0f;
     float ladderRes = 0.0f;
     float zdfState[8][2][4] = { { {0.0f} } };
@@ -75,6 +81,12 @@ private:
 
     float ap_s[16][2] = { {0.0f} };
     float ap_out_prev[2] = { 0.0f };
+
+    // デジタル精密シリーズ用係数
+    struct BiquadCoeffs { float g, R, h; };
+    std::vector<BiquadCoeffs> dpCoeffs;
+    float dp_s1[8][2] = { {0.0f} };
+    float dp_s2[8][2] = { {0.0f} };
 
     float rmsIn[2] = { 0.0f, 0.0f };
     float rmsOut[2] = { 0.0f, 0.0f };
