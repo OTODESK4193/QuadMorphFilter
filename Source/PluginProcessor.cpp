@@ -75,6 +75,12 @@ QuadMorphFilterAudioProcessor::~QuadMorphFilterAudioProcessor() {}
 
 void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
+    // ===== 【新規追加開始】=====
+// Phase 1: 新しい FilterA_SVF の初期化
+    filterA_SVF.prepare(sampleRate, samplesPerBlock);
+    filterA_SVF.reset();
+    // ===== 【新規追加終了】=====
+
     filterA.prepare(sampleRate, samplesPerBlock, 2);
     filterB.prepare(sampleRate, samplesPerBlock, 2);
     filterC.prepare(sampleRate, samplesPerBlock, 2);
@@ -110,6 +116,18 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
 
     double bpm = 120.0;
     if (auto* ph = getPlayHead()) if (auto pos = ph->getPosition()) if (pos->getBpm().hasValue()) bpm = *(pos->getBpm());
+
+    // ===== 【新規追加開始】=====
+// Phase 1: FilterA_SVF のパラメータ設定
+    float cutoffA = apvts.getRawParameterValue("cutoffA")->load();
+    float resA = apvts.getRawParameterValue("resA")->load();
+    int typeA = (int)apvts.getRawParameterValue("typeA")->load();
+    bool enableA = apvts.getRawParameterValue("enableA")->load() > 0.5f;
+
+    filterA_SVF.setCutoff(cutoffA);
+    filterA_SVF.setResonance(resA);
+    filterA_SVF.setType(typeA);
+    // ===== 【新規追加終了】=====
 
     float baseX = apvts.getRawParameterValue("posX")->load();
     float baseY = apvts.getRawParameterValue("posY")->load();
@@ -259,17 +277,40 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         wMix[0] = (1.0f - x) * (1.0f - y); wMix[1] = x * (1.0f - y); wMix[2] = (1.0f - x) * y; wMix[3] = x * y;
     }
 
-    bool enA = apvts.getRawParameterValue("enableA")->load() > 0.5f; bool enB = apvts.getRawParameterValue("enableB")->load() > 0.5f;
-    bool enC = apvts.getRawParameterValue("enableC")->load() > 0.5f; bool enD = apvts.getRawParameterValue("enableD")->load() > 0.5f;
+    bool enA = apvts.getRawParameterValue("enableA")->load() > 0.5f;
+    bool enB = apvts.getRawParameterValue("enableB")->load() > 0.5f;
+    bool enC = apvts.getRawParameterValue("enableC")->load() > 0.5f;
+    bool enD = apvts.getRawParameterValue("enableD")->load() > 0.5f;
 
+    // ===== 【修正】Phase 1: FilterA_SVF 処理 =====
+    if (enableA)
+    {
+        // FilterA_SVF をバッファに直接適用して、結果を filterBuffers[0] に保存
+        filterBuffers[0].setSize(numChannels, numSamples);
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            filterBuffers[0].copyFrom(ch, 0, buffer, ch, 0, numSamples);
+        }
+        filterA_SVF.process(filterBuffers[0]);
+    }
+    else
+    {
+        filterBuffers[0].clear();
+    }
+    // ===== 【修正終了】=====
+
+    // ===== 既存フィルター B, C, D の処理 =====
     auto proc = [&](juce::AudioBuffer<float>& t, TptFilter& f, bool e) {
         for (int ch = 0; ch < numChannels; ++ch) t.copyFrom(ch, 0, buffer, ch, 0, numSamples);
         if (e) f.process(t); else t.clear();
         };
 
-    proc(filterBuffers[0], filterA, enA); proc(filterBuffers[1], filterB, enB);
-    proc(filterBuffers[2], filterC, enC); proc(filterBuffers[3], filterD, enD);
+    // 既存フィルター A は使わない（FilterA_SVF に置き換え）
+    proc(filterBuffers[1], filterB, enB);
+    proc(filterBuffers[2], filterC, enC);
+    proc(filterBuffers[3], filterD, enD);
 
+    // ===== バッファのミキシング（そのまま） =====
     buffer.clear();
     for (int ch = 0; ch < numChannels; ++ch) {
         if (enA) buffer.addFrom(ch, 0, filterBuffers[0], ch, 0, numSamples, wMix[0]);

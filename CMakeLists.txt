@@ -5,11 +5,19 @@ project(QuadMorphFilter VERSION 1.0.0)
 set(JUCE_VST3_AUTO_MANIFEST OFF)
 add_compile_definitions(JUCE_VST3_CAN_REPLACE_VST2=0)
 
-# 1. C++20の有効化
+# 1. CMakeバージョンをアップ（JUCE8.0推奨）
+cmake_minimum_required(VERSION 3.24)
+project(QuadMorphFilter VERSION 1.0.0)
+
+# 2. C++20の有効化
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 2. JUCEディレクトリの指定
+# 3. ビルド出力ディレクトリの指定（余計なゴミを避ける）
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+
+# 4. JUCEディレクトリの指定
 set(JUCE_DIR "C:/JUCE")
 add_subdirectory(${JUCE_DIR} build_juce)
 
@@ -25,7 +33,7 @@ juce_add_plugin(QuadMorphFilter
     VST3_AUTO_MANIFEST FALSE
     PLUGIN_MANUFACTURER_CODE "Otdk"
     PLUGIN_CODE "Qmfl"
-    FORMATS VST3
+    FORMATS VST3 Standalone
     PRODUCT_NAME "Quad-Morph Filter")
 
 # 4. SIMD最適化フラグと文字コードエラー無視の設定
@@ -46,7 +54,7 @@ target_sources(QuadMorphFilter PRIVATE
     Source/PluginEditor.h
     Source/TptFilter.cpp
     Source/TptFilter.h
-)
+ "Source/FilterA_SVF.h" "Source/FilterA_SVF.cpp")
 
 # 6. 使用するJUCEモジュールのリンク（問題のTARGETを削除しました）
 target_link_libraries(QuadMorphFilter PRIVATE

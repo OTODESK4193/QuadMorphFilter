@@ -4,6 +4,7 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "TptFilter.h"
+#include "FilterA_SVF.h"  // ← 新規追加
 #include <vector>
 #include <array>
 #include <atomic>
@@ -47,7 +48,12 @@ public:
     std::atomic<float> currentRecY[3]{ 0.5f };
 
 private:
+
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+
+    // ===== 【新規追加開始】=====
+    FilterA_SVF filterA_SVF;              // ← 新しいフィルターインスタンス
+    // ===== 【新規追加終了】=====
 
     TptFilter filterA, filterB, filterC, filterD;
     std::array<juce::AudioBuffer<float>, 4> filterBuffers;
