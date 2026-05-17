@@ -29,13 +29,31 @@ void XYPadComponent::paint(juce::Graphics& g)
     g.setColour(juce::Colour(0xffD5DDE5));
     g.drawRoundedRectangle(b, 8.0f, 1.5f);
 
-    g.setColour(juce::Colours::white.withAlpha(0.3f));
+    // ===== XYモード読み取り =====
+    int xyMode = (int)processor.apvts.getRawParameterValue("xyMode")->load();
+
+    // ===== ABCD コーナーラベル（Cutoffモードでは薄く）=====
+    g.setColour(juce::Colours::white.withAlpha(xyMode == 1 ? 0.1f : 0.3f));
     g.setFont(14.0f);
     g.drawText("A", 10, 10, 20, 20, juce::Justification::centred);
     g.drawText("B", getWidth() - 30, 10, 20, 20, juce::Justification::centred);
     g.drawText("C", 10, getHeight() - 30, 20, 20, juce::Justification::centred);
     g.drawText("D", getWidth() - 30, getHeight() - 30, 20, 20, juce::Justification::centred);
 
+    // ===== Cutoffモード: 軸ラベルを表示 =====
+    if (xyMode == 1)
+    {
+        g.setColour(juce::Colours::white.withAlpha(0.55f));
+        g.setFont(10.0f);
+        g.drawText("Cutoff \xe2\x86\x92",  // →
+            getWidth() / 2 - 35, getHeight() - 16, 70, 14,
+            juce::Justification::centred);
+        g.drawText("\xe2\x86\x91 Reso",    // ↑
+            3, getHeight() / 2 - 7, 42, 14,
+            juce::Justification::centredLeft);
+    }
+
+    // ===== LFO トレイルと現在位置 =====
     juce::Colour colors[] = {
         juce::Colour(0xff00D2D3),
         juce::Colour(0xffFF9FF3),
@@ -48,7 +66,7 @@ void XYPadComponent::paint(juce::Graphics& g)
             "lfo" + juce::String(i + 1) + "en")->load() < 0.5f)
             continue;
 
-        // トレイル描画
+        // トレイル
         for (int t = 0; t < 30; ++t) {
             int   idx = (trailIdx[i] + t) % 30;
             auto  pt = trails[i][idx];
@@ -57,7 +75,7 @@ void XYPadComponent::paint(juce::Graphics& g)
             g.fillEllipse(pt.x * getWidth() - 3, pt.y * getHeight() - 3, 6, 6);
         }
 
-        // 現在位置の描画
+        // 現在位置
         auto p = processor.getLfoPos(i);
         bool isWait = processor.isWaitingForRecord[i].load(std::memory_order_acquire);
         bool isDrag = processor.isRecordingDrag[i].load(std::memory_order_acquire);
@@ -87,7 +105,6 @@ void XYPadComponent::mouseDown(const juce::MouseEvent& e)
 {
     if (e.mods.isRightButtonDown())
     {
-        // 録音待機状態をキャンセル
         for (int i = 0; i < 3; ++i) {
             if (processor.isWaitingForRecord[i].load()) {
                 processor.isWaitingForRecord[i].store(false);
@@ -96,7 +113,6 @@ void XYPadComponent::mouseDown(const juce::MouseEvent& e)
                 return;
             }
         }
-        // Recording LFO の録音開始
         float ww = (float)getWidth();
         float hh = (float)getHeight();
         for (int i = 0; i < 3; ++i) {

@@ -73,6 +73,20 @@ QuadMorphFilterAudioProcessor::createParameterLayout()
         layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "res" + s, 1 }, "Res / Ctrl " + s, 0.1f, 10.0f, 0.707f));
     }
 
+    // ===== 【新規】XY モード =====
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ "xyMode", 1 }, "XY Mode",
+        juce::StringArray{ "Morph", "Cutoff" }, 0));
+
+    // ===== 【新規】LFO Cut / LFO Res per-filter スイッチ =====
+    for (const auto& s : suffixes)
+    {
+        layout.add(std::make_unique<juce::AudioParameterBool>(
+            juce::ParameterID{ "lfoCut" + s, 1 }, "LFO Cut " + s, true));
+        layout.add(std::make_unique<juce::AudioParameterBool>(
+            juce::ParameterID{ "lfoRes" + s, 1 }, "LFO Res " + s, true));
+    }
+
     return layout;
 }
 
@@ -86,16 +100,10 @@ QuadMorphFilterAudioProcessor::QuadMorphFilterAudioProcessor()
 
 QuadMorphFilterAudioProcessor::~QuadMorphFilterAudioProcessor() {}
 
-// ==========================================
-// prepareToPlay
-// ==========================================
 void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
     lfoEngine.prepare(sampleRate);
-
-    // SIMD版を初期化 (4インスタンス分まとめて)
     svfQuad.prepare(sampleRate, samplesPerBlock);
-
     filterA.prepare(sampleRate, samplesPerBlock, 2);
     filterB.prepare(sampleRate, samplesPerBlock, 2);
     filterC.prepare(sampleRate, samplesPerBlock, 2);
@@ -103,7 +111,6 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
 
     for (auto& buf : filterBuffers)
         buf.setSize(2, samplesPerBlock, false, false, true);
-
     dryBuffer.setSize(2, samplesPerBlock, false, false, true);
 
     currentGainReduction[0] = 1.0f;
@@ -112,9 +119,6 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
 
 void QuadMorphFilterAudioProcessor::releaseResources() {}
 
-// ==========================================
-// processBlock
-// ==========================================
 void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     juce::MidiBuffer&)
 {
@@ -138,15 +142,22 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     float baseY = apvts.getRawParameterValue("posY")->load();
 
     LfoEngine::RecordingContext recCtx{
-        recBuffer,
-        recLength,
-        isWaitingForRecord,
-        isRecordingDrag,
-        currentRecX,
-        currentRecY
+        recBuffer, recLength, isWaitingForRecord, isRecordingDrag, currentRecX, currentRecY
     };
     lfoEngine.process(dt, bpm, baseX, baseY, apvts, recCtx);
 
+    // ===== XYモードと XY位置取得 =====
+    int xyMode = (int)apvts.getRawParameterValue("xyMode")->load();
+    float posX = lfoEngine.getPosition(0).x;
+    float posY = lfoEngine.getPosition(0).y;
+
+    // Cutoffモード用: XY位置 → カットオフ・Reso に変換
+    // X: 0→1 = 20Hz→20kHz（対数スケール）
+    // Y: 0→1 = 0.1→10.0 （線形スケール）
+    float xyCutoff = 20.0f * std::pow(1000.0f, posX);
+    float xyRes = juce::jlimit(0.1f, 10.0f, 0.1f + posY * 9.9f);
+
+    // ===== LFO2/3 モジュレーション量の計算 =====
     bool lfo1_isRand1 = ((int)apvts.getRawParameterValue("lfo2wave")->load() == 3)
         && (apvts.getRawParameterValue("lfo2en")->load() > 0.5f);
     bool lfo2_isRand1 = ((int)apvts.getRawParameterValue("lfo3wave")->load() == 3)
@@ -160,10 +171,26 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     // ===== TptFilter パラメータ更新 =====
     auto updateTpt = [&](TptFilter& f, const juce::String& s, int idx)
         {
-            float fc = MorphEngine::applyFrequencyMod(
-                apvts.getRawParameterValue("cutoff" + s)->load(), cM[idx]);
-            float res = MorphEngine::applyResonanceMod(
-                apvts.getRawParameterValue("res" + s)->load(), rM[idx]);
+            float baseCutoff, baseRes;
+            if (xyMode == 1)
+            {
+                // Cutoffモード: XY位置を基準値として使用
+                baseCutoff = xyCutoff;
+                baseRes = xyRes;
+            }
+            else
+            {
+                // Morphモード: 各フィルターのスライダー値を使用
+                baseCutoff = apvts.getRawParameterValue("cutoff" + s)->load();
+                baseRes = apvts.getRawParameterValue("res" + s)->load();
+            }
+
+            // per-filter LFO スイッチ
+            bool lfoCutOn = apvts.getRawParameterValue("lfoCut" + s)->load() > 0.5f;
+            bool lfoResOn = apvts.getRawParameterValue("lfoRes" + s)->load() > 0.5f;
+
+            float fc = lfoCutOn ? MorphEngine::applyFrequencyMod(baseCutoff, cM[idx]) : baseCutoff;
+            float res = lfoResOn ? MorphEngine::applyResonanceMod(baseRes, rM[idx]) : baseRes;
 
             f.setModel((int)apvts.getRawParameterValue("model" + s)->load());
             f.setCutoff(juce::jlimit(20.0f, 20000.0f, fc));
@@ -178,19 +205,31 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     updateTpt(filterD, "D", 3);
 
     // ===== SIMD SVF パラメータ更新 =====
-    // 4インスタンスをまとめて設定
     juce::StringArray suffixes = { "A", "B", "C", "D" };
     for (int idx = 0; idx < 4; ++idx)
     {
         const juce::String& s = suffixes[idx];
         int model = (int)apvts.getRawParameterValue("model" + s)->load();
         bool enabled = (apvts.getRawParameterValue("enable" + s)->load() > 0.5f)
-            && (model == 0); // モデルが Clean SVF のときのみ有効
+            && (model == 0);
 
-        float fc = MorphEngine::applyFrequencyMod(
-            apvts.getRawParameterValue("cutoff" + s)->load(), cM[idx]);
-        float res = MorphEngine::applyResonanceMod(
-            apvts.getRawParameterValue("res" + s)->load(), rM[idx]);
+        float baseCutoff, baseRes;
+        if (xyMode == 1)
+        {
+            baseCutoff = xyCutoff;
+            baseRes = xyRes;
+        }
+        else
+        {
+            baseCutoff = apvts.getRawParameterValue("cutoff" + s)->load();
+            baseRes = apvts.getRawParameterValue("res" + s)->load();
+        }
+
+        bool lfoCutOn = apvts.getRawParameterValue("lfoCut" + s)->load() > 0.5f;
+        bool lfoResOn = apvts.getRawParameterValue("lfoRes" + s)->load() > 0.5f;
+
+        float fc = lfoCutOn ? MorphEngine::applyFrequencyMod(baseCutoff, cM[idx]) : baseCutoff;
+        float res = lfoResOn ? MorphEngine::applyResonanceMod(baseRes, rM[idx]) : baseRes;
 
         svfQuad.setEnabled(idx, enabled);
         svfQuad.setCutoff(idx, juce::jlimit(20.0f, 20000.0f, fc));
@@ -198,47 +237,70 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         svfQuad.setType(idx, (int)apvts.getRawParameterValue("type" + s)->load());
     }
 
-    // ===== 等パワー Mix 計算 =====
-    std::array<float, 4> wMix;
-    bool lfo0_isRand1 = ((int)apvts.getRawParameterValue("lfo1wave")->load() == 3)
-        && (apvts.getRawParameterValue("lfo1en")->load() > 0.5f);
-
-    if (lfo0_isRand1)
-        wMix = lfoEngine.getMod4(0);
-    else
-        wMix = MorphEngine::computeEqualPowerWMix(
-            lfoEngine.getPosition(0).x,
-            lfoEngine.getPosition(0).y);
-
+    // ===== 有効フィルター取得 =====
     bool enA = apvts.getRawParameterValue("enableA")->load() > 0.5f;
     bool enB = apvts.getRawParameterValue("enableB")->load() > 0.5f;
     bool enC = apvts.getRawParameterValue("enableC")->load() > 0.5f;
     bool enD = apvts.getRawParameterValue("enableD")->load() > 0.5f;
+
+    // ===== wMix 計算（XYモードで切り替え）=====
+    std::array<float, 4> wMix;
+
+    if (xyMode == 1)
+    {
+        // Cutoffモード: 有効フィルター全て等パワー（Morphしない）
+        int numActive = (enA ? 1 : 0) + (enB ? 1 : 0) + (enC ? 1 : 0) + (enD ? 1 : 0);
+        float w = (numActive > 0) ? (1.0f / std::sqrt((float)numActive)) : 0.0f;
+        wMix[0] = enA ? w : 0.0f;
+        wMix[1] = enB ? w : 0.0f;
+        wMix[2] = enC ? w : 0.0f;
+        wMix[3] = enD ? w : 0.0f;
+    }
+    else
+    {
+        // Morphモード: 等パワークロスフェード
+        bool lfo0_isRand1 = ((int)apvts.getRawParameterValue("lfo1wave")->load() == 3)
+            && (apvts.getRawParameterValue("lfo1en")->load() > 0.5f);
+
+        if (lfo0_isRand1)
+            wMix = lfoEngine.getMod4(0);
+        else
+            wMix = MorphEngine::computeEqualPowerWMix(posX, posY);
+
+        // 有効フィルターのみで正規化
+        {
+            float sumSq = 0.0f;
+            if (enA) sumSq += wMix[0] * wMix[0];
+            if (enB) sumSq += wMix[1] * wMix[1];
+            if (enC) sumSq += wMix[2] * wMix[2];
+            if (enD) sumSq += wMix[3] * wMix[3];
+
+            if (sumSq > 1e-8f)
+            {
+                float norm = 1.0f / std::sqrt(sumSq);
+                if (enA) wMix[0] *= norm;
+                if (enB) wMix[1] *= norm;
+                if (enC) wMix[2] *= norm;
+                if (enD) wMix[3] *= norm;
+            }
+        }
+    }
 
     int modelA = (int)apvts.getRawParameterValue("modelA")->load();
     int modelB = (int)apvts.getRawParameterValue("modelB")->load();
     int modelC = (int)apvts.getRawParameterValue("modelC")->load();
     int modelD = (int)apvts.getRawParameterValue("modelD")->load();
 
-    // ===== SIMD SVF: Clean SVF モデルのフィルターを 1 回でまとめて処理 =====
-    // 内部で4インスタンスを並列処理（CPU負荷削減）
+    // ===== フィルター処理 =====
     svfQuad.processBuffer(buffer, filterBuffers);
 
-    // ===== TptFilter: その他27モデルのフィルター =====
-    // SVF が処理したインスタンスを上書きしないよう、model != 0 の場合のみ処理
     auto procTptIfNeeded = [&](juce::AudioBuffer<float>& dst,
-        TptFilter& tpt,
-        int model,
-        bool enabled)
+        TptFilter& tpt, int model, bool enabled)
         {
-            if (model == 0)
-                return; // SVF が処理済み
-
+            if (model == 0) return;
             if (!enabled) { dst.clear(); return; }
-
             for (int ch = 0; ch < numChannels; ++ch)
                 dst.copyFrom(ch, 0, buffer, ch, 0, numSamples);
-
             tpt.process(dst);
         };
 
@@ -273,10 +335,8 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         for (int i = 0; i < numSamples; ++i)
         {
             float gained = (dry[i] * (1.0f - mixRatio) + out[i] * mixRatio) * gainLinear;
-
             float absSignal = std::abs(gained);
-            float targetGr = (absSignal > ceilingLinear)
-                ? ceilingLinear / absSignal : 1.0f;
+            float targetGr = (absSignal > ceilingLinear) ? ceilingLinear / absSignal : 1.0f;
 
             if (targetGr < currentGainReduction[ch])
                 currentGainReduction[ch] = targetGr;
@@ -288,9 +348,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     }
 }
 
-// ==========================================
-// 残りのメソッド（変更なし）
-// ==========================================
 const juce::String QuadMorphFilterAudioProcessor::getName() const { return "Quad-Morph Filter"; }
 bool QuadMorphFilterAudioProcessor::acceptsMidi()  const { return false; }
 bool QuadMorphFilterAudioProcessor::producesMidi() const { return false; }
