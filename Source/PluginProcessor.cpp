@@ -93,10 +93,8 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
 {
     lfoEngine.prepare(sampleRate);
 
-    svfA.prepare(sampleRate, samplesPerBlock);
-    svfB.prepare(sampleRate, samplesPerBlock);
-    svfC.prepare(sampleRate, samplesPerBlock);
-    svfD.prepare(sampleRate, samplesPerBlock);
+    // SIMD版を初期化 (4インスタンス分まとめて)
+    svfQuad.prepare(sampleRate, samplesPerBlock);
 
     filterA.prepare(sampleRate, samplesPerBlock, 2);
     filterB.prepare(sampleRate, samplesPerBlock, 2);
@@ -115,7 +113,7 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
 void QuadMorphFilterAudioProcessor::releaseResources() {}
 
 // ==========================================
-// processBlock（薄いオーケストレーション層）
+// processBlock
 // ==========================================
 void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     juce::MidiBuffer&)
@@ -127,11 +125,9 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     const int   numChannels = buffer.getNumChannels();
     const float dt = numSamples / (float)sampleRate;
 
-    // ドライ信号を保存
     for (int ch = 0; ch < numChannels; ++ch)
         dryBuffer.copyFrom(ch, 0, buffer, ch, 0, numSamples);
 
-    // BPM 取得
     double bpm = 120.0;
     if (auto* ph = getPlayHead())
         if (auto pos = ph->getPosition())
@@ -141,7 +137,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     float baseX = apvts.getRawParameterValue("posX")->load();
     float baseY = apvts.getRawParameterValue("posY")->load();
 
-    // ===== LfoEngine に録音状態を渡して LFO 処理 =====
     LfoEngine::RecordingContext recCtx{
         recBuffer,
         recLength,
@@ -152,17 +147,13 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     };
     lfoEngine.process(dt, bpm, baseX, baseY, apvts, recCtx);
 
-    // ===== MorphEngine でモジュレーション値を計算 =====
     bool lfo1_isRand1 = ((int)apvts.getRawParameterValue("lfo2wave")->load() == 3)
         && (apvts.getRawParameterValue("lfo2en")->load() > 0.5f);
     bool lfo2_isRand1 = ((int)apvts.getRawParameterValue("lfo3wave")->load() == 3)
         && (apvts.getRawParameterValue("lfo3en")->load() > 0.5f);
 
-    // cM: カットオフモジュレーション量 (4フィルター分)
     auto cM = MorphEngine::computeModulation(
         lfoEngine.getPosition(1), lfoEngine.getMod4(1), lfo1_isRand1);
-
-    // rM: レゾナンスモジュレーション量 (4フィルター分)
     auto rM = MorphEngine::computeModulation(
         lfoEngine.getPosition(2), lfoEngine.getMod4(2), lfo2_isRand1);
 
@@ -186,28 +177,28 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     updateTpt(filterC, "C", 2);
     updateTpt(filterD, "D", 3);
 
-    // ===== FilterA_SVF パラメータ更新 =====
-    auto updateSvf = [&](FilterA_SVF& svf, const juce::String& s, int idx)
-        {
-            if ((int)apvts.getRawParameterValue("model" + s)->load() != 0)
-                return; // Clean SVF 以外はスキップ
+    // ===== SIMD SVF パラメータ更新 =====
+    // 4インスタンスをまとめて設定
+    juce::StringArray suffixes = { "A", "B", "C", "D" };
+    for (int idx = 0; idx < 4; ++idx)
+    {
+        const juce::String& s = suffixes[idx];
+        int model = (int)apvts.getRawParameterValue("model" + s)->load();
+        bool enabled = (apvts.getRawParameterValue("enable" + s)->load() > 0.5f)
+            && (model == 0); // モデルが Clean SVF のときのみ有効
 
-            float fc = MorphEngine::applyFrequencyMod(
-                apvts.getRawParameterValue("cutoff" + s)->load(), cM[idx]);
-            float res = MorphEngine::applyResonanceMod(
-                apvts.getRawParameterValue("res" + s)->load(), rM[idx]);
+        float fc = MorphEngine::applyFrequencyMod(
+            apvts.getRawParameterValue("cutoff" + s)->load(), cM[idx]);
+        float res = MorphEngine::applyResonanceMod(
+            apvts.getRawParameterValue("res" + s)->load(), rM[idx]);
 
-            svf.setCutoff(juce::jlimit(20.0f, 20000.0f, fc));
-            svf.setResonance(juce::jlimit(0.1f, 10.0f, res));
-            svf.setType((int)apvts.getRawParameterValue("type" + s)->load());
-        };
+        svfQuad.setEnabled(idx, enabled);
+        svfQuad.setCutoff(idx, juce::jlimit(20.0f, 20000.0f, fc));
+        svfQuad.setResonance(idx, juce::jlimit(0.1f, 10.0f, res));
+        svfQuad.setType(idx, (int)apvts.getRawParameterValue("type" + s)->load());
+    }
 
-    updateSvf(svfA, "A", 0);
-    updateSvf(svfB, "B", 1);
-    updateSvf(svfC, "C", 2);
-    updateSvf(svfD, "D", 3);
-
-    // ===== 等パワーwMix 計算 =====
+    // ===== 等パワー Mix 計算 =====
     std::array<float, 4> wMix;
     bool lfo0_isRand1 = ((int)apvts.getRawParameterValue("lfo1wave")->load() == 3)
         && (apvts.getRawParameterValue("lfo1en")->load() > 0.5f);
@@ -219,34 +210,42 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             lfoEngine.getPosition(0).x,
             lfoEngine.getPosition(0).y);
 
-    // ===== フィルター処理 =====
     bool enA = apvts.getRawParameterValue("enableA")->load() > 0.5f;
     bool enB = apvts.getRawParameterValue("enableB")->load() > 0.5f;
     bool enC = apvts.getRawParameterValue("enableC")->load() > 0.5f;
     bool enD = apvts.getRawParameterValue("enableD")->load() > 0.5f;
 
-    // model == 0 → SVF, それ以外 → TptFilter
-    auto procUnified = [&](juce::AudioBuffer<float>& dst,
+    int modelA = (int)apvts.getRawParameterValue("modelA")->load();
+    int modelB = (int)apvts.getRawParameterValue("modelB")->load();
+    int modelC = (int)apvts.getRawParameterValue("modelC")->load();
+    int modelD = (int)apvts.getRawParameterValue("modelD")->load();
+
+    // ===== SIMD SVF: Clean SVF モデルのフィルターを 1 回でまとめて処理 =====
+    // 内部で4インスタンスを並列処理（CPU負荷削減）
+    svfQuad.processBuffer(buffer, filterBuffers);
+
+    // ===== TptFilter: その他27モデルのフィルター =====
+    // SVF が処理したインスタンスを上書きしないよう、model != 0 の場合のみ処理
+    auto procTptIfNeeded = [&](juce::AudioBuffer<float>& dst,
         TptFilter& tpt,
-        FilterA_SVF& svf,
-        const juce::String& s,
+        int model,
         bool enabled)
         {
-            for (int ch = 0; ch < numChannels; ++ch)
-                dst.copyFrom(ch, 0, buffer, ch, 0, numSamples);
+            if (model == 0)
+                return; // SVF が処理済み
 
             if (!enabled) { dst.clear(); return; }
 
-            if ((int)apvts.getRawParameterValue("model" + s)->load() == 0)
-                svf.process(dst);
-            else
-                tpt.process(dst);
+            for (int ch = 0; ch < numChannels; ++ch)
+                dst.copyFrom(ch, 0, buffer, ch, 0, numSamples);
+
+            tpt.process(dst);
         };
 
-    procUnified(filterBuffers[0], filterA, svfA, "A", enA);
-    procUnified(filterBuffers[1], filterB, svfB, "B", enB);
-    procUnified(filterBuffers[2], filterC, svfC, "C", enC);
-    procUnified(filterBuffers[3], filterD, svfD, "D", enD);
+    procTptIfNeeded(filterBuffers[0], filterA, modelA, enA);
+    procTptIfNeeded(filterBuffers[1], filterB, modelB, enB);
+    procTptIfNeeded(filterBuffers[2], filterC, modelC, enC);
+    procTptIfNeeded(filterBuffers[3], filterD, modelD, enD);
 
     // ===== ABCD ミキシング =====
     buffer.clear();

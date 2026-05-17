@@ -4,9 +4,10 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "DSP/TptFilter.h"
-#include "DSP/FilterA_SVF.h"
-#include "DSP/LfoEngine.h"     // ← 追加
-#include "DSP/MorphEngine.h"   // ← 追加
+#include "DSP/FilterA_SVF.h"          // ← 残しておく（後で削除可能）
+#include "DSP/FilterA_SVF_SIMD.h"     // ← 追加
+#include "DSP/LfoEngine.h"
+#include "DSP/MorphEngine.h"
 #include <vector>
 #include <array>
 #include <atomic>
@@ -37,14 +38,11 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
-    // ===== LFO 出力アクセサ（UI・ビジュアライザーから参照）=====
-    // LfoEngine に委譲
     juce::Point<float>   getLfoPos(int index)  const { return lfoEngine.getPosition(index); }
     std::array<float, 4> getLfoMod4(int index) const { return lfoEngine.getMod4(index); }
 
     juce::AudioProcessorValueTreeState apvts;
 
-    // ===== 録音状態（XYPadComponent から直接アクセスされる）=====
     std::array<juce::Point<float>, 2048> recBuffer[3];
     std::atomic<int>   recLength[3]{ 0 };
     std::atomic<bool>  isWaitingForRecord[3]{ false };
@@ -55,11 +53,15 @@ public:
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    // ===== DSP エンジン =====
-    LfoEngine   lfoEngine;                        // ← LFO処理を委譲
+    LfoEngine lfoEngine;
 
-    FilterA_SVF svfA, svfB, svfC, svfD;           // Clean SVF 専用
-    TptFilter   filterA, filterB, filterC, filterD; // その他27モデル
+    // ===== Clean SVF 4インスタンス（SIMD並列処理）=====
+    // 旧: svfA, svfB, svfC, svfD の4つ
+    // 新: svfQuad の1つで4インスタンス分を内部管理
+    FilterA_SVF_SIMD svfQuad;
+
+    // その他27モデル用
+    TptFilter filterA, filterB, filterC, filterD;
 
     std::array<juce::AudioBuffer<float>, 4> filterBuffers;
     juce::AudioBuffer<float> dryBuffer;
