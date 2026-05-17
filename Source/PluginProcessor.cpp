@@ -11,8 +11,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout QuadMorphFilterAudioProcesso
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "posX", 1 }, "Base X", 0.0f, 1.0f, 0.5f));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "posY", 1 }, "Base Y", 0.0f, 1.0f, 0.5f));
 
-    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "masterGain", 1 }, "Output Gain", juce::NormalisableRange<float>(-36.0f, 24.0f, 0.1f), 0.0f));
-    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "dryWet", 1 }, "Dry/Wet", juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 100.0f));
+    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "masterGain",     1 }, "Output Gain", juce::NormalisableRange<float>(-36.0f, 24.0f, 0.1f), 0.0f));
+    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "dryWet",         1 }, "Dry/Wet", juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 100.0f));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "limiterCeiling", 1 }, "Ceiling", juce::NormalisableRange<float>(-36.0f, 0.0f, 0.1f), -0.1f));
 
     juce::StringArray waveTypes = {
@@ -20,13 +20,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout QuadMorphFilterAudioProcesso
         "Smooth Noise", "Spirograph", "Harmonic Swarm", "3D Torus Knot",
         "Lissajous", "Spiral", "Star", "Rose", "Lemniscate", "Billiard", "Polygon", "Attractor Orbit"
     };
-
     juce::StringArray syncRates = {
         "8/1", "4/1", "2/1", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64",
         "1/1D", "1/2D", "1/4D", "1/8D", "1/16D", "1/32D",
         "1/1T", "1/2T", "1/4T", "1/8T", "1/16T", "1/32T"
     };
-
     juce::StringArray bounds = { "Clip", "Bounce", "Wrap" };
     juce::StringArray lfoNames = { "Morph", "Cutoff", "Reso" };
 
@@ -77,24 +75,18 @@ QuadMorphFilterAudioProcessor::QuadMorphFilterAudioProcessor()
 
 QuadMorphFilterAudioProcessor::~QuadMorphFilterAudioProcessor() {}
 
-// ==========================================
-// prepareToPlay
-// ==========================================
 void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
-    // ===== Clean SVF 専用フィルター（4つ全て初期化）=====
     svfA.prepare(sampleRate, samplesPerBlock);
     svfB.prepare(sampleRate, samplesPerBlock);
     svfC.prepare(sampleRate, samplesPerBlock);
     svfD.prepare(sampleRate, samplesPerBlock);
 
-    // ===== TptFilter（その他27モデル用）=====
     filterA.prepare(sampleRate, samplesPerBlock, 2);
     filterB.prepare(sampleRate, samplesPerBlock, 2);
     filterC.prepare(sampleRate, samplesPerBlock, 2);
     filterD.prepare(sampleRate, samplesPerBlock, 2);
 
-    // ===== バッファの事前確保（processBlock 内での動的確保を防ぐ）=====
     for (auto& buf : filterBuffers)
         buf.setSize(2, samplesPerBlock, false, false, true);
 
@@ -114,9 +106,6 @@ float QuadMorphFilterAudioProcessor::getSyncTime(int selection, double bpm)
     return (float)(beatLen * std::pow(2.0, 0 - (selection - 16)) * (2.0 / 3.0));
 }
 
-// ==========================================
-// processBlock
-// ==========================================
 void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     juce::MidiBuffer& midiMessages)
 {
@@ -127,11 +116,9 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     const auto numChannels = buffer.getNumChannels();
     const float dt = numSamples / (float)sampleRate;
 
-    // ドライ信号を保存（Dry/Wet 処理用）
     for (int ch = 0; ch < numChannels; ++ch)
         dryBuffer.copyFrom(ch, 0, buffer, ch, 0, numSamples);
 
-    // BPM 取得
     double bpm = 120.0;
     if (auto* ph = getPlayHead())
         if (auto pos = ph->getPosition())
@@ -161,7 +148,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             return v;
         };
 
-    // ===== LFO 処理 =====
     for (int i = 0; i < 3; ++i)
     {
         juce::String id = "lfo" + juce::String(i + 1);
@@ -192,7 +178,7 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
                     lfoStates[i].phase -= juce::MathConstants<float>::twoPi;
                     lfoStates[i].currentRandom = lfoStates[i].nextRandom;
                     lfoStates[i].nextRandom = { lfoStates[i].rng.nextBool() ? 1.0f : 0.0f,
-                                                    lfoStates[i].rng.nextBool() ? 1.0f : 0.0f };
+                                                   lfoStates[i].rng.nextBool() ? 1.0f : 0.0f };
                     lfoStates[i].currentRand1 = lfoStates[i].nextRand1;
                     for (int f = 0; f < 4; ++f)
                         lfoStates[i].nextRand1[f] = lfoStates[i].rng.nextFloat();
@@ -332,14 +318,12 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         currentLfoMod4[i] = lfoMod4[i];
     }
 
-    // ===== LFO モジュレーション値の計算 =====
     auto getM = [](juce::Point<float> p, const std::array<float, 4>& m4, bool isRand1)
         -> std::array<float, 4>
         {
             std::array<float, 4> res;
             if (isRand1) {
-                for (int i = 0; i < 4; ++i)
-                    res[i] = m4[i] * 2.0f - 1.0f;
+                for (int i = 0; i < 4; ++i) res[i] = m4[i] * 2.0f - 1.0f;
             }
             else {
                 res[0] = p.x * 2.0f - 1.0f;
@@ -358,15 +342,12 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         && (apvts.getRawParameterValue("lfo3en")->load() > 0.5f);
     std::array<float, 4> rM = getM(lfoPositions[2], lfoMod4[2], lfo2_isRand1);
 
-    // ===== TptFilter パラメータ更新（モデルが Clean SVF 以外のとき使用）=====
     auto updateF = [&](TptFilter& f, juce::String s, int idx)
         {
             float baseCutoff = apvts.getRawParameterValue("cutoff" + s)->load();
             float baseRes = apvts.getRawParameterValue("res" + s)->load();
-
             float fc = baseCutoff * std::pow(2.0f, 4.0f * cM[idx]);
             float res = baseRes * std::pow(2.0f, 2.0f * rM[idx]);
-
             f.setModel((int)apvts.getRawParameterValue("model" + s)->load());
             f.setCutoff(juce::jlimit(20.0f, 20000.0f, fc));
             f.setResonance(juce::jlimit(0.1f, 10.0f, res));
@@ -379,19 +360,14 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     updateF(filterC, "C", 2);
     updateF(filterD, "D", 3);
 
-    // ===== FilterA_SVF パラメータ更新（モデル = Clean SVF のとき使用）=====
     auto updateSVF = [&](FilterA_SVF& svf, juce::String s, int idx)
         {
-            // モデルが Clean SVF(0) のときだけ設定する
             int model = (int)apvts.getRawParameterValue("model" + s)->load();
             if (model != 0) return;
-
             float baseCutoff = apvts.getRawParameterValue("cutoff" + s)->load();
             float baseRes = apvts.getRawParameterValue("res" + s)->load();
-
             float fc = baseCutoff * std::pow(2.0f, 4.0f * cM[idx]);
             float res = baseRes * std::pow(2.0f, 2.0f * rM[idx]);
-
             svf.setCutoff(juce::jlimit(20.0f, 20000.0f, fc));
             svf.setResonance(juce::jlimit(0.1f, 10.0f, res));
             svf.setType((int)apvts.getRawParameterValue("type" + s)->load());
@@ -402,21 +378,45 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     updateSVF(svfC, "C", 2);
     updateSVF(svfD, "D", 3);
 
-    // ===== Morph ミックス比率の計算 =====
+    // ===== 【Option A】等パワークロスフェード =====
+    // 旧: wMix = (1-x)(1-y), x(1-y), (1-x)y, xy  → 中央で -3dB 低下
+    // 新: cos/sin ベースの等パワー計算             → どの位置でも音量一定
+    //
+    // 数学的根拠:
+    //   cos²θ + sin²θ = 1 （ピタゴラスの定理）
+    //   → wMix[0]² + wMix[1]² + wMix[2]² + wMix[3]² = 1 が保証される
+    //   → フィルターが同じ信号を出力する場合、常に一定音量を保つ
     std::array<float, 4> wMix{ 0.f, 0.f, 0.f, 0.f };
     bool lfo0_isRand1 = ((int)apvts.getRawParameterValue("lfo1wave")->load() == 3)
         && (apvts.getRawParameterValue("lfo1en")->load() > 0.5f);
 
-    if (lfo0_isRand1) {
+    if (lfo0_isRand1)
+    {
         wMix = lfoMod4[0];
     }
-    else {
+    else
+    {
         float x = lfoPositions[0].x;
         float y = lfoPositions[0].y;
-        wMix[0] = (1.0f - x) * (1.0f - y);
-        wMix[1] = x * (1.0f - y);
-        wMix[2] = (1.0f - x) * y;
-        wMix[3] = x * y;
+
+        // x, y を角度（0 〜 π/2）に変換
+        float angleX = x * juce::MathConstants<float>::halfPi;
+        float angleY = y * juce::MathConstants<float>::halfPi;
+
+        float cosX = std::cos(angleX);
+        float sinX = std::sin(angleX);
+        float cosY = std::cos(angleY);
+        float sinY = std::sin(angleY);
+
+        // 2D 等パワーミックス
+        // A(左上): cosX * cosY
+        // B(右上): sinX * cosY
+        // C(左下): cosX * sinY
+        // D(右下): sinX * sinY
+        wMix[0] = cosX * cosY;
+        wMix[1] = sinX * cosY;
+        wMix[2] = cosX * sinY;
+        wMix[3] = sinX * sinY;
     }
 
     bool enA = apvts.getRawParameterValue("enableA")->load() > 0.5f;
@@ -424,31 +424,22 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     bool enC = apvts.getRawParameterValue("enableC")->load() > 0.5f;
     bool enD = apvts.getRawParameterValue("enableD")->load() > 0.5f;
 
-    // ===== 統合フィルター処理 =====
-    // モデルが Clean SVF(0) → FilterA_SVF（高品質版）
-    // それ以外の27モデル  → TptFilter
     auto procUnified = [&](juce::AudioBuffer<float>& dst,
         TptFilter& tpt,
         FilterA_SVF& svf,
         juce::String  s,
         bool          enabled)
         {
-            // 入力バッファをコピー
             for (int ch = 0; ch < numChannels; ++ch)
                 dst.copyFrom(ch, 0, buffer, ch, 0, numSamples);
 
-            if (!enabled)
-            {
-                dst.clear();
-                return;
-            }
+            if (!enabled) { dst.clear(); return; }
 
             int model = (int)apvts.getRawParameterValue("model" + s)->load();
-
             if (model == 0)
-                svf.process(dst);   // Clean SVF → 高品質版
+                svf.process(dst);
             else
-                tpt.process(dst);   // その他27モデル → TptFilter
+                tpt.process(dst);
         };
 
     procUnified(filterBuffers[0], filterA, svfA, "A", enA);
@@ -456,7 +447,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     procUnified(filterBuffers[2], filterC, svfC, "C", enC);
     procUnified(filterBuffers[3], filterD, svfD, "D", enD);
 
-    // ===== ABCD ミキシング =====
     buffer.clear();
     for (int ch = 0; ch < numChannels; ++ch)
     {
@@ -466,7 +456,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         if (enD) buffer.addFrom(ch, 0, filterBuffers[3], ch, 0, numSamples, wMix[3]);
     }
 
-    // ===== Dry/Wet ブレンド + マスターゲイン + リミッター =====
     const float mixRatio = apvts.getRawParameterValue("dryWet")->load() / 100.0f;
     const float gainLinear = juce::Decibels::decibelsToGain(
         apvts.getRawParameterValue("masterGain")->load());
@@ -492,17 +481,13 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             if (targetGr < currentGainReduction[ch])
                 currentGainReduction[ch] = targetGr;
             else
-                currentGainReduction[ch] += limiterRelease
-                * (targetGr - currentGainReduction[ch]);
+                currentGainReduction[ch] += limiterRelease * (targetGr - currentGainReduction[ch]);
 
             out[i] = gained * currentGainReduction[ch];
         }
     }
 }
 
-// ==========================================
-// 残りのメソッド（変更なし）
-// ==========================================
 const juce::String QuadMorphFilterAudioProcessor::getName() const { return "Quad-Morph Filter"; }
 bool QuadMorphFilterAudioProcessor::acceptsMidi()  const { return false; }
 bool QuadMorphFilterAudioProcessor::producesMidi() const { return false; }
