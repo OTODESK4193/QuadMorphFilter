@@ -222,73 +222,75 @@ void QuadMorphFilterAudioProcessorEditor::resized()
     auto b = getLocalBounds().reduced(15);
     auto top = b.removeFromTop(300);
 
-    // 左: ビジュアライザー (70%)
-    visualizer.setBounds(top.removeFromLeft(top.getWidth() * 0.7f).reduced(5));
+    // ===== 上段 =====
+    // visWidth を保存して下段のコントロールに揃える
+    const int visWidth = (int)(top.getWidth() * 0.7f);
 
-    // 右パネル: XYパッド + コントロール
-    auto rightPanel = top.reduced(3, 0);
+    visualizer.setBounds(top.removeFromLeft(visWidth).reduced(5));
+    xyPad.setBounds(top.reduced(5));  // 元の大きさ
 
-    // XYパッド: 上部 185px
-    xyPad.setBounds(rightPanel.removeFromTop(185).reduced(0, 3));
+    b.removeFromTop(8);
 
-    // コントロール: XYパッドの下
-    auto ctrlArea = rightPanel.reduced(2, 2);
-
-    // Mode 行
+    // ===== Mode / LFO Cut / LFO Res: ビジュアライザー幅に揃える =====
     {
-        auto row = ctrlArea.removeFromTop(26);
-        xyModeLabel.setBounds(row.removeFromLeft(48).reduced(0, 3));
-        xyModeCombo.setBounds(row.reduced(2, 3));
+        auto row = b.removeFromTop(26);
+        auto ctrlArea = row.removeFromLeft(visWidth).reduced(5, 2);
+        xyModeLabel.setBounds(ctrlArea.removeFromLeft(48).reduced(0, 3));
+        xyModeCombo.setBounds(ctrlArea.removeFromLeft(100).reduced(2, 3));
     }
-    ctrlArea.removeFromTop(2);
+    b.removeFromTop(2);
 
-    // LFO Cut 行
     {
-        auto row = ctrlArea.removeFromTop(26);
-        lfoCutLabel.setBounds(row.removeFromLeft(55).reduced(0, 3));
-        int bw = row.getWidth() / 4;
+        auto row = b.removeFromTop(26);
+        auto ctrlArea = row.removeFromLeft(visWidth).reduced(5, 2);
+        lfoCutLabel.setBounds(ctrlArea.removeFromLeft(55).reduced(0, 3));
+        int bw = ctrlArea.getWidth() / 4;
         for (int i = 0; i < 4; ++i)
-            lfoCutBtn[i].setBounds(row.removeFromLeft(bw).reduced(2, 3));
+            lfoCutBtn[i].setBounds(ctrlArea.removeFromLeft(bw).reduced(2, 3));
     }
-    ctrlArea.removeFromTop(2);
+    b.removeFromTop(2);
 
-    // LFO Res 行
     {
-        auto row = ctrlArea.removeFromTop(26);
-        lfoResLabel.setBounds(row.removeFromLeft(55).reduced(0, 3));
-        int bw = row.getWidth() / 4;
+        auto row = b.removeFromTop(26);
+        auto ctrlArea = row.removeFromLeft(visWidth).reduced(5, 2);
+        lfoResLabel.setBounds(ctrlArea.removeFromLeft(55).reduced(0, 3));
+        int bw = ctrlArea.getWidth() / 4;
         for (int i = 0; i < 4; ++i)
-            lfoResBtn[i].setBounds(row.removeFromLeft(bw).reduced(2, 3));
+            lfoResBtn[i].setBounds(ctrlArea.removeFromLeft(bw).reduced(2, 3));
     }
+    b.removeFromTop(6);
 
-    b.removeFromTop(10);
-
-    // ===== フィルター行（30px: やや縮小）=====
+    // ===== フィルター行 =====
+    // CutoffとResを同じ幅(160px)に固定
+    // 内訳: ラベル28px + テキストボックス55px + スライダー77px = 160px
     for (auto* g : { &groupA, &groupB, &groupC, &groupD })
     {
         auto r = b.removeFromTop(30).reduced(5, 2);
+
         g->enableButton.setBounds(r.removeFromLeft(60).reduced(0, 3));
         g->model.setBounds(r.removeFromLeft(115).reduced(2, 3));
         g->type.setBounds(r.removeFromLeft(60).reduced(2, 3));
         g->slope.setBounds(r.removeFromLeft(85).reduced(2, 3));
 
-        // スライダーを半分程度に縮小
-        auto sliderArea = r.reduced(0, 2);
-        auto cutArea = sliderArea.removeFromLeft(sliderArea.getWidth() / 2).reduced(3, 0);
-        auto resArea = sliderArea.reduced(3, 0);
-
+        // Cutoff: 160px固定
+        auto cutArea = r.removeFromLeft(160).reduced(3, 0);
         g->cutoffLabel.setBounds(cutArea.removeFromLeft(28));
         g->cutoff.setBounds(cutArea);
+
+        // Res: 160px固定（Cutoffと同じ幅）
+        auto resArea = r.removeFromLeft(160).reduced(3, 0);
         g->resLabel.setBounds(resArea.removeFromLeft(28));
         g->res.setBounds(resArea);
+
+        // 残りは空白（右側に余白）
     }
+    b.removeFromTop(6);
 
-    b.removeFromTop(10);
-
-    // ===== LFO 行（30px）=====
+    // ===== LFO 行 =====
     for (int i = 0; i < 3; ++i)
     {
         auto r = b.removeFromTop(30).reduced(5, 2);
+
         lfos[i].enableButton.setBounds(r.removeFromLeft(100).reduced(0, 3));
         lfos[i].wave.setBounds(r.removeFromLeft(120).withSizeKeepingCentre(115, 20));
         lfos[i].boundCombo.setBounds(r.removeFromLeft(70).withSizeKeepingCentre(65, 20));
@@ -303,7 +305,8 @@ void QuadMorphFilterAudioProcessorEditor::resized()
         bool isSynced = audioProcessor.apvts.getRawParameterValue(
             "lfo" + juce::String(i + 1) + "sync")->load() > 0.5f;
         if (isSynced) {
-            lfos[i].rateSync.setBounds(rateArea.withSizeKeepingCentre(rateArea.getWidth() - 5, 20));
+            lfos[i].rateSync.setBounds(
+                rateArea.withSizeKeepingCentre(rateArea.getWidth() - 5, 20));
             lfos[i].rateFree.setVisible(false);
             lfos[i].rateSync.setVisible(true);
         }
@@ -316,9 +319,9 @@ void QuadMorphFilterAudioProcessorEditor::resized()
         lfos[i].maxSlider.setBounds(maxArea.reduced(2, 6));
     }
 
-    b.removeFromTop(15);
+    b.removeFromTop(10);
 
-    // ===== マスターコントロール =====
+    // ===== マスター =====
     auto masterArea = b.removeFromTop(30).reduced(5, 2);
     auto cellW = masterArea.getWidth() / 3;
 
