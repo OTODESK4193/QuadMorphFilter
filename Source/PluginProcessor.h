@@ -3,8 +3,10 @@
 // ==========================================
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
-#include "DSP/TptFilter.h"       // ← パス変更
-#include "DSP/FilterA_SVF.h"     // ← パス変更
+#include "DSP/TptFilter.h"
+#include "DSP/FilterA_SVF.h"
+#include "DSP/LfoEngine.h"     // ← 追加
+#include "DSP/MorphEngine.h"   // ← 追加
 #include <vector>
 #include <array>
 #include <atomic>
@@ -35,11 +37,14 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
-    juce::Point<float>   getLfoPos(int index) const { return lfoPositions[index]; }
-    std::array<float, 4> getLfoMod4(int index) const { return currentLfoMod4[index]; }
+    // ===== LFO 出力アクセサ（UI・ビジュアライザーから参照）=====
+    // LfoEngine に委譲
+    juce::Point<float>   getLfoPos(int index)  const { return lfoEngine.getPosition(index); }
+    std::array<float, 4> getLfoMod4(int index) const { return lfoEngine.getMod4(index); }
 
     juce::AudioProcessorValueTreeState apvts;
 
+    // ===== 録音状態（XYPadComponent から直接アクセスされる）=====
     std::array<juce::Point<float>, 2048> recBuffer[3];
     std::atomic<int>   recLength[3]{ 0 };
     std::atomic<bool>  isWaitingForRecord[3]{ false };
@@ -50,39 +55,16 @@ public:
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    // Clean SVF 専用（4フィルター分）
-    FilterA_SVF svfA, svfB, svfC, svfD;
+    // ===== DSP エンジン =====
+    LfoEngine   lfoEngine;                        // ← LFO処理を委譲
 
-    // その他27モデル用
-    TptFilter filterA, filterB, filterC, filterD;
+    FilterA_SVF svfA, svfB, svfC, svfD;           // Clean SVF 専用
+    TptFilter   filterA, filterB, filterC, filterD; // その他27モデル
 
     std::array<juce::AudioBuffer<float>, 4> filterBuffers;
     juce::AudioBuffer<float> dryBuffer;
 
     float currentGainReduction[2] = { 1.0f, 1.0f };
-
-    struct LfoState {
-        juce::Random rng;
-        float phase = 0.0f;
-        juce::Point<float> currentRandom{ 0.5f, 0.5f };
-        juce::Point<float> nextRandom{ 0.5f, 0.5f };
-        std::array<float, 4> currentRand1{ 0.5f, 0.5f, 0.5f, 0.5f };
-        std::array<float, 4> nextRand1{ 0.5f, 0.5f, 0.5f, 0.5f };
-        float bilX = 0.0f, bilY = 0.0f, bilVx = 1.3f, bilVy = 1.7f;
-        float smoothNx = 0.5f, smoothNy = 0.5f;
-        float tNextNx = 0.5f, tNextNy = 0.5f;
-    };
-
-    LfoState lfoStates[3];
-    juce::Point<float> lfoPositions[3];
-
-    std::array<float, 4> currentLfoMod4[3] = {
-        std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f },
-        std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f },
-        std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f }
-    };
-
-    float getSyncTime(int selection, double bpm);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(QuadMorphFilterAudioProcessor)
 };

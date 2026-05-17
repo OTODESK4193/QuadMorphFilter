@@ -48,19 +48,20 @@ target_compile_options(QuadMorphFilter PRIVATE
 
 target_sources(QuadMorphFilter
     PRIVATE
-        # ===== Core =====
         Source/PluginProcessor.cpp
         Source/PluginProcessor.h
         Source/PluginEditor.cpp
         Source/PluginEditor.h
 
-        # ===== DSP =====
         Source/DSP/FilterA_SVF.cpp
         Source/DSP/FilterA_SVF.h
         Source/DSP/TptFilter.cpp
         Source/DSP/TptFilter.h
+        Source/DSP/LfoEngine.cpp      # ← 新規追加
+        Source/DSP/LfoEngine.h        # ← 新規追加
+        Source/DSP/MorphEngine.cpp    # ← 新規追加
+        Source/DSP/MorphEngine.h      # ← 新規追加
 
-        # ===== UI =====
         Source/UI/QuadMorphLookAndFeel.cpp
         Source/UI/QuadMorphLookAndFeel.h
         Source/UI/FilterVisualizer.cpp
