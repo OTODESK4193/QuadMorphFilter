@@ -1,8 +1,5 @@
 // ==========================================
-// FilterA_SVF.cpp (修正版 v2)
-// Zero-Delay Feedback State Variable Filter
-//
-// 修正点: ステレオ対応（チャンネル別状態変数）
+// FilterA_SVF.cpp (Phase 1c: Newton-Raphson 高Q値対応版)
 // ==========================================
 
 #include "FilterA_SVF.h"
@@ -14,12 +11,14 @@
 FilterA_SVF::FilterA_SVF()
 {
     sampleRate = 48000.0;
-    cutoffHz = 1000.0f;
-    resQ = 0.707f;
-    k = 1.0f / resQ;
     currentType = 0;
+    nonlinearMode = false;
 
-    updateCoefficients();
+    smoothedCutoff.setCurrentAndTargetValue(1000.0f);
+    smoothedResonance.setCurrentAndTargetValue(0.707f);
+
+    k = 1.0f / 0.707f;
+    updateCoefficients(1000.0f, 0.707f);
 }
 
 // ==========================================
@@ -29,11 +28,16 @@ void FilterA_SVF::prepare(double newSampleRate, int /*blockSize*/)
 {
     sampleRate = newSampleRate;
 
-    // サンプルレートが変わったら係数を強制再計算
-    lastComputedCutoff = -1.0f;
-    lastComputedQ = -1.0f;
+    // ランプタイム 20ms: UI 操作・オートメーション時のジッパーノイズ防止
+    const double rampTime = 0.020;
+    smoothedCutoff.reset(sampleRate, rampTime);
+    smoothedResonance.reset(sampleRate, rampTime);
 
-    updateCoefficients();
+    updateCoefficients(
+        smoothedCutoff.getCurrentValue(),
+        smoothedResonance.getCurrentValue()
+    );
+
     reset();
 }
 
@@ -55,15 +59,12 @@ void FilterA_SVF::reset()
 // ==========================================
 void FilterA_SVF::setCutoff(float newCutoffHz)
 {
-    cutoffHz = clamp(newCutoffHz, 20.0f, 20000.0f);
-    updateCoefficients();
+    smoothedCutoff.setTargetValue(clamp(newCutoffHz, 20.0f, 20000.0f));
 }
 
 void FilterA_SVF::setResonance(float newQ)
 {
-    resQ = clamp(newQ, 0.1f, 10.0f);
-    k = 1.0f / resQ;
-    updateCoefficients();
+    smoothedResonance.setTargetValue(clamp(newQ, 0.1f, 10.0f));
 }
 
 void FilterA_SVF::setType(int type)
@@ -74,93 +75,63 @@ void FilterA_SVF::setType(int type)
 // ==========================================
 // Coefficient Calculation
 // ==========================================
-void FilterA_SVF::updateCoefficients()
+void FilterA_SVF::updateCoefficients(float fc, float Q)
 {
-    // 値が変わっていなければスキップ（余分な tan() 計算を避ける）
-    if (std::abs(cutoffHz - lastComputedCutoff) < 0.1f &&
-        std::abs(resQ - lastComputedQ) < 0.001f)
-    {
-        return;
-    }
+    // Q 値に基づいてモードを判定
+    // Q >= 1.5 でアナログ的な飽和が必要になる領域
+    nonlinearMode = (Q >= nrThreshold);
 
-    lastComputedCutoff = cutoffHz;
-    lastComputedQ = resQ;
+    // ダンピング係数: k = 1/Q
+    k = 1.0f / juce::jmax(0.1f, Q);
 
+    // プリワーピング: g = tan(π·fc/fs)
     const float pi = juce::MathConstants<float>::pi;
-
-    // プリワーピング: g = tan(π * fc / fs)
-    // アナログフィルターの周波数特性をデジタル領域に正確に対応させる
-    float normalizedFreq = (pi * cutoffHz) / static_cast<float>(sampleRate);
-
+    float normalizedFreq = (pi * fc) / static_cast<float>(sampleRate);
     g = fastTan(normalizedFreq);
 
     // 分母係数: h = 1 / (1 + g(g+k) + g²)
-    // ZDF方程式を解いた結果で、毎サンプルの除算を避けるための事前計算
+    // 非線形モードでも h は NR のウォームスタート精度向上に使用
     float denom = 1.0f + g * (g + k) + g * g;
-
-    if (std::abs(denom) < 1e-10f)
-    {
-        h = 1.0f;  // ゼロ除算防止
-    }
-    else
-    {
-        h = 1.0f / denom;
-    }
-
-    g2 = 2.0f * g * k;
+    h = (std::abs(denom) < 1e-10f) ? 1.0f : (1.0f / denom);
 }
 
 // ==========================================
-// Core DSP: Per-sample processing
+// 線形モード（Phase 1b と同一）
+// Q < 1.5 のとき使用
 // ==========================================
-float FilterA_SVF::processSample(float inputSample, int channel)
+float FilterA_SVF::processSampleLinear(float x, int ch)
 {
-    // チャンネル番号の安全確認
-    if (channel < 0 || channel >= maxChannels)
-        channel = 0;
+    // デノーマル保護
+    if (std::abs(v1[ch]) < 1e-15f) v1[ch] = 0.0f;
+    if (std::abs(v2[ch]) < 1e-15f) v2[ch] = 0.0f;
 
-    // デノーマル値の強制ゼロ化（CPU スパイク防止）
-    // ScopedNoDenormals で大半は防げるが念のため
-    if (std::abs(v1[channel]) < 1e-15f) v1[channel] = 0.0f;
-    if (std::abs(v2[channel]) < 1e-15f) v2[channel] = 0.0f;
+    // ZDF/TPT 更新式（直接解）
+    float v3 = x - v2[ch] - k * v1[ch];
+    float v1_new = v1[ch] + g * h * v3;
+    float v2_new = v2[ch] + g * v1_new;
 
-    // ===== Andy Simper ZDF/TPT 更新式 =====
-    //
-    //  v3 は「フィードバックを含む誤差信号」
-    //  v1 は「第1積分器（BPF出力相当）」
-    //  v2 は「第2積分器（LPF出力相当）」
-    //
-    float v3 = inputSample - v2[channel] - k * v1[channel];
-    float v1_new = v1[channel] + g * h * v3;
-    float v2_new = v2[channel] + g * v1_new;
+    v1[ch] = v1_new;
+    v2[ch] = v2_new;
 
-    // 状態を更新（次サンプルへの記憶）
-    v1[channel] = v1_new;
-    v2[channel] = v2_new;
+    lastLp[ch] = v2[ch];
+    lastBp[ch] = v1[ch];
+    lastHp[ch] = x - k * v1[ch] - v2[ch];
+    float notch = x - k * v1[ch];
 
-    // 4出力の同時計算（線形演算なのでコスト増なし）
-    lastLp[channel] = v2[channel];
-    lastBp[channel] = v1[channel];
-    lastHp[channel] = inputSample - k * v1[channel] - v2[channel];
-    float notch = inputSample - k * v1[channel];
-
-    // 選択されたタイプの出力
     float output = 0.0f;
     switch (currentType)
     {
-    case 0:  output = lastLp[channel]; break;
-    case 1:  output = lastBp[channel]; break;
-    case 2:  output = lastHp[channel]; break;
-    case 3:  output = notch;           break;
-    default: output = lastLp[channel]; break;
+    case 0:  output = lastLp[ch]; break;
+    case 1:  output = lastBp[ch]; break;
+    case 2:  output = lastHp[ch]; break;
+    case 3:  output = notch;      break;
+    default: output = lastLp[ch]; break;
     }
 
-    // NaN / Inf が発生した場合は状態をリセットして無音にする
-    // （これが頻発する場合は係数計算に問題がある）
     if (!std::isfinite(output))
     {
-        v1[channel] = 0.0f;
-        v2[channel] = 0.0f;
+        v1[ch] = 0.0f;
+        v2[ch] = 0.0f;
         output = 0.0f;
     }
 
@@ -168,44 +139,137 @@ float FilterA_SVF::processSample(float inputSample, int channel)
 }
 
 // ==========================================
-// Buffer Processing
+// 非線形モード（Newton-Raphson）
+// Q >= 1.5 のとき使用
+//
+// 解くべき陰関数:
+//   F(y) = y - v1 - g*h*(x - v2 - k*tanh(y)) = 0
+//   y = v1_new（新しい BP 状態変数）
+//
+// 微分:
+//   F'(y) = 1 + g*h*k*(1 - tanh²(y))
+//         = 1 + g*h*k*sech²(y)
+//
+// F'(y) は常に 1 以上 → 収束が数学的に保証される
+// ==========================================
+float FilterA_SVF::processSampleNonlinear(float x, int ch)
+{
+    // デノーマル保護
+    if (std::abs(v1[ch]) < 1e-15f) v1[ch] = 0.0f;
+    if (std::abs(v2[ch]) < 1e-15f) v2[ch] = 0.0f;
+
+    // ===== Newton-Raphson 反復 =====
+    //
+    // ウォームスタート: 前サンプルの v1 から開始
+    // → 音声信号は連続的なので、前サンプルからの変化は小さい
+    // → 通常 1〜2 回の反復で収束する
+    float y = v1[ch];
+
+    for (int iter = 0; iter < maxNRIter; ++iter)
+    {
+        // tanh(y) と sech²(y) = 1 - tanh²(y) を計算
+        float tanhY = std::tanh(y);
+        float sech2Y = 1.0f - tanhY * tanhY;
+
+        // F(y):  解くべき方程式の残差
+        // F'(y): ヤコビアン（常に 1 以上）
+        float F = y - v1[ch] - g * h * (x - v2[ch] - k * tanhY);
+        float dF = 1.0f + g * h * k * sech2Y;
+
+        // Newton ステップ: delta = F/F'
+        float delta = F / dF;
+        y -= delta;
+
+        // 収束判定: 変化量が許容値以下なら終了
+        if (std::abs(delta) < nrTolerance)
+            break;
+    }
+
+    // ===== 状態変数を更新 =====
+    v1[ch] = y;
+    v2[ch] = v2[ch] + g * y;  // 第2積分器は線形更新
+
+    // ===== 出力計算 =====
+    // HP と Notch の計算では tanh(v1) を使用
+    // （フィードバックと整合性を保つため）
+    float tanhV1 = std::tanh(v1[ch]);
+
+    lastLp[ch] = v2[ch];
+    lastBp[ch] = v1[ch];
+    lastHp[ch] = x - k * tanhV1 - v2[ch];
+    float notch = x - k * tanhV1;
+
+    float output = 0.0f;
+    switch (currentType)
+    {
+    case 0:  output = lastLp[ch]; break;
+    case 1:  output = lastBp[ch]; break;
+    case 2:  output = lastHp[ch]; break;
+    case 3:  output = notch;      break;
+    default: output = lastLp[ch]; break;
+    }
+
+    if (!std::isfinite(output))
+    {
+        v1[ch] = 0.0f;
+        v2[ch] = 0.0f;
+        output = 0.0f;
+    }
+
+    return output;
+}
+
+// ==========================================
+// Buffer Processing（サブブロック処理）
 // ==========================================
 void FilterA_SVF::process(juce::AudioBuffer<float>& buffer)
 {
-    // ===== 【修正の核心】=====
-    // チャンネルを独立して処理する
-    // ch=0 (Left) と ch=1 (Right) が互いの状態変数を汚染しない
+    const int numChannels = juce::jmin(buffer.getNumChannels(), maxChannels);
+    const int numSamples = buffer.getNumSamples();
 
-    int numChannels = juce::jmin(buffer.getNumChannels(), maxChannels);
-    int numSamples = buffer.getNumSamples();
+    int samplePos = 0;
 
-    for (int ch = 0; ch < numChannels; ++ch)
+    while (samplePos < numSamples)
     {
-        float* channelData = buffer.getWritePointer(ch);
+        // サブブロックサイズを計算（端数対応）
+        const int blockSize = juce::jmin(subBlockSize, numSamples - samplePos);
 
-        for (int n = 0; n < numSamples; ++n)
+        // SmoothedValue を blockSize 分進めて現在値を取得
+        const float currentCutoff = smoothedCutoff.skip(blockSize);
+        const float currentRes = smoothedResonance.skip(blockSize);
+
+        // 係数を更新（nonlinearMode も同時に決定される）
+        updateCoefficients(currentCutoff, currentRes);
+
+        // サブブロック内でのモードを固定
+        // （サンプル単位でモードが切り替わることを防ぐ）
+        const bool useNonlinear = nonlinearMode;
+
+        for (int ch = 0; ch < numChannels; ++ch)
         {
-            // ← channel インデックスを渡すことで独立した v1[ch], v2[ch] を使用
-            channelData[n] = processSample(channelData[n], ch);
+            float* data = buffer.getWritePointer(ch, samplePos);
+
+            for (int n = 0; n < blockSize; ++n)
+            {
+                // Q 値に基づいてモードを切り替え
+                if (useNonlinear)
+                    data[n] = processSampleNonlinear(data[n], ch);
+                else
+                    data[n] = processSampleLinear(data[n], ch);
+            }
         }
+
+        samplePos += blockSize;
     }
 }
 
 // ==========================================
-// Fast Math: Padé [5/4] approximation of tan(x)
+// Fast Math: Padé [5/4] tan(x) 近似
 // ==========================================
 float FilterA_SVF::fastTan(float x)
 {
-    // 音響用途向けの高精度 Padé 近似
-    // tan(x) ≈ x(105 + 10x² + x⁴) / (105 + 45x² + x⁴)
-    //
-    // 誤差: 音響周波数域（0 ≤ x ≤ π/2）で < 0.01%
-
     if (x < -1.5f || x > 1.5f)
-    {
-        // 範囲外は標準ライブラリにフォールバック
         return std::tan(x);
-    }
 
     float x2 = x * x;
     float x4 = x2 * x2;
