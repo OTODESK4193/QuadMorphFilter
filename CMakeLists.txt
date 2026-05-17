@@ -68,7 +68,7 @@ target_sources(QuadMorphFilter
         Source/UI/FilterVisualizer.h
         Source/UI/XYPadComponent.cpp
         Source/UI/XYPadComponent.h
-)
+ "Source/DSP/FilterA_SVF_SIMD.h" "Source/DSP/FilterA_SVF_SIMD.cpp")
 
 # 6. 使用するJUCEモジュールのリンク（問題のTARGETを削除しました）
 target_link_libraries(QuadMorphFilter PRIVATE
