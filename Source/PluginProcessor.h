@@ -4,7 +4,7 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "TptFilter.h"
-#include "FilterA_SVF.h"  // ← 新規追加
+#include "FilterA_SVF.h"   // ← 追加
 #include <vector>
 #include <array>
 #include <atomic>
@@ -41,21 +41,22 @@ public:
     juce::AudioProcessorValueTreeState apvts;
 
     std::array<juce::Point<float>, 2048> recBuffer[3];
-    std::atomic<int> recLength[3]{ 0 };
-    std::atomic<bool> isWaitingForRecord[3]{ false };
-    std::atomic<bool> isRecordingDrag[3]{ false };
+    std::atomic<int>   recLength[3]{ 0 };
+    std::atomic<bool>  isWaitingForRecord[3]{ false };
+    std::atomic<bool>  isRecordingDrag[3]{ false };
     std::atomic<float> currentRecX[3]{ 0.5f };
     std::atomic<float> currentRecY[3]{ 0.5f };
 
 private:
-
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    // ===== 【新規追加開始】=====
-    FilterA_SVF filterA_SVF;              // ← 新しいフィルターインスタンス
-    // ===== 【新規追加終了】=====
+    // ===== Clean SVF 専用フィルター（4フィルター分）=====
+    // モデル = Clean SVF(0) のときのみ使用
+    FilterA_SVF svfA, svfB, svfC, svfD;
 
+    // ===== その他27モデル用フィルター =====
     TptFilter filterA, filterB, filterC, filterD;
+
     std::array<juce::AudioBuffer<float>, 4> filterBuffers;
     juce::AudioBuffer<float> dryBuffer;
 
@@ -77,9 +78,9 @@ private:
     juce::Point<float> lfoPositions[3];
 
     std::array<float, 4> currentLfoMod4[3] = {
-        std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f},
-        std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f},
-        std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}
+        std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f },
+        std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f },
+        std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f }
     };
 
     float getSyncTime(int selection, double bpm);
