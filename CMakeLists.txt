@@ -46,15 +46,28 @@ target_compile_options(QuadMorphFilter PRIVATE
     >
 )
 
-# 5. ソースコードの追加
-target_sources(QuadMorphFilter PRIVATE
-    Source/PluginProcessor.cpp
-    Source/PluginProcessor.h
-    Source/PluginEditor.cpp
-    Source/PluginEditor.h
-    Source/TptFilter.cpp
-    Source/TptFilter.h
- "Source/FilterA_SVF.h" "Source/FilterA_SVF.cpp")
+target_sources(QuadMorphFilter
+    PRIVATE
+        # ===== Core =====
+        Source/PluginProcessor.cpp
+        Source/PluginProcessor.h
+        Source/PluginEditor.cpp
+        Source/PluginEditor.h
+
+        # ===== DSP =====
+        Source/DSP/FilterA_SVF.cpp
+        Source/DSP/FilterA_SVF.h
+        Source/DSP/TptFilter.cpp
+        Source/DSP/TptFilter.h
+
+        # ===== UI =====
+        Source/UI/QuadMorphLookAndFeel.cpp
+        Source/UI/QuadMorphLookAndFeel.h
+        Source/UI/FilterVisualizer.cpp
+        Source/UI/FilterVisualizer.h
+        Source/UI/XYPadComponent.cpp
+        Source/UI/XYPadComponent.h
+)
 
 # 6. 使用するJUCEモジュールのリンク（問題のTARGETを削除しました）
 target_link_libraries(QuadMorphFilter PRIVATE

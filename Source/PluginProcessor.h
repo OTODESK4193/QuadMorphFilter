@@ -3,8 +3,8 @@
 // ==========================================
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
-#include "TptFilter.h"
-#include "FilterA_SVF.h"   // ← 追加
+#include "DSP/TptFilter.h"       // ← パス変更
+#include "DSP/FilterA_SVF.h"     // ← パス変更
 #include <vector>
 #include <array>
 #include <atomic>
@@ -35,7 +35,7 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
-    juce::Point<float> getLfoPos(int index) const { return lfoPositions[index]; }
+    juce::Point<float>   getLfoPos(int index) const { return lfoPositions[index]; }
     std::array<float, 4> getLfoMod4(int index) const { return currentLfoMod4[index]; }
 
     juce::AudioProcessorValueTreeState apvts;
@@ -50,11 +50,10 @@ public:
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    // ===== Clean SVF 専用フィルター（4フィルター分）=====
-    // モデル = Clean SVF(0) のときのみ使用
+    // Clean SVF 専用（4フィルター分）
     FilterA_SVF svfA, svfB, svfC, svfD;
 
-    // ===== その他27モデル用フィルター =====
+    // その他27モデル用
     TptFilter filterA, filterB, filterC, filterD;
 
     std::array<juce::AudioBuffer<float>, 4> filterBuffers;
@@ -69,11 +68,11 @@ private:
         juce::Point<float> nextRandom{ 0.5f, 0.5f };
         std::array<float, 4> currentRand1{ 0.5f, 0.5f, 0.5f, 0.5f };
         std::array<float, 4> nextRand1{ 0.5f, 0.5f, 0.5f, 0.5f };
-
         float bilX = 0.0f, bilY = 0.0f, bilVx = 1.3f, bilVy = 1.7f;
         float smoothNx = 0.5f, smoothNy = 0.5f;
         float tNextNx = 0.5f, tNextNy = 0.5f;
     };
+
     LfoState lfoStates[3];
     juce::Point<float> lfoPositions[3];
 
