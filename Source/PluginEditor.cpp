@@ -82,11 +82,12 @@ void FilterVisualizer::paint(juce::Graphics& g)
     auto w = (float)getWidth();
     auto h = (float)getHeight();
 
-    // ===== 【Slope表示修正】dB表示範囲を -120dB まで拡張 =====
-    // 旧: +40dB 〜 -60dB  → 48dB/oct 以上で曲線が見切れる
-    // 新: +40dB 〜 -120dB → 96dB/oct でも曲線が収まる
-    const float dbTop = 40.0f;
-    const float dbBottom = -120.0f;
+    // ===== 【修正】dB表示範囲 =====
+    // 旧: const float dbTop = +40.0f;  ← Res=10 のピークが見切れる
+    // 新:
+    const float dbTop = +60.0f;   // ← +60dB に拡張
+    const float dbBottom = -120.0f;  // ← 変更なし
+
 
     // ----- 0dB ライン -----
     float y0dB = juce::jmap(0.0f, dbTop, dbBottom, 0.0f, h);
@@ -433,7 +434,7 @@ void FilterVisualizer::paint(juce::Graphics& g)
             + calc("D", 3) * wD;
     }
 
-    // ----- スムージングと描画 -----
+    // ===== スムージングと描画 =====
     juce::Path path;
     int smoothRadius = 8;
 
@@ -446,17 +447,18 @@ void FilterVisualizer::paint(juce::Graphics& g)
             if (idx >= 0 && idx <= wInt) { sum += rawMag[idx]; count++; }
         }
         float smoothedMag = sum / (float)count;
-
         float db = 20.0f * std::log10(smoothedMag + 1e-5f);
-
-        // ===== 【Slope表示修正】拡張された dB 範囲でマッピング =====
         float yPos = juce::jmap(db, dbTop, dbBottom, 0.0f, h);
+
+        // ===== 【新規追加】コンポーネント外へのパス描画を防ぐ =====
+        // 共振ピークが dbTop を超えた場合にパスが上に飛び出すのを防止
+        yPos = juce::jlimit(0.0f, h, yPos);
 
         if (px == 0) path.startNewSubPath((float)px, yPos);
         else         path.lineTo((float)px, yPos);
     }
 
-    g.strokePath(path, juce::PathStrokeType(2.0f));
+    g.strokePath(path, juce::PathStrokeType(2.0f)); 
 }
 
 // ==========================================
