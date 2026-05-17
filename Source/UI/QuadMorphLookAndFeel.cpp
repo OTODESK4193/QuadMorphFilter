@@ -61,7 +61,8 @@ void QuadMorphLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button&
     auto bounds = button.getLocalBounds().toFloat().reduced(1.0f);
     bool isOn = button.getToggleState();
 
-    auto baseColour = isOn ? button.findColour(juce::TextButton::textColourOnId).withAlpha(0.15f)
+    // ===== 【修正】alpha 0.15 → 0.30 で視認性向上 =====
+    auto baseColour = isOn ? button.findColour(juce::TextButton::textColourOnId).withAlpha(0.30f)
         : juce::Colour(0xffFFFFFF);
     auto borderColour = isOn ? button.findColour(juce::TextButton::textColourOnId)
         : juce::Colour(0xffD5DDE5);
@@ -69,5 +70,5 @@ void QuadMorphLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button&
     g.setColour(baseColour);
     g.fillRoundedRectangle(bounds, 4.0f);
     g.setColour(borderColour);
-    g.drawRoundedRectangle(bounds, 4.0f, 1.2f);
+    g.drawRoundedRectangle(bounds, 4.0f, 1.5f);
 }

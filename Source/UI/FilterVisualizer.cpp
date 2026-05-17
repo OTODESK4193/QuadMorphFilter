@@ -51,10 +51,9 @@ void FilterVisualizer::paint(juce::Graphics& g)
         g.drawText(labels[i], (int)x + 2, (int)h - 15, 40, 10, juce::Justification::left);
     }
 
-    // ----- カーブ描画準備 -----
     g.setColour(juce::Colour(0xff00D2D3));
 
-    // LFO2/3 情報
+    // ----- LFO 情報取得 -----
     auto cPos = processor.getLfoPos(1);
     auto rPos = processor.getLfoPos(2);
     auto lfo1Mod4 = processor.getLfoMod4(1);
@@ -71,8 +70,10 @@ void FilterVisualizer::paint(juce::Graphics& g)
             std::array<float, 4> res;
             if (isRand1) { for (int i = 0; i < 4; ++i) res[i] = m4[i] * 2.0f - 1.0f; }
             else {
-                res[0] = p.x * 2.0f - 1.0f;  res[1] = p.y * 2.0f - 1.0f;
-                res[2] = (1.0f - p.x) * 2.0f - 1.0f;  res[3] = (1.0f - p.y) * 2.0f - 1.0f;
+                res[0] = p.x * 2.0f - 1.0f;
+                res[1] = p.y * 2.0f - 1.0f;
+                res[2] = (1.0f - p.x) * 2.0f - 1.0f;
+                res[3] = (1.0f - p.y) * 2.0f - 1.0f;
             }
             return res;
         };
@@ -80,23 +81,23 @@ void FilterVisualizer::paint(juce::Graphics& g)
     std::array<float, 4> cM = getM(cPos, lfo1Mod4, lfo1_isRand1);
     std::array<float, 4> rM = getM(rPos, lfo2Mod4, lfo2_isRand1);
 
-    // ===== XYモード読み取り（ループ外で1回計算）=====
-    int xyMode = (int)processor.apvts.getRawParameterValue("xyMode")->load();
-    auto mPos = processor.getLfoPos(0);
-    float xyCutoff = 20.0f * std::pow(1000.0f, mPos.x);
-    float xyRes = juce::jlimit(0.1f, 10.0f, 0.1f + mPos.y * 9.9f);
+    // ----- XYモード情報（ループ外で1回計算）-----
+    int   xyMode = (int)processor.apvts.getRawParameterValue("xyMode")->load();
+    auto  mPos = processor.getLfoPos(0);
 
-    // ===== 有効フィルターフラグ（ループ外で1回取得）=====
+    // X: 20Hz〜20kHz、Y: 上=大（反転）
+    float xyCutoff = 20.0f * std::pow(1000.0f, mPos.x);
+    float xyRes = juce::jlimit(0.1f, 10.0f, 0.1f + (1.0f - mPos.y) * 9.9f);
+
+    // ----- 有効フィルター・wMix（ループ外）-----
     bool visEnA = processor.apvts.getRawParameterValue("enableA")->load() > 0.5f;
     bool visEnB = processor.apvts.getRawParameterValue("enableB")->load() > 0.5f;
     bool visEnC = processor.apvts.getRawParameterValue("enableC")->load() > 0.5f;
     bool visEnD = processor.apvts.getRawParameterValue("enableD")->load() > 0.5f;
 
-    // ===== wMix 計算（ループ外で1回、xyModeで切り替え）=====
     float wA, wB, wC, wD;
     if (xyMode == 1)
     {
-        // Cutoffモード: 等パワー
         int numActive = (visEnA ? 1 : 0) + (visEnB ? 1 : 0) + (visEnC ? 1 : 0) + (visEnD ? 1 : 0);
         float w = (numActive > 0) ? (1.0f / std::sqrt((float)numActive)) : 0.0f;
         wA = visEnA ? w : 0.0f;
@@ -106,7 +107,6 @@ void FilterVisualizer::paint(juce::Graphics& g)
     }
     else
     {
-        // Morphモード: 等パワー + 有効フィルター正規化
         float angleX = mPos.x * juce::MathConstants<float>::halfPi;
         float angleY = mPos.y * juce::MathConstants<float>::halfPi;
         float cosX = std::cos(angleX), sinX = std::sin(angleX);
@@ -129,7 +129,7 @@ void FilterVisualizer::paint(juce::Graphics& g)
         }
     }
 
-    // ===== 周波数応答の計算 =====
+    // ----- 周波数応答の計算 -----
     int wInt = (int)w;
     std::vector<float> rawMag(wInt + 1, 0.0f);
 
@@ -137,33 +137,47 @@ void FilterVisualizer::paint(juce::Graphics& g)
     {
         float freq = 20.0f * std::pow(1000.0f, (float)px / w);
 
+        // =====================================================
+        // calc: 1フィルターの周波数応答を計算
+        //
+        // lfoCutOn の意味（Processor と完全に一致）:
+        //   Cutoffモード: true → XY使用+LFO2変調 / false → スライダー使用
+        //   Morphモード:  true → スライダー+LFO2変調 / false → スライダーのみ
+        // =====================================================
         auto calc = [&](juce::String s, int idx) -> float
             {
                 if (processor.apvts.getRawParameterValue("enable" + s)->load() < 0.5f)
                     return 0.0f;
 
-                // ===== xyModeに応じて fc/res を切り替え =====
+                bool lfoCutOn = processor.apvts.getRawParameterValue("lfoCut" + s)->load() > 0.5f;
+                bool lfoResOn = processor.apvts.getRawParameterValue("lfoRes" + s)->load() > 0.5f;
+
                 float fc, res;
                 if (xyMode == 1)
                 {
-                    // Cutoffモード: XY位置から直接
-                    fc = xyCutoff;
-                    res = xyRes;
+                    float baseCutoff = lfoCutOn ? xyCutoff
+                        : processor.apvts.getRawParameterValue("cutoff" + s)->load();
+                    float baseRes = lfoResOn ? xyRes
+                        : processor.apvts.getRawParameterValue("res" + s)->load();
+                    fc = lfoCutOn ? baseCutoff * std::pow(2.0f, 4.0f * cM[idx]) : baseCutoff;
+                    res = lfoResOn ? baseRes * std::pow(2.0f, 2.0f * rM[idx]) : baseRes;
                 }
                 else
                 {
-                    // Morphモード: スライダー値 + LFOモジュレーション
                     float baseCutoff = processor.apvts.getRawParameterValue("cutoff" + s)->load();
-                    fc = baseCutoff * std::pow(2.0f, 4.0f * cM[idx]);
                     float baseRes = processor.apvts.getRawParameterValue("res" + s)->load();
-                    res = baseRes * std::pow(2.0f, 2.0f * rM[idx]);
+                    fc = lfoCutOn ? baseCutoff * std::pow(2.0f, 4.0f * cM[idx]) : baseCutoff;
+                    res = lfoResOn ? baseRes * std::pow(2.0f, 2.0f * rM[idx]) : baseRes;
                 }
+
+                fc = juce::jlimit(20.0f, 20000.0f, fc);
+                res = juce::jlimit(0.1f, 10.0f, res);
 
                 int modelIdx = (int)processor.apvts.getRawParameterValue("model" + s)->load();
                 int slopeIdx = (int)processor.apvts.getRawParameterValue("slope" + s)->load();
                 int t = (int)processor.apvts.getRawParameterValue("type" + s)->load();
 
-                float freqLimit = juce::jlimit(20.0f, 20000.0f, fc);
+                float freqLimit = fc;
                 float w_norm = freq / freqLimit;
                 float w2 = w_norm * w_norm;
                 float mag = 1.0f;
@@ -223,8 +237,8 @@ void FilterVisualizer::paint(juce::Graphics& g)
                     float v = juce::jmap(std::log10(freqLimit), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f);
                     int idx_v = (int)v; float frac = v - idx_v;
                     if (idx_v >= 4) { idx_v = 3; frac = 1.0f; }
-                    float f1_m[5] = { 730.f,  270.f,  300.f,  530.f,  400.f };
-                    float f2_m[5] = { 1090.f, 2290.f, 870.f,  1840.f, 840.f };
+                    float f1_m[5] = { 730.f, 270.f, 300.f, 530.f, 400.f };
+                    float f2_m[5] = { 1090.f, 2290.f, 870.f, 1840.f, 840.f };
                     float f3_m[5] = { 2440.f, 3010.f, 2240.f, 2480.f, 2800.f };
                     float f_arr[3] = {
                         f1_m[idx_v] + (f1_m[idx_v + 1] - f1_m[idx_v]) * frac,
@@ -244,7 +258,7 @@ void FilterVisualizer::paint(juce::Graphics& g)
                 else if (modelIdx == 6)
                 {
                     int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
-                    float delaySamples = 44100.0f / juce::jlimit(20.0f, 20000.0f, fc);
+                    float delaySamples = 44100.0f / freqLimit;
                     float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.95f);
                     if (t == 1 || t == 3) fb = -fb;
                     float wD = 2.0f * juce::MathConstants<float>::pi * freq * (delaySamples / 44100.0f);
@@ -266,14 +280,14 @@ void FilterVisualizer::paint(juce::Graphics& g)
                 else if (modelIdx == 8)
                 {
                     int stages = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
-                    float phi = -2.0f * std::atan(freq / juce::jlimit(20.0f, 20000.0f, fc));
+                    float phi = -2.0f * std::atan(freq / freqLimit);
                     float fb = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 0.95f);
                     if (t == 1 || t == 3) fb = -fb;
                     float c_ap = std::cos(stages * phi); float s_ap = std::sin(stages * phi);
                     float den2 = (1.0f - fb * c_ap) * (1.0f - fb * c_ap) + (fb * s_ap) * (fb * s_ap);
-                    float real_yap = (c_ap - fb) / den2; float imag_yap = s_ap / den2;
-                    float real_out = 0.5f * (1.0f + real_yap); float imag_out = 0.5f * imag_yap;
-                    mag = std::sqrt(real_out * real_out + imag_out * imag_out);
+                    float rya = (c_ap - fb) / den2; float iya = s_ap / den2;
+                    float ro = 0.5f * (1.0f + rya); float io = 0.5f * iya;
+                    mag = std::sqrt(ro * ro + io * io);
                 }
                 else if (modelIdx == 10)
                 {
@@ -291,8 +305,8 @@ void FilterVisualizer::paint(juce::Graphics& g)
                     int stages = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
                     float d = 1.0f / juce::jlimit(0.1f, 10.0f, res);
                     float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w_norm * d, 2.0f));
-                    float bp_mag = (1.0f / den) * w_norm;
-                    mag = 1.0f + std::pow(bp_mag, 1.2f) * res * ((float)stages * 0.1f);
+                    float bp = (1.0f / den) * w_norm;
+                    mag = 1.0f + std::pow(bp, 1.2f) * res * ((float)stages * 0.1f);
                 }
                 else if (modelIdx >= 17 && modelIdx <= 20)
                 {
@@ -327,22 +341,21 @@ void FilterVisualizer::paint(juce::Graphics& g)
                             float wn2 = rp * rp + ip * ip;
                             freqScale = std::sqrt(wn2); stage_q = std::sqrt(wn2) / (-2.0f * rp) * 1.2f;
                         }
-                        float stage_w = freq / juce::jlimit(20.0f, 20000.0f, freqLimit * freqScale);
-                        float stage_w2 = stage_w * stage_w;
-                        float stage_d = 1.0f / stage_q;
-                        float den = std::sqrt(std::pow(1.0f - stage_w2, 2.0f) + std::pow(stage_w * stage_d, 2.0f));
+                        float sw = freq / juce::jlimit(20.0f, 20000.0f, freqLimit * freqScale);
+                        float sw2 = sw * sw;
+                        float sd = 1.0f / stage_q;
+                        float den = std::sqrt(std::pow(1.0f - sw2, 2.0f) + std::pow(sw * sd, 2.0f));
                         float m = 1.0f / den;
-                        if (modelIdx == 20) { m = std::abs(1.0f - stage_w2 * 0.5f) / den; }
-                        else { if (t == 1) m *= stage_w; else if (t == 2) m *= stage_w2; else if (t == 3) m *= std::abs(1.0f - stage_w2); }
+                        if (modelIdx == 20) { m = std::abs(1.0f - sw2 * 0.5f) / den; }
+                        else { if (t == 1) m *= sw; else if (t == 2) m *= sw2; else if (t == 3) m *= std::abs(1.0f - sw2); }
                         mag_total *= m;
                     }
                     mag = mag_total;
                 }
                 else if (modelIdx == 21)
                 {
-                    float lpgFc = juce::jlimit(20.0f, 15000.0f, fc);
                     float d = 1.0f / 0.707f;
-                    float w_lpg = freq / lpgFc;
+                    float w_lpg = freq / freqLimit;
                     mag = 1.0f / std::sqrt(std::pow(1.0f - w_lpg * w_lpg, 2.0f) + std::pow(w_lpg * d, 2.0f));
                 }
                 else if (modelIdx == 22)
@@ -351,11 +364,11 @@ void FilterVisualizer::paint(juce::Graphics& g)
                     float mag_sum = 0.0f;
                     for (int b = 0; b < 8; ++b) {
                         float bFreq = std::clamp(fc * std::pow((float)(b + 1), inharmonicity), 20.0f, 20000.0f);
-                        float stage_w = freq / bFreq;
+                        float sw = freq / bFreq;
                         float q = 50.0f / std::sqrt((float)(b + 1));
                         float d = 1.0f / q;
-                        mag_sum += (1.0f / std::sqrt(std::pow(1.0f - stage_w * stage_w, 2.0f) + std::pow(stage_w * d, 2.0f)))
-                            * stage_w * (1.0f / std::sqrt((float)(b + 1)));
+                        mag_sum += (1.0f / std::sqrt(std::pow(1.0f - sw * sw, 2.0f) + std::pow(sw * d, 2.0f)))
+                            * sw * (1.0f / std::sqrt((float)(b + 1)));
                     }
                     mag = mag_sum;
                 }
@@ -368,20 +381,16 @@ void FilterVisualizer::paint(juce::Graphics& g)
                 {
                     float x_zp = juce::jlimit(0.0f, 1.0f, juce::jmap(std::log10(fc), std::log10(20.0f), std::log10(20000.0f), 0.0f, 1.0f));
                     float y_zp = juce::jlimit(0.0f, 1.0f, juce::jmap(res, 0.1f, 10.0f, 0.0f, 1.0f));
-                    const float fA[7] = { 730,  1090, 2440, 4000, 6000, 8000, 10000 };
-                    const float qA[7] = { 4.0f, 4.0f, 3.0f, 1.0f, 1.0f, 1.0f, 1.0f };
-                    const float fB[7] = { 200,  500,  1200, 2800, 5000, 8500, 12000 };
-                    const float qB[7] = { 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f };
-                    const float fC[7] = { 300,  870,  2240, 4000, 6000, 8000, 10000 };
-                    const float qC[7] = { 5.0f, 4.0f, 2.0f, 1.0f, 1.0f, 1.0f, 1.0f };
-                    const float fD[7] = { 80,   120,  200,  4000, 8000, 12000, 16000 };
-                    const float qD[7] = { 3.0f, 2.0f, 1.0f, 1.0f, 2.0f, 3.0f, 4.0f };
+                    const float fA[7] = { 730,1090,2440,4000,6000,8000,10000 }; const float qA[7] = { 4,4,3,1,1,1,1 };
+                    const float fB[7] = { 200,500,1200,2800,5000,8500,12000 }; const float qB[7] = { .5f,.5f,.5f,.5f,.5f,.5f,.5f };
+                    const float fC[7] = { 300,870,2240,4000,6000,8000,10000 }; const float qC[7] = { 5,4,2,1,1,1,1 };
+                    const float fD[7] = { 80,120,200,4000,8000,12000,16000 };  const float qD[7] = { 3,2,1,1,2,3,4 };
                     float mag_total = 1.0f;
                     for (int k = 0; k < 7; ++k) {
-                        float stage_fc = fA[k] * (1 - x_zp) * (1 - y_zp) + fB[k] * x_zp * (1 - y_zp) + fC[k] * (1 - x_zp) * y_zp + fD[k] * x_zp * y_zp;
-                        float stage_q = std::max(0.5f, qA[k] * (1 - x_zp) * (1 - y_zp) + qB[k] * x_zp * (1 - y_zp) + qC[k] * (1 - x_zp) * y_zp + qD[k] * x_zp * y_zp);
-                        float stage_w = freq / juce::jlimit(20.0f, 20000.0f, stage_fc);
-                        float den = std::sqrt(std::pow(1.0f - stage_w * stage_w, 2.0f) + std::pow(stage_w * (1.0f / stage_q), 2.0f));
+                        float sfc = fA[k] * (1 - x_zp) * (1 - y_zp) + fB[k] * x_zp * (1 - y_zp) + fC[k] * (1 - x_zp) * y_zp + fD[k] * x_zp * y_zp;
+                        float sq = std::max(0.5f, qA[k] * (1 - x_zp) * (1 - y_zp) + qB[k] * x_zp * (1 - y_zp) + qC[k] * (1 - x_zp) * y_zp + qD[k] * x_zp * y_zp);
+                        float sw = freq / juce::jlimit(20.0f, 20000.0f, sfc);
+                        float den = std::sqrt(std::pow(1.0f - sw * sw, 2.0f) + std::pow(sw * (1.0f / sq), 2.0f));
                         mag_total *= (1.0f / den);
                     }
                     mag = mag_total;
@@ -404,7 +413,7 @@ void FilterVisualizer::paint(juce::Graphics& g)
                 }
 
                 return static_cast<float>(mag);
-            }; // end calc lambda
+            }; // end calc
 
         rawMag[px] = calc("A", 0) * wA
             + calc("B", 1) * wB

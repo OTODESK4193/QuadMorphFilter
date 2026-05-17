@@ -29,10 +29,9 @@ void XYPadComponent::paint(juce::Graphics& g)
     g.setColour(juce::Colour(0xffD5DDE5));
     g.drawRoundedRectangle(b, 8.0f, 1.5f);
 
-    // ===== XYモード読み取り =====
     int xyMode = (int)processor.apvts.getRawParameterValue("xyMode")->load();
 
-    // ===== ABCD コーナーラベル（Cutoffモードでは薄く）=====
+    // ===== コーナーラベル =====
     g.setColour(juce::Colours::white.withAlpha(xyMode == 1 ? 0.1f : 0.3f));
     g.setFont(14.0f);
     g.drawText("A", 10, 10, 20, 20, juce::Justification::centred);
@@ -40,16 +39,20 @@ void XYPadComponent::paint(juce::Graphics& g)
     g.drawText("C", 10, getHeight() - 30, 20, 20, juce::Justification::centred);
     g.drawText("D", getWidth() - 30, getHeight() - 30, 20, 20, juce::Justification::centred);
 
-    // ===== Cutoffモード: 軸ラベルを表示 =====
+    // ===== Cutoffモード: 軸ラベル（ASCII使用）=====
     if (xyMode == 1)
     {
-        g.setColour(juce::Colours::white.withAlpha(0.55f));
+        g.setColour(juce::Colours::white.withAlpha(0.6f));
         g.setFont(10.0f);
-        g.drawText("Cutoff \xe2\x86\x92",  // →
-            getWidth() / 2 - 35, getHeight() - 16, 70, 14,
+
+        // X軸: Cutoff → (下部中央)
+        g.drawText("Cutoff ->",
+            getWidth() / 2 - 35, getHeight() - 15, 70, 12,
             juce::Justification::centred);
-        g.drawText("\xe2\x86\x91 Reso",    // ↑
-            3, getHeight() / 2 - 7, 42, 14,
+
+        // Y軸: Reso ^ (左側、上向き)
+        g.drawText("^ Reso",
+            3, getHeight() / 2 - 25, 40, 12,
             juce::Justification::centredLeft);
     }
 
@@ -66,7 +69,6 @@ void XYPadComponent::paint(juce::Graphics& g)
             "lfo" + juce::String(i + 1) + "en")->load() < 0.5f)
             continue;
 
-        // トレイル
         for (int t = 0; t < 30; ++t) {
             int   idx = (trailIdx[i] + t) % 30;
             auto  pt = trails[i][idx];
@@ -75,7 +77,6 @@ void XYPadComponent::paint(juce::Graphics& g)
             g.fillEllipse(pt.x * getWidth() - 3, pt.y * getHeight() - 3, 6, 6);
         }
 
-        // 現在位置
         auto p = processor.getLfoPos(i);
         bool isWait = processor.isWaitingForRecord[i].load(std::memory_order_acquire);
         bool isDrag = processor.isRecordingDrag[i].load(std::memory_order_acquire);
@@ -148,8 +149,7 @@ void XYPadComponent::mouseDown(const juce::MouseEvent& e)
 
 void XYPadComponent::mouseDrag(const juce::MouseEvent& e)
 {
-    if (draggingLfoIndex != -1
-        && processor.isRecordingDrag[draggingLfoIndex].load())
+    if (draggingLfoIndex != -1 && processor.isRecordingDrag[draggingLfoIndex].load())
     {
         int len = processor.recLength[draggingLfoIndex].load();
         if (len < 2048) {
