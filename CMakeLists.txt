@@ -53,8 +53,8 @@ target_sources(QuadMorphFilter
         Source/PluginEditor.cpp
         Source/PluginEditor.h
 
-        Source/DSP/FilterA_SVF.cpp
-        Source/DSP/FilterA_SVF.h
+        
+        
         Source/DSP/TptFilter.cpp
         Source/DSP/TptFilter.h
         Source/DSP/LfoEngine.cpp      # ← 新規追加
@@ -68,7 +68,7 @@ target_sources(QuadMorphFilter
         Source/UI/FilterVisualizer.h
         Source/UI/XYPadComponent.cpp
         Source/UI/XYPadComponent.h
- "Source/DSP/FilterA_SVF_SIMD.h" "Source/DSP/FilterA_SVF_SIMD.cpp")
+ "Source/DSP/FilterA_SVF_SIMD.h" "Source/DSP/FilterA_SVF_SIMD.cpp" "Source/DSP/TptFilterState.h" "Source/DSP/TptFilter/SVF/TptFilter_SVF.h" "Source/DSP/TptFilter/SVF/TptFilter_SVF.cpp" "Source/DSP/TptFilter/Ladder/TptFilter_Ladder.h" "Source/DSP/TptFilter/Ladder/TptFilter_Ladder.cpp" "Source/DSP/TptFilter/AnalogEmulation/TptFilter_AnalogEmulation.h" "Source/DSP/TptFilter/AnalogEmulation/TptFilter_AnalogEmulation.cpp" "Source/DSP/TptFilter/DigitalPrecision/TptFilter_DigitalPrecision.h" "Source/DSP/TptFilter/DigitalPrecision/TptFilter_DigitalPrecision.cpp" "Source/DSP/TptFilter/Spectral/TptFilter_Spectral.h" "Source/DSP/TptFilter/Spectral/TptFilter_Spectral.cpp" "Source/DSP/TptFilter/Experimental/TptFilter_Experimental.h" "Source/DSP/TptFilter/Experimental/TptFilter_Experimental.cpp")
 
 # 6. 使用するJUCEモジュールのリンク（問題のTARGETを削除しました）
 target_link_libraries(QuadMorphFilter PRIVATE
