@@ -25,15 +25,23 @@ public:
     void process(juce::AudioBuffer<float>& buffer);
     float getMagnitudeForFrequency(float frequency) const;
 
+    // ===== 【新規】Oversampling API =====
+    // mode: 0=Off, 1=Auto, 2=Force 2x, 3=Force 4x
+    void setOsMode(int mode);
+    int  getOsLatencySamples() const;
+
 private:
     float processSample(int channel, float x);
     void updateCoefficients();
-
     void calcDigitalPrecisionCoeffs(float fc, float res);
     void updateZPlaneCoeffs(float fc, float res);
 
+    // ===== 【新規】Oversampling 内部メソッド =====
+    int  getAutoOsFactor(int modelIdx) const;
+    void rebuildOversampler(int newFactor);
+
     double sampleRate = 44100.0;
-    int maxChannels = 2;
+    int    maxChannels = 2;
 
     juce::SmoothedValue<float> cutoff;
     juce::SmoothedValue<float> resonance;
@@ -71,7 +79,7 @@ private:
     // All-Pass Phaser
     float ap_s[16][2] = { {0.0f} }; float ap_out_prev[2] = { 0.0f };
 
-    // Kilo All-Pass (Staggering Coefficients) 【追加】
+    // Kilo All-Pass
     float kilo_g[16] = { 0.0f }; float kilo_R[16] = { 0.0f }; float kilo_h[16] = { 0.0f };
     float kilo_s1[16][2] = { {0.0f} }; float kilo_s2[16][2] = { {0.0f} };
 
@@ -93,7 +101,7 @@ private:
 
     // Waveguide Mesh
     float wgBuffer[2][16384] = { {0.0f} };
-    int wgWriteIdx[2] = { 0 };
+    int   wgWriteIdx[2] = { 0 };
     float wg_ap_state[2] = { 0.0f };
 
     // Bode Frequency Shifter
@@ -103,7 +111,7 @@ private:
     float hilbertStateB[4][2] = { {0.0f} };
     float bodePhase[2] = { 0.0f, 0.0f };
 
-    // Z-Plane (Deterministic 2D Morphing)
+    // Z-Plane
     std::vector<BiquadCoeffs> zplaneCoeffs;
     float zplane_s1[7][2] = { {0.0f} };
     float zplane_s2[7][2] = { {0.0f} };
@@ -117,13 +125,19 @@ private:
     float aa_s1[4][2] = { {0.0f} };
     float aa_s2[4][2] = { {0.0f} };
 
-    // Reverb 4x4 FDN (Feedback Delay Network) 【追加】
+    // Reverb FDN
     float fdnBuffer[4][2][16384] = { {{0.0f}} };
-    int fdnWriteIdx[4][2] = { {0} };
+    int   fdnWriteIdx[4][2] = { {0} };
     float fdn_ap_state[4][2] = { {0.0f} };
-    float fdnDelayTimes[4] = { 1.0f, 1.313f, 1.637f, 1.911f }; // 互いに素な関係に近い比率
+    float fdnDelayTimes[4] = { 1.0f, 1.313f, 1.637f, 1.911f };
 
     float rmsIn[2] = { 0.0f, 0.0f };
     float rmsOut[2] = { 0.0f, 0.0f };
     float agcGain[2] = { 1.0f, 1.0f };
+
+    // ===== 【新規】Oversampling 関連メンバ =====
+    std::unique_ptr<juce::dsp::Oversampling<float>> oversampler;
+    int currentOsFactor = 0;   // 0=off, 1=2x, 2=4x
+    int osMode = 0;   // 0=Off, 1=Auto, 2=Force2x, 3=Force4x
+    int preparedBlockSize = 512;
 };

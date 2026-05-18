@@ -77,6 +77,11 @@ QuadMorphFilterAudioProcessor::createParameterLayout()
         juce::ParameterID{ "xyMode", 1 }, "XY Mode",
         juce::StringArray{ "Morph", "Cutoff" }, 0));
 
+    // ===== 【新規追加】ここに挿入 =====
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ "osMode", 1 }, "OS Quality",
+        juce::StringArray{ "Off", "Auto", "2x", "4x" }, 0));
+
     for (const auto& s : suffixes)
     {
         layout.add(std::make_unique<juce::AudioParameterBool>(
@@ -113,6 +118,17 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
 
     currentGainReduction[0] = 1.0f;
     currentGainReduction[1] = 1.0f;
+
+    // ===== 【新規追加】ここに挿入 =====
+    // OSのレイテンシをホストに報告
+    // (filterA~D で最大のレイテンシを使用)
+    int maxLatency = 0;
+    maxLatency = std::max(maxLatency, filterA.getOsLatencySamples());
+    maxLatency = std::max(maxLatency, filterB.getOsLatencySamples());
+    maxLatency = std::max(maxLatency, filterC.getOsLatencySamples());
+    maxLatency = std::max(maxLatency, filterD.getOsLatencySamples());
+    setLatencySamples(maxLatency);
+
 }
 
 void QuadMorphFilterAudioProcessor::releaseResources() {}
@@ -164,6 +180,17 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         lfoEngine.getPosition(1), lfoEngine.getMod4(1), lfo1_isRand1);
     auto rM = MorphEngine::computeModulation(
         lfoEngine.getPosition(2), lfoEngine.getMod4(2), lfo2_isRand1);
+
+    // ===== 【新規追加】ここに挿入 =====
+// OSモードを各フィルターに反映
+// (毎ブロック呼ぶが、値が変わらなければ内部でスキップされる)
+    {
+        int osMode = (int)apvts.getRawParameterValue("osMode")->load();
+        filterA.setOsMode(osMode);
+        filterB.setOsMode(osMode);
+        filterC.setOsMode(osMode);
+        filterD.setOsMode(osMode);
+    }
 
     // ===== フィルターパラメータ統合ゲッター =====
     //

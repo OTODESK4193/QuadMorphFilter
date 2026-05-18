@@ -49,6 +49,16 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
     xyModeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         audioProcessor.apvts, "xyMode", xyModeCombo);
 
+    // ===== 【新規追加】ここに挿入 =====
+    osModeLabel.setText("OS", juce::dontSendNotification);
+    osModeLabel.setJustificationType(juce::Justification::centredRight);
+    addAndMakeVisible(osModeLabel);
+
+    osModeCombo.addItemList({ "Off", "Auto", "2x", "4x" }, 1);
+    addAndMakeVisible(osModeCombo);
+    osModeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.apvts, "osMode", osModeCombo);
+
     // ===== LFO Cut/Res per-filter スイッチ =====
     // 【色改善】
     //   LFO Cut: 0xffC2185B (Material Pink 700) - 視認性の高い深いピンク
@@ -242,13 +252,23 @@ void QuadMorphFilterAudioProcessorEditor::resized()
     // b から高さ分を removeFromTop して Y位置を進める
     // 実際のコントロールは rightX から始まる Rectangle に配置
 
-    // Mode 行
+  // ===== 【置き換え】Mode + OS を1行に並べる =====
     {
         auto row = b.removeFromTop(24);
         auto area = juce::Rectangle<int>(rightX, row.getY(), rightW, row.getHeight()).reduced(4, 2);
-        xyModeLabel.setBounds(area.removeFromLeft(42).reduced(0, 1));
-        xyModeCombo.setBounds(area.reduced(2, 0));
+
+        // 左半分: Mode
+        auto modeArea = area.removeFromLeft(area.getWidth() / 2 - 4);
+        xyModeLabel.setBounds(modeArea.removeFromLeft(42).reduced(0, 1));
+        xyModeCombo.setBounds(modeArea.reduced(2, 0));
+
+        area.removeFromLeft(8); // 間隔
+
+        // 右半分: OS Quality
+        osModeLabel.setBounds(area.removeFromLeft(24).reduced(0, 1));
+        osModeCombo.setBounds(area.reduced(2, 0));
     }
+
     b.removeFromTop(2);
 
     // LFO Cut 行

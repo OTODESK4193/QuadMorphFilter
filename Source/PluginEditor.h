@@ -54,6 +54,12 @@ private:
     juce::ComboBox xyModeCombo;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> xyModeAtt;
 
+    // ===== 【新規追加】ここに挿入 =====
+    juce::Label    osModeLabel;
+    juce::ComboBox osModeCombo;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> osModeAtt;
+
+
     // ===== 【新規】LFO Cut per-filter スイッチ (A/B/C/D) =====
     juce::Label      lfoCutLabel;
     juce::TextButton lfoCutBtn[4];

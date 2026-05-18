@@ -16,13 +16,23 @@ TptFilter::TptFilter()
     zplaneCoeffs.resize(7);
 }
 
-void TptFilter::prepare(double newSampleRate, int /*samplesPerBlock*/, int numChannels)
+void TptFilter::prepare(double newSampleRate, int samplesPerBlock, int numChannels)
 {
     sampleRate = newSampleRate;
     maxChannels = juce::jmin(numChannels, 2);
+    preparedBlockSize = samplesPerBlock;
+
     cutoff.reset(sampleRate, 0.01);
     resonance.reset(sampleRate, 0.01);
     smoothedDigitalCutoff = cutoff.getCurrentValue();
+
+    // Oversamplerを再初期化
+    if (oversampler != nullptr)
+    {
+        oversampler->initProcessing(static_cast<size_t>(samplesPerBlock));
+        oversampler->reset();
+    }
+
     reset();
 }
 
@@ -42,14 +52,13 @@ void TptFilter::reset()
     for (int stage = 0; stage < 16; ++stage) {
         for (int ch = 0; ch < 2; ++ch) {
             ap_s[stage][ch] = 0.0f;
-            kilo_s1[stage][ch] = 0.0f; kilo_s2[stage][ch] = 0.0f; // 【追加】
+            kilo_s1[stage][ch] = 0.0f; kilo_s2[stage][ch] = 0.0f;
         }
     }
     for (int stage = 0; stage < 7; ++stage) {
         for (int ch = 0; ch < 2; ++ch) { zplane_s1[stage][ch] = 0.0f; zplane_s2[stage][ch] = 0.0f; }
         zp_fc[stage] = 1000.0f; zp_q[stage] = 0.707f;
     }
-    // 【追加】FDNリバーブのバッファ初期化
     for (int stage = 0; stage < 4; ++stage) {
         for (int ch = 0; ch < 2; ++ch) {
             fdnWriteIdx[stage][ch] = 0; fdn_ap_state[stage][ch] = 0.0f;
@@ -68,9 +77,25 @@ void TptFilter::reset()
     }
     lastCutoff = -1.0f; lastRes = -1.0f;
     smoothedDigitalCutoff = cutoff.getCurrentValue();
+
+    if (oversampler != nullptr)
+        oversampler->reset();
 }
 
-void TptFilter::setModel(int newModel) { filterModel = newModel; lastCutoff = -1.0f; }
+// ===== 【修正】setModel: Autoモード時にOS倍率を再評価 =====
+void TptFilter::setModel(int newModel)
+{
+    if (filterModel == newModel) return;
+    filterModel = newModel;
+    lastCutoff = -1.0f;
+
+    if (osMode == 1)
+    {
+        int newFactor = getAutoOsFactor(newModel);
+        rebuildOversampler(newFactor);
+    }
+}
+
 void TptFilter::setCutoff(float newCutoff) { cutoff.setTargetValue(juce::jlimit(20.0f, 20000.0f, newCutoff)); }
 void TptFilter::setResonance(float newResonance) { resonance.setTargetValue(juce::jmax(0.1f, newResonance)); }
 void TptFilter::setType(int newType) { filterType = newType; }
@@ -79,7 +104,7 @@ void TptFilter::setSlope(int index)
 {
     slopeIdx = index;
     if (filterModel == 5 || filterModel == 10 || filterModel == 21 || filterModel == 22 || filterModel == 24 || filterModel == 25 || filterModel == 27) {
-        currentStages = 1; filterOrder = 2; // Model 10 (Reverb) は内部で4段固定だがUI制御上は1
+        currentStages = 1; filterOrder = 2;
     }
     else if (filterModel == 8 || filterModel == 11 || filterModel == 26) {
         currentStages = (index == 0) ? 2 : (index == 1) ? 4 : (index == 2) ? 8 : 16; filterOrder = currentStages * 2;
@@ -100,6 +125,74 @@ void TptFilter::setSlope(int index)
     lastCutoff = -1.0f;
 }
 
+// ==========================================
+// Oversampling API
+// ==========================================
+
+void TptFilter::setOsMode(int mode)
+{
+    mode = juce::jlimit(0, 3, mode);
+    if (mode == osMode) return;
+    osMode = mode;
+
+    int newFactor = 0;
+    switch (osMode)
+    {
+    case 0:  newFactor = 0;                             break; // Off
+    case 1:  newFactor = getAutoOsFactor(filterModel);  break; // Auto
+    case 2:  newFactor = 1;                             break; // Force 2x
+    case 3:  newFactor = 2;                             break; // Force 4x
+    default: newFactor = 0;                             break;
+    }
+    rebuildOversampler(newFactor);
+}
+
+int TptFilter::getOsLatencySamples() const
+{
+    if (oversampler == nullptr) return 0;
+    return static_cast<int>(oversampler->getLatencyInSamples());
+}
+
+int TptFilter::getAutoOsFactor(int modelIdx) const
+{
+    if (modelIdx == 9) return 2; // Wavefolder: 4x
+
+    if (modelIdx == 1 || modelIdx == 2 ||
+        modelIdx == 3 || modelIdx == 4 ||
+        modelIdx == 6 || modelIdx == 7 ||
+        modelIdx == 12 || modelIdx == 13 ||
+        modelIdx == 14 || modelIdx == 15 ||
+        modelIdx == 16) return 1; // 2x
+
+    return 0; // OS不要
+}
+
+void TptFilter::rebuildOversampler(int newFactor)
+{
+    if (newFactor == currentOsFactor && oversampler != nullptr) return;
+    currentOsFactor = newFactor;
+
+    if (newFactor == 0)
+    {
+        oversampler.reset();
+        lastCutoff = -1.0f;
+        return;
+    }
+
+    oversampler = std::make_unique<juce::dsp::Oversampling<float>>(
+        maxChannels,
+        newFactor,
+        juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR,
+        true);
+
+    oversampler->initProcessing(static_cast<size_t>(preparedBlockSize));
+    oversampler->reset();
+    lastCutoff = -1.0f;
+}
+
+// ==========================================
+// calcDigitalPrecisionCoeffs
+// ==========================================
 void TptFilter::calcDigitalPrecisionCoeffs(float fc, float res) {
     float maxSafeFreq = (float)sampleRate * 0.45f;
     float rippleDb = juce::jmap(res, 0.1f, 10.0f, 0.1f, 3.0f);
@@ -136,6 +229,9 @@ void TptFilter::calcDigitalPrecisionCoeffs(float fc, float res) {
     }
 }
 
+// ==========================================
+// updateZPlaneCoeffs
+// ==========================================
 void TptFilter::updateZPlaneCoeffs(float fc, float res) {
     float maxSafeFreq = (float)sampleRate * 0.45f;
     float x = juce::jmap(std::log10(fc), std::log10(20.0f), std::log10(20000.0f), 0.0f, 1.0f);
@@ -160,6 +256,9 @@ void TptFilter::updateZPlaneCoeffs(float fc, float res) {
     }
 }
 
+// ==========================================
+// updateCoefficients
+// ==========================================
 void TptFilter::updateCoefficients()
 {
     float targetCutoff = cutoff.getTargetValue();
@@ -198,19 +297,15 @@ void TptFilter::updateCoefficients()
         else if (filterModel == 25) {
             updateZPlaneCoeffs(smoothedDigitalCutoff, currentRes);
         }
-        else if (filterModel == 11) { // 【修正】Kilo All-Pass (Staggering Coefficients) 
+        else if (filterModel == 11) {
             float maxSafeFreq = (float)sampleRate * 0.45f;
-            // Resonance を周波数の分散幅（Spread）として使用
             float spread = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, 2.5f);
             for (int k = 0; k < currentStages; ++k) {
-                // 中心周波数から上下に散らす（1段なら中心のみ）
                 float offset = (currentStages > 1) ? ((float)k / (currentStages - 1)) * 2.0f - 1.0f : 0.0f;
                 float st_fc = smoothedDigitalCutoff * std::pow(2.0f, offset * spread);
                 st_fc = std::clamp(st_fc, 20.0f, maxSafeFreq);
-
                 float wd = juce::MathConstants<float>::pi * st_fc / (float)sampleRate;
                 kilo_g[k] = std::tan(wd);
-                // 各段のQ値はSpreadが広いほど高く（ピーキーに）してスミアリングを強調
                 float q = 0.5f + (spread * 2.0f);
                 kilo_R[k] = 1.0f / (2.0f * q);
                 kilo_h[k] = 1.0f / (1.0f + 2.0f * kilo_R[k] * kilo_g[k] + kilo_g[k] * kilo_g[k]);
@@ -238,23 +333,59 @@ void TptFilter::updateCoefficients()
     }
 }
 
+// ==========================================
+// process（OS対応版）
+// ==========================================
 void TptFilter::process(juce::AudioBuffer<float>& buffer)
 {
     int numSamples = buffer.getNumSamples();
     int numChannels = juce::jmin(buffer.getNumChannels(), maxChannels);
-    float* writePointers[2] = { nullptr, nullptr };
-    for (int ch = 0; ch < numChannels; ++ch) writePointers[ch] = buffer.getWritePointer(ch);
 
-    for (int i = 0; i < numSamples; ++i) {
-        if (i % 16 == 0) {
-            updateCoefficients();
+    // OS なし: 従来通り
+    if (oversampler == nullptr || currentOsFactor == 0)
+    {
+        float* writePointers[2] = { nullptr, nullptr };
+        for (int ch = 0; ch < numChannels; ++ch)
+            writePointers[ch] = buffer.getWritePointer(ch);
+
+        for (int i = 0; i < numSamples; ++i) {
+            if (i % 16 == 0)
+                updateCoefficients();
+            for (int ch = 0; ch < numChannels; ++ch)
+                writePointers[ch][i] = processSample(ch, writePointers[ch][i]);
         }
-        for (int ch = 0; ch < numChannels; ++ch) {
-            writePointers[ch][i] = processSample(ch, writePointers[ch][i]);
+        return;
+    }
+
+    // OS あり: アップ → 処理 → ダウン
+    juce::dsp::AudioBlock<float> block(buffer);
+    auto oversampledBlock = oversampler->processSamplesUp(block);
+
+    int osNumSamples = static_cast<int>(oversampledBlock.getNumSamples());
+    int osNumChannels = juce::jmin(static_cast<int>(oversampledBlock.getNumChannels()), maxChannels);
+
+    double savedSampleRate = sampleRate;
+    sampleRate = sampleRate * std::pow(2.0, static_cast<double>(currentOsFactor));
+    lastCutoff = -1.0f;
+
+    for (int i = 0; i < osNumSamples; ++i) {
+        if (i % 16 == 0)
+            updateCoefficients();
+        for (int ch = 0; ch < osNumChannels; ++ch) {
+            float* osPtr = oversampledBlock.getChannelPointer(ch);
+            osPtr[i] = processSample(ch, osPtr[i]);
         }
     }
+
+    sampleRate = savedSampleRate;
+    lastCutoff = -1.0f;
+
+    oversampler->processSamplesDown(block);
 }
 
+// ==========================================
+// processSample（既存のまま）
+// ==========================================
 float TptFilter::processSample(int channel, float x)
 {
     float comp = 1.0f;
@@ -348,7 +479,6 @@ float TptFilter::processSample(int channel, float x)
             float eta = (1.0f - dFrac) / (1.0f + dFrac);
             float delayed = combBuffer[stage][channel][readIdx2] + eta * (combBuffer[stage][channel][readIdx1] - comb_ap_state[stage][channel]);
             comb_ap_state[stage][channel] = delayed;
-
             float fb = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 0.0f, 0.95f); if (filterType == 1 || filterType == 3) fb = -fb;
             float combOut = 0.0f;
             if (filterType == 0 || filterType == 1) { float toBuffer = std::tanh(out + delayed * fb); combBuffer[stage][channel][combWriteIdx[stage][channel]] = toBuffer; combOut = toBuffer; }
@@ -386,12 +516,9 @@ float TptFilter::processSample(int channel, float x)
         out = std::sin(out * fold_gain);
     }
     else if (filterModel == 10) {
-        // 【完全修正】Reverb (4x4 Feedback Delay Network) 
         float ms = juce::jmap(smoothedDigitalCutoff, 20.0f, 20000.0f, 50.0f, 0.5f);
         float baseSamples = (ms / 1000.0f) * sampleRate;
         float fb = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 0.0f, 0.98f);
-
-        // 4本のディレイラインからの読み出し (All-Pass Interpolation)
         float d_out[4];
         for (int i = 0; i < 4; ++i) {
             float delaySamples = juce::jlimit(1.0f, 16383.0f, baseSamples * fdnDelayTimes[i]);
@@ -401,35 +528,28 @@ float TptFilter::processSample(int channel, float x)
             d_out[i] = fdnBuffer[i][channel][r2] + eta * (fdnBuffer[i][channel][r1] - fdn_ap_state[i][channel]);
             fdn_ap_state[i][channel] = d_out[i];
         }
-
-        // Householder Matrix による無損失散乱ミックス (1/2 * [1 1 1 1; 1 -1 1 -1; 1 1 -1 -1; 1 -1 -1 1])
         float m0 = 0.5f * (d_out[0] + d_out[1] + d_out[2] + d_out[3]);
         float m1 = 0.5f * (d_out[0] - d_out[1] + d_out[2] - d_out[3]);
         float m2 = 0.5f * (d_out[0] + d_out[1] - d_out[2] - d_out[3]);
         float m3 = 0.5f * (d_out[0] - d_out[1] - d_out[2] + d_out[3]);
-
-        // ディレイラインへの書き込み（入力 + フィードバック）
         fdnBuffer[0][channel][fdnWriteIdx[0][channel]] = std::tanh(out + m0 * fb);
         fdnBuffer[1][channel][fdnWriteIdx[1][channel]] = std::tanh(out + m1 * fb);
         fdnBuffer[2][channel][fdnWriteIdx[2][channel]] = std::tanh(out + m2 * fb);
         fdnBuffer[3][channel][fdnWriteIdx[3][channel]] = std::tanh(out + m3 * fb);
-
         for (int s = 0; s < 4; ++s) fdnWriteIdx[s][channel] = (fdnWriteIdx[s][channel] + 1) & 16383;
-
-        float reverb_out = m0; // 出力はシンプルに1本目から取るかミックスする
+        float reverb_out = m0;
         if (filterType == 0) out = reverb_out;
         else if (filterType == 1) out = (out + reverb_out) * 0.5f;
         else if (filterType == 2) out = out - reverb_out * 0.5f;
         else out = std::sin(reverb_out * 3.0f);
     }
     else if (filterModel == 11) {
-        // 【完全修正】Kilo All-Pass (Frequency Staggered APF Chain)
         for (int stage = 0; stage < currentStages; ++stage) {
             float cur_g = kilo_g[stage]; float cur_R = kilo_R[stage]; float cur_h = kilo_h[stage];
             float hp = (out - (2.0f * cur_R + cur_g) * kilo_s1[stage][channel] - kilo_s2[stage][channel]) * cur_h;
             float bp = cur_g * hp + kilo_s1[stage][channel]; float lp = cur_g * bp + kilo_s2[stage][channel];
             kilo_s1[stage][channel] = cur_g * hp + bp; kilo_s2[stage][channel] = cur_g * bp + lp;
-            out = lp - 2.0f * cur_R * bp + hp; // All-Pass Output
+            out = lp - 2.0f * cur_R * bp + hp;
         }
     }
     else if (filterModel == 16) {
@@ -458,14 +578,11 @@ float TptFilter::processSample(int channel, float x)
         float attackCoef = 1.0f - std::exp(-1.0f / (0.005f * sampleRate));
         float releaseTime = juce::jmap(resonance.getCurrentValue(), 0.1f, 10.0f, 0.05f, 2.0f);
         float releaseCoef = 1.0f - std::exp(-1.0f / (releaseTime * sampleRate));
-
         float coef = (targetEnv > currentEnv) ? attackCoef : releaseCoef;
         lpgEnv[channel] = currentEnv + coef * (targetEnv - currentEnv);
-
         float lpgFc = juce::jlimit(20.0f, 15000.0f, 20.0f * std::pow(1000.0f, lpgEnv[channel]));
         float lpgWd = juce::MathConstants<float>::pi * lpgFc / (float)sampleRate;
         float lpgG = std::tan(lpgWd); float lpgR = 1.0f / (2.0f * 0.707f); float lpgH = 1.0f / (1.0f + 2.0f * lpgR * lpgG + lpgG * lpgG);
-
         float hp = (out - (2.0f * lpgR + lpgG) * s1[0][channel] - s2[0][channel]) * lpgH;
         float bp = lpgG * hp + s1[0][channel]; float lp = lpgG * bp + s2[0][channel];
         s1[0][channel] = lpgG * hp + bp; s2[0][channel] = lpgG * bp + lp;
@@ -488,7 +605,6 @@ float TptFilter::processSample(int channel, float x)
         float eta = (1.0f - dFrac) / (1.0f + dFrac);
         float wgDelayed = wgBuffer[channel][r2] + eta * (wgBuffer[channel][r1] - wg_ap_state[channel]);
         wg_ap_state[channel] = wgDelayed;
-
         float hp = (wgDelayed - (2.0f * R + g) * s1[0][channel] - s2[0][channel]) * h;
         float bp = g * hp + s1[0][channel]; float wgScattered = g * bp + s2[0][channel];
         s1[0][channel] = g * hp + bp; s2[0][channel] = g * bp + wgScattered;
@@ -562,6 +678,9 @@ float TptFilter::processSample(int channel, float x)
     return out * agcGain[channel];
 }
 
+// ==========================================
+// getMagnitudeForFrequency（既存のまま）
+// ==========================================
 float TptFilter::getMagnitudeForFrequency(float frequency) const
 {
     float fc = cutoff.getCurrentValue();
@@ -594,7 +713,6 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         return mag_total;
     }
     else if (filterModel == 11) {
-        // Visualizer for Kilo All-Pass
         float mag_total = 1.0f;
         float spread = juce::jmap(res, 0.1f, 10.0f, 0.0f, 2.5f);
         for (int k = 0; k < currentStages; ++k) {
@@ -609,7 +727,6 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         return mag_total;
     }
     else if (filterModel == 10) {
-        // Visualizer for FDN Reverb
         float ms = juce::jmap(fc, 20.0f, 20000.0f, 50.0f, 0.5f);
         float baseD = (ms / 1000.0f);
         float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.98f);
