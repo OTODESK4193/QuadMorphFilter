@@ -18,6 +18,47 @@ void XYPadComponent::timerCallback()
         trails[i][trailIdx[i]] = processor.getLfoPos(i);
         trailIdx[i] = (trailIdx[i] + 1) % 30;
     }
+
+    // ===== Cutoffモード: XY位置をスライダーに書き戻し =====
+    // lfoCutOn=true のフィルターのカットオフスライダーを
+    // XY位置由来の値に追従させる（表示の同期）
+    int xyMode = (int)processor.apvts.getRawParameterValue("xyMode")->load();
+    if (xyMode == 1)
+    {
+        auto mPos = processor.getLfoPos(0);
+
+        // X: 20Hz〜20kHz（対数）, Y: 上=大（反転）
+        float xyCutoff = 20.0f * std::pow(1000.0f, mPos.x);
+        float xyRes = juce::jlimit(0.1f, 10.0f, 0.1f + (1.0f - mPos.y) * 9.9f);
+
+        const juce::String suffixes[4] = { "A", "B", "C", "D" };
+        for (const auto& s : suffixes)
+        {
+            // lfoCutOn の場合、カットオフスライダーを XY X位置に同期
+            if (processor.apvts.getRawParameterValue("lfoCut" + s)->load() > 0.5f)
+            {
+                if (auto* p = dynamic_cast<juce::AudioParameterFloat*>(
+                    processor.apvts.getParameter("cutoff" + s)))
+                {
+                    // 現在値との差が小さければスキップ（CPU節約）
+                    if (std::abs(p->get() - xyCutoff) > 0.5f)
+                        *p = juce::jlimit(p->range.start, p->range.end, xyCutoff);
+                }
+            }
+
+            // lfoResOn の場合、Resスライダーを XY Y位置に同期
+            if (processor.apvts.getRawParameterValue("lfoRes" + s)->load() > 0.5f)
+            {
+                if (auto* p = dynamic_cast<juce::AudioParameterFloat*>(
+                    processor.apvts.getParameter("res" + s)))
+                {
+                    if (std::abs(p->get() - xyRes) > 0.01f)
+                        *p = juce::jlimit(p->range.start, p->range.end, xyRes);
+                }
+            }
+        }
+    }
+
     repaint();
 }
 
@@ -31,7 +72,7 @@ void XYPadComponent::paint(juce::Graphics& g)
 
     int xyMode = (int)processor.apvts.getRawParameterValue("xyMode")->load();
 
-    // ===== コーナーラベル =====
+    // コーナーラベル
     g.setColour(juce::Colours::white.withAlpha(xyMode == 1 ? 0.1f : 0.3f));
     g.setFont(14.0f);
     g.drawText("A", 10, 10, 20, 20, juce::Justification::centred);
@@ -39,24 +80,20 @@ void XYPadComponent::paint(juce::Graphics& g)
     g.drawText("C", 10, getHeight() - 30, 20, 20, juce::Justification::centred);
     g.drawText("D", getWidth() - 30, getHeight() - 30, 20, 20, juce::Justification::centred);
 
-    // ===== Cutoffモード: 軸ラベル（ASCII使用）=====
+    // Cutoffモード: 軸ラベル
     if (xyMode == 1)
     {
         g.setColour(juce::Colours::white.withAlpha(0.6f));
         g.setFont(10.0f);
-
-        // X軸: Cutoff → (下部中央)
         g.drawText("Cutoff ->",
             getWidth() / 2 - 35, getHeight() - 15, 70, 12,
             juce::Justification::centred);
-
-        // Y軸: Reso ^ (左側、上向き)
         g.drawText("^ Reso",
             3, getHeight() / 2 - 25, 40, 12,
             juce::Justification::centredLeft);
     }
 
-    // ===== LFO トレイルと現在位置 =====
+    // LFO トレイルと現在位置
     juce::Colour colors[] = {
         juce::Colour(0xff00D2D3),
         juce::Colour(0xffFF9FF3),

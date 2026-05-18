@@ -229,74 +229,64 @@ void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, ju
 
 void QuadMorphFilterAudioProcessorEditor::resized()
 {
-    // 外側のパディング
     const int pad = 15;
     auto b = getLocalBounds().reduced(pad);
     const int totalW = b.getWidth();
 
-    // ビジュアライザー幅: 70%, 右パネル幅: 30%
     const int visW = (int)(totalW * 0.7f);
-    const int rightX = b.getX() + visW;          // 右パネルの絶対X座標
-    const int rightW = b.getRight() - rightX;     // 右パネルの幅
+    const int rightX = b.getX() + visW;
+    const int rightW = b.getRight() - rightX;
 
     // ===== 上段（300px）: ビジュアライザー + XYパッド =====
-    // XYパッドは元の大きさのまま（300px × rightW）
     {
         auto top = b.removeFromTop(300);
         visualizer.setBounds(top.removeFromLeft(visW).reduced(5));
         xyPad.setBounds(top.reduced(5));
     }
-    b.removeFromTop(6);
+    b.removeFromTop(4); // 最小限の間隔
 
-    // ===== Mode/LFO Cut/LFO Res: 右パネル幅に揃えて配置 =====
-    // b から高さ分を removeFromTop して Y位置を進める
-    // 実際のコントロールは rightX から始まる Rectangle に配置
-
-  // ===== 【置き換え】Mode + OS を1行に並べる =====
+    // ===== 右パネルコントロール（フィルター行と同じY帯に絶対配置）=====
+    // フィルター行は左側 ~640px のみ使用するため右パネルは空き
+    // → Mode/LFO を右パネルに重ねることで余白をゼロにする
     {
-        auto row = b.removeFromTop(24);
-        auto area = juce::Rectangle<int>(rightX, row.getY(), rightW, row.getHeight()).reduced(4, 2);
+        int ctrlY = b.getY();
+        const int rowH = 24;
+        const int gap = 2;
 
-        // 左半分: Mode
-        auto modeArea = area.removeFromLeft(area.getWidth() / 2 - 4);
-        xyModeLabel.setBounds(modeArea.removeFromLeft(42).reduced(0, 1));
-        xyModeCombo.setBounds(modeArea.reduced(2, 0));
+        // Mode + OS 行
+        {
+            auto area = juce::Rectangle<int>(rightX, ctrlY, rightW, rowH).reduced(4, 1);
+            auto modeHalf = area.removeFromLeft(area.getWidth() / 2 - 4);
+            xyModeLabel.setBounds(modeHalf.removeFromLeft(42).reduced(0, 1));
+            xyModeCombo.setBounds(modeHalf);
+            area.removeFromLeft(8);
+            osModeLabel.setBounds(area.removeFromLeft(24).reduced(0, 1));
+            osModeCombo.setBounds(area);
+            ctrlY += rowH + gap;
+        }
 
-        area.removeFromLeft(8); // 間隔
+        // LFO Cut 行
+        {
+            auto area = juce::Rectangle<int>(rightX, ctrlY, rightW, rowH).reduced(4, 1);
+            lfoCutLabel.setBounds(area.removeFromLeft(52).reduced(0, 1));
+            int bw = area.getWidth() / 4;
+            for (int i = 0; i < 4; ++i)
+                lfoCutBtn[i].setBounds(area.removeFromLeft(bw).reduced(2, 1));
+            ctrlY += rowH + gap;
+        }
 
-        // 右半分: OS Quality
-        osModeLabel.setBounds(area.removeFromLeft(24).reduced(0, 1));
-        osModeCombo.setBounds(area.reduced(2, 0));
+        // LFO Res 行
+        {
+            auto area = juce::Rectangle<int>(rightX, ctrlY, rightW, rowH).reduced(4, 1);
+            lfoResLabel.setBounds(area.removeFromLeft(52).reduced(0, 1));
+            int bw = area.getWidth() / 4;
+            for (int i = 0; i < 4; ++i)
+                lfoResBtn[i].setBounds(area.removeFromLeft(bw).reduced(2, 1));
+        }
     }
 
-    b.removeFromTop(2);
-
-    // LFO Cut 行
-    {
-        auto row = b.removeFromTop(24);
-        auto area = juce::Rectangle<int>(rightX, row.getY(), rightW, row.getHeight()).reduced(4, 2);
-        lfoCutLabel.setBounds(area.removeFromLeft(52).reduced(0, 1));
-        int bw = area.getWidth() / 4;
-        for (int i = 0; i < 4; ++i)
-            lfoCutBtn[i].setBounds(area.removeFromLeft(bw).reduced(2, 1));
-    }
-    b.removeFromTop(2);
-
-    // LFO Res 行
-    {
-        auto row = b.removeFromTop(24);
-        auto area = juce::Rectangle<int>(rightX, row.getY(), rightW, row.getHeight()).reduced(4, 2);
-        lfoResLabel.setBounds(area.removeFromLeft(52).reduced(0, 1));
-        int bw = area.getWidth() / 4;
-        for (int i = 0; i < 4; ++i)
-            lfoResBtn[i].setBounds(area.removeFromLeft(bw).reduced(2, 1));
-    }
-    b.removeFromTop(6);
-
-    // ===== フィルター行 =====
-    // CutoffとResを同じ幅(155px)に揃える
+    // ===== フィルター行（右パネルコントロールと同じY帯から開始）=====
     const int sliderW = 155;
-
     for (auto* g : { &groupA, &groupB, &groupC, &groupD })
     {
         auto r = b.removeFromTop(28).reduced(5, 2);
@@ -306,19 +296,15 @@ void QuadMorphFilterAudioProcessorEditor::resized()
         g->type.setBounds(r.removeFromLeft(60).reduced(2, 2));
         g->slope.setBounds(r.removeFromLeft(85).reduced(2, 2));
 
-        // Cutoff スライダー: sliderW固定
         auto cutArea = r.removeFromLeft(sliderW).reduced(2, 0);
         g->cutoffLabel.setBounds(cutArea.removeFromLeft(28));
         g->cutoff.setBounds(cutArea);
 
-        r.removeFromLeft(6); // 間隔
+        r.removeFromLeft(6);
 
-        // Res スライダー: sliderW固定
         auto resArea = r.removeFromLeft(sliderW).reduced(2, 0);
         g->resLabel.setBounds(resArea.removeFromLeft(28));
         g->res.setBounds(resArea);
-
-        // 残りは空白
     }
     b.removeFromTop(6);
 
