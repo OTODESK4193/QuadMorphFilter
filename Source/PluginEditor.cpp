@@ -1,8 +1,12 @@
 ﻿// ==========================================
 // PluginEditor.cpp
 // ==========================================
+// ===== 既存コード =====
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+
+// ===== 【新規追加】=====
+#include "DSP/ModelCapabilities.h"
 
 QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
     QuadMorphFilterAudioProcessor& p)
@@ -106,6 +110,65 @@ void QuadMorphFilterAudioProcessorEditor::paint(juce::Graphics& g)
     g.fillAll(juce::Colour(0xffF0F4F8));
 }
 
+void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
+    FilterGroup& g, const juce::String& suffix, int modelIdx)
+{
+    auto [maxSlope, hasLP, hasBP, hasHP, hasNotch] = getModelCaps(modelIdx);
+
+    // ===== スロープ: 有効なオプションのみ選択可能 =====
+    // JUCE ComboBox の setItemEnabled は 1-indexed
+    for (int i = 1; i <= 4; ++i)
+        g.slope.setItemEnabled(i, (i - 1) <= maxSlope);
+
+    // 現在値が無効なら有効な最大値に補正
+    int curSlope = g.slope.getSelectedId(); // 1-indexed
+    if (curSlope - 1 > maxSlope)
+    {
+        g.slope.setSelectedId(maxSlope + 1, juce::sendNotification);
+        // APVTS にも反映
+        if (auto* p = audioProcessor.apvts.getParameter("slope" + suffix))
+            p->setValueNotifyingHost(
+                p->convertTo0to1((float)maxSlope));
+    }
+
+    // ===== タイプ: 有効なオプションのみ =====
+    g.type.setItemEnabled(1, hasLP);
+    g.type.setItemEnabled(2, hasBP);
+    g.type.setItemEnabled(3, hasHP);
+    g.type.setItemEnabled(4, hasNotch);
+
+    // 現在値が無効なら LP(1) に戻す
+    int curType = g.type.getSelectedId();
+    bool typeOk = (curType == 1 && hasLP)
+        || (curType == 2 && hasBP)
+        || (curType == 3 && hasHP)
+        || (curType == 4 && hasNotch);
+
+    if (!typeOk)
+    {
+        // 最初の有効なタイプを選ぶ
+        int fallback = hasLP ? 1 : hasBP ? 2 : hasHP ? 3 : 4;
+        g.type.setSelectedId(fallback, juce::sendNotification);
+        if (auto* p = audioProcessor.apvts.getParameter("type" + suffix))
+            p->setValueNotifyingHost(
+                p->convertTo0to1((float)(fallback - 1)));
+    }
+
+    // ===== ラベル変更: モデル固有のコントロール名を表示 =====
+    // Bitcrush だけ別の意味を持つ
+    if (modelIdx == 4) // Bitcrush / SRR
+    {
+        g.cutoffLabel.setText("SRR", juce::dontSendNotification);
+        g.resLabel.setText("Bits", juce::dontSendNotification);
+    }
+    else
+    {
+        g.cutoffLabel.setText("Cut", juce::dontSendNotification);
+        g.resLabel.setText("Res", juce::dontSendNotification);
+    }
+}
+
+
 void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g,
     juce::String s,
     juce::String name)
@@ -154,6 +217,20 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g,
         };
     setup(g.cutoffLabel, g.cutoff, "Cut", "cutoff", g.cAtt);
     setup(g.resLabel, g.res, "Res", "res", g.rAtt);
+
+    // ===== 【新規追加】モデル変更リスナー =====
+   // モデルが変わったらスロープ・タイプを更新
+    g.model.onChange = [this, &g, s]()
+        {
+            int modelIdx = g.model.getSelectedId() - 1; // 1-indexed → 0-indexed
+            refreshFilterGroupControls(g, s, modelIdx);
+        };
+
+    // 初期状態を設定（現在のモデル値で更新）
+    int initialModel = (int)audioProcessor.apvts.getRawParameterValue("model" + s)->load();
+    refreshFilterGroupControls(g, s, initialModel);
+
+
 }
 
 void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, juce::String name)

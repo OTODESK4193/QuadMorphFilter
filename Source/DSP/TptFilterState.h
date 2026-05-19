@@ -120,14 +120,22 @@ struct TptFilterState
     float aa_s1[4][2] = {};
     float aa_s2[4][2] = {};
 
-    // ===== Reverb FDN =====
+    // ===== 【既存コード: FDN Reverb ここから】=====
     float fdnBuffer[4][2][16384] = {};
-    int   fdnWriteIdx[4][2] = {};
+    int   fdnWriteIdx[4][2] = {};      // ← ここは触らない
     float fdn_ap_state[4][2] = {};
     float fdnDelayTimes[4] = { 1.0f, 1.313f, 1.637f, 1.911f };
+    // ===== 【既存コード: FDN Reverb ここまで】=====
 
-    // ===== AGC =====
+    // ===== 【新規追加】TB-303 Diode Ladder 専用 =====
+    // ↑ fdnDelayTimes の直後、AGC の直前に挿入する
+    float diode_g = 0.0f;   // ZDF係数 tan(pi*fc/fs)
+    float diode_h = 0.0f;   // 8Hz HPF係数（固定）
+    float diodeHpfS[2] = {};   // 8Hz HPF 状態変数
+
+    // ===== 【既存コード: AGC ここから】=====
     float rmsIn[2] = {};
     float rmsOut[2] = {};
     float agcGain[2] = { 1.0f, 1.0f };
+    // ===== 【既存コード: AGC ここまで】=====
 };

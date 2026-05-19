@@ -70,8 +70,13 @@ private:
     juce::TextButton lfoResBtn[4];
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> lfoResAtt[4];
 
+    // ===== 既存コード: private セクション末尾 =====
     void setupFilterGroup(FilterGroup& g, juce::String s, juce::String name);
     void setupLfoGroup(LfoGroup& g, int index, juce::String name);
+
+    // ===== 【新規追加】=====
+    // モデル変更時にスロープ・タイプを更新
+    void refreshFilterGroupControls(FilterGroup& g, const juce::String& suffix, int modelIdx);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(QuadMorphFilterAudioProcessorEditor)
 };

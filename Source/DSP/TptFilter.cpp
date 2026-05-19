@@ -5,6 +5,8 @@
 #include "TptFilter.h"
 #include <cmath>
 #include <algorithm>
+// TptFilter.cpp の先頭（他の #include の後）に一時的に追加して確認
+#include <xsimd/xsimd.hpp>
 
 // ==========================================
 // Constructor
@@ -95,10 +97,17 @@ void TptFilter::reset()
         for (int h = 0; h < 4; ++h) {
             state.hilbertStateA[h][ch] = 0.0f; state.hilbertStateB[h][ch] = 0.0f;
         }
+        // ===== 既存コード: Per-channel リセットの末尾付近 =====
         for (int a = 0; a < 4; ++a) {
-            state.aa_s1[a][ch] = 0.0f; state.aa_s2[a][ch] = 0.0f;
+            state.aa_s1[a][ch] = 0.0f;
+            state.aa_s2[a][ch] = 0.0f;
         }
-    }
+
+        // ===== 【新規追加】TB-303 HPF 状態リセット =====
+        state.diodeHpfS[ch] = 0.0f;
+
+        // ===== 既存コード（続き）=====
+    }  // for (int ch...)    }
 
     lastCutoff = -1.0f; lastRes = -1.0f;
     state.smoothedDigitalCutoff = cutoff.getCurrentValue();
@@ -238,13 +247,18 @@ void TptFilter::updateCoefficients()
 
     const int m = state.filterModel;
 
-    // ===== カテゴリ別係数更新 =====
+    // ===== 既存コード =====
     if (m == 5 || m == 22)
         TptFilter_AnalogEmulation::updateCoeffs(state);
     else if (m >= 17 && m <= 20)
         TptFilter_DigitalPrecision::updateCoeffs(state);
     else if (m == 11 || m == 25)
         TptFilter_Spectral::updateCoeffs(state);
+
+    // ===== 【新規追加】TB-303 の係数更新 =====
+    else if (m == 2)
+        TptFilter_Ladder::updateCoeffs(state);
+
     else
     {
         // 共通 g / ladderG / R / h / ladderRes の計算

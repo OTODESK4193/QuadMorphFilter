@@ -1,5 +1,20 @@
+# ===== 既存コード（冒頭付近）=====
 cmake_minimum_required(VERSION 3.22)
 project(QuadMorphFilter VERSION 1.0.0)
+
+# ===== 【新規追加】ここに挿入 =====
+include(FetchContent)
+
+FetchContent_Declare(
+    xsimd
+    GIT_REPOSITORY https://github.com/xtensor-stack/xsimd.git
+    GIT_TAG        13.0.0   # 2024年時点の最新安定版
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(xsimd)
+
+# ===== 既存コード（続き）=====
+# find_package(JUCE ...) 等
 
 # VST3の互換エラーと過去キャッシュの干渉を徹底排除
 set(JUCE_VST3_AUTO_MANIFEST OFF)
@@ -68,13 +83,16 @@ target_sources(QuadMorphFilter
         Source/UI/FilterVisualizer.h
         Source/UI/XYPadComponent.cpp
         Source/UI/XYPadComponent.h
- "Source/DSP/FilterA_SVF_SIMD.h" "Source/DSP/FilterA_SVF_SIMD.cpp" "Source/DSP/TptFilterState.h" "Source/DSP/TptFilter/SVF/TptFilter_SVF.h" "Source/DSP/TptFilter/SVF/TptFilter_SVF.cpp" "Source/DSP/TptFilter/Ladder/TptFilter_Ladder.h" "Source/DSP/TptFilter/Ladder/TptFilter_Ladder.cpp" "Source/DSP/TptFilter/AnalogEmulation/TptFilter_AnalogEmulation.h" "Source/DSP/TptFilter/AnalogEmulation/TptFilter_AnalogEmulation.cpp" "Source/DSP/TptFilter/DigitalPrecision/TptFilter_DigitalPrecision.h" "Source/DSP/TptFilter/DigitalPrecision/TptFilter_DigitalPrecision.cpp" "Source/DSP/TptFilter/Spectral/TptFilter_Spectral.h" "Source/DSP/TptFilter/Spectral/TptFilter_Spectral.cpp" "Source/DSP/TptFilter/Experimental/TptFilter_Experimental.h" "Source/DSP/TptFilter/Experimental/TptFilter_Experimental.cpp")
+ "Source/DSP/FilterA_SVF_SIMD.h" "Source/DSP/FilterA_SVF_SIMD.cpp" "Source/DSP/TptFilterState.h" "Source/DSP/TptFilter/SVF/TptFilter_SVF.h" "Source/DSP/TptFilter/SVF/TptFilter_SVF.cpp" "Source/DSP/TptFilter/Ladder/TptFilter_Ladder.h" "Source/DSP/TptFilter/Ladder/TptFilter_Ladder.cpp" "Source/DSP/TptFilter/AnalogEmulation/TptFilter_AnalogEmulation.h" "Source/DSP/TptFilter/AnalogEmulation/TptFilter_AnalogEmulation.cpp" "Source/DSP/TptFilter/DigitalPrecision/TptFilter_DigitalPrecision.h" "Source/DSP/TptFilter/DigitalPrecision/TptFilter_DigitalPrecision.cpp" "Source/DSP/TptFilter/Spectral/TptFilter_Spectral.h" "Source/DSP/TptFilter/Spectral/TptFilter_Spectral.cpp" "Source/DSP/TptFilter/Experimental/TptFilter_Experimental.h" "Source/DSP/TptFilter/Experimental/TptFilter_Experimental.cpp" "Source/DSP/ModelCapabilities.h")
 
 # 6. 使用するJUCEモジュールのリンク（問題のTARGETを削除しました）
-target_link_libraries(QuadMorphFilter PRIVATE
+target_link_libraries(QuadMorphFilter
+PRIVATE
     juce::juce_audio_utils
     juce::juce_audio_processors
     juce::juce_dsp
     juce::juce_gui_basics
     juce::juce_gui_extra
+    # ===== 【追加】xsimd を追加 =====
+        xsimd
 )
