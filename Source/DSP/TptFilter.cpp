@@ -584,21 +584,23 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
     // ===== 【置き換え後】=====
     else {
         if (m == 2) {
-            // TB-303: k = 0~4
-            float k = juce::jmap(res, 0.1f, 10.0f, 0.0f, 4.0f);
+            // TB-303: k スケールを実装と合わせて 4.2 に
+            float k = juce::jmap(res, 0.1f, 10.0f, 0.0f, 4.2f);
             if (state.slopeIdx == 0) {
-                // 12dB: 2次 LP
-                float Q_eff = juce::jlimit(0.5f, 40.0f, 0.5f + k * 3.0f);
-                float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w / Q_eff, 2.0f));
+                // 12dB: 線形Q（Moogより緩やか）
+                float Q_eff = juce::jlimit(0.5f, 40.0f, 0.5f + k * 2.0f);
+                float den = std::sqrt(std::pow(1.0f - w2, 2.0f)
+                    + std::pow(w / Q_eff, 2.0f));
                 mag = 1.0f / den;
+                return mag * (1.0f + k * 0.15f);
             }
             else {
-                // 24dB: 4次 Diode LP
+                // 24dB: Diode Ladder 3.5 係数
                 float real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + k;
                 float imag_p = 3.5f * w * (1.0f - w2);
                 mag = 1.0f / std::sqrt(real_p * real_p + imag_p * imag_p);
+                return mag * (1.0f + k * 0.25f);
             }
-            return mag * (1.0f + k * 0.25f);
         }
 
         // Moog 系 (1,12,13,15)
@@ -606,17 +608,20 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         float r_val = juce::jmap(res, 0.1f, 10.0f, 0.0f, r_scale) * state.scalerMoog;
 
         if (state.slopeIdx == 0) {
-            // 12dB: 2次 LP 応答
-            float Q_eff = juce::jlimit(0.5f, 50.0f, 0.5f + r_val * 4.0f);
-            float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w / Q_eff, 2.0f));
+            // 12dB: Q が2乗的に増大 → 発振前に急峻なピーク
+            float Q_eff = juce::jlimit(0.5f, 200.0f,
+                0.5f + r_val * r_val * 3.5f);
+            float den = std::sqrt(std::pow(1.0f - w2, 2.0f)
+                + std::pow(w / Q_eff, 2.0f));
             mag = 1.0f / den;
             if (state.filterType == 1) mag *= w;
             else if (state.filterType == 2) mag *= w2;
             else if (state.filterType == 3) mag *= std::abs(1.0f - w2);
-            return mag * (1.0f + 0.25f * r_val);
+            float peak = (r_val > 2.5f) ? (1.0f + (r_val - 2.5f) * 1.5f) : 1.0f;
+            return mag * peak;
         }
         else {
-            // 24dB+: 4次 Moog LP 応答
+            // 24dB+: 変更なし
             int cascade = (state.slopeIdx == 1) ? 1 : (state.slopeIdx == 2) ? 2 : 4;
             float r_sc = r_val * std::pow(0.7f, std::log2((float)cascade));
             float real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + r_sc;
@@ -628,5 +633,4 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
             return mag * (1.0f + 0.5f * r_sc);
         }
         }
-
 } // getMagnitudeForFrequency の閉じ括弧

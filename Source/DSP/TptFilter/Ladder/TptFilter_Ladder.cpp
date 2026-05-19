@@ -68,10 +68,10 @@ namespace TptFilter_Ladder
         float& s3 = st.zdfState[0][ch][2];
         float& s4 = st.zdfState[0][ch][3];
 
-        // 【修正】k を 0~4 に直接マップ
-        // 4段 ZDF LP の自己発振条件: k * |H(jωc)| ≈ 1
-        // fc = Nyquist/4 のとき |H| ≈ 1/4 → k=4 で発振
-        float k = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 4.0f);
+        // ===== 【置き換え】=====
+            // k=4.0 は理論閾値（4段×各1/√2 = 1/4）だが
+            // 数値精度と8Hz HPFの損失で届かない → 4.2 に上げる
+        float k = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 4.2f);
 
         // 8Hz HPF フィードバック（Stinchcombe: アシッドうねりの本質）
         float fb = tpt1HPF(k * s4, st.diodeHpfS[ch], st.diode_h);
