@@ -579,31 +579,54 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w * d, 2.0f));
         return std::pow(1.0f / den, 4.0f);
     }
+
+
+    // ===== 【置き換え後】=====
     else {
-        // Ladder 系の mag 計算 (Model 1,2,12,13,15)
-        float r_scale = (m == 13) ? 5.0f : (m == 2) ? 15.0f : 4.0f;
-        float r_val = juce::jmap(res, 0.1f, 10.0f, 0.0f, r_scale)
-            * ((m == 2) ? state.scalerDiode : state.scalerMoog);
-        float real_p = std::pow(1.0f - w2, 2.0f) - ((m == 2) ? 3.5f : 4.0f) * w2 + r_val;
-        float imag_p = ((m == 2) ? 3.5f : 4.0f) * w * (1.0f - w2);
-        mag = 1.0f / std::sqrt(real_p * real_p + imag_p * imag_p);
+        if (m == 2) {
+            // TB-303: k = 0~4
+            float k = juce::jmap(res, 0.1f, 10.0f, 0.0f, 4.0f);
+            if (state.slopeIdx == 0) {
+                // 12dB: 2次 LP
+                float Q_eff = juce::jlimit(0.5f, 40.0f, 0.5f + k * 3.0f);
+                float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w / Q_eff, 2.0f));
+                mag = 1.0f / den;
+            }
+            else {
+                // 24dB: 4次 Diode LP
+                float real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + k;
+                float imag_p = 3.5f * w * (1.0f - w2);
+                mag = 1.0f / std::sqrt(real_p * real_p + imag_p * imag_p);
+            }
+            return mag * (1.0f + k * 0.25f);
+        }
+
+        // Moog 系 (1,12,13,15)
+        float r_scale = (m == 13) ? 5.0f : 4.0f;
+        float r_val = juce::jmap(res, 0.1f, 10.0f, 0.0f, r_scale) * state.scalerMoog;
+
         if (state.slopeIdx == 0) {
+            // 12dB: 2次 LP 応答
+            float Q_eff = juce::jlimit(0.5f, 50.0f, 0.5f + r_val * 4.0f);
+            float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w / Q_eff, 2.0f));
+            mag = 1.0f / den;
             if (state.filterType == 1) mag *= w;
             else if (state.filterType == 2) mag *= w2;
             else if (state.filterType == 3) mag *= std::abs(1.0f - w2);
+            return mag * (1.0f + 0.25f * r_val);
         }
         else {
-            if (m == 1 || m == 12 || m == 13 || m == 15) {
-                if (state.filterType == 1) mag *= w2;
-                else if (state.filterType == 2) mag *= w2 * w2;
-                else if (state.filterType == 3) mag *= std::abs(1.0f - w2 * w2);
-            }
-            else {
-                if (state.filterType == 1) mag *= w2 * w;
-                else if (state.filterType == 2) mag *= w2 * w2;
-                else if (state.filterType == 3) mag *= std::abs(1.0f - w2 * w);
-            }
+            // 24dB+: 4次 Moog LP 応答
+            int cascade = (state.slopeIdx == 1) ? 1 : (state.slopeIdx == 2) ? 2 : 4;
+            float r_sc = r_val * std::pow(0.7f, std::log2((float)cascade));
+            float real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + r_sc;
+            float imag_p = 4.0f * w * (1.0f - w2);
+            mag = std::pow(1.0f / std::sqrt(real_p * real_p + imag_p * imag_p), cascade);
+            if (state.filterType == 1) mag *= w2;
+            else if (state.filterType == 2) mag *= w2 * w2;
+            else if (state.filterType == 3) mag *= std::abs(1.0f - w2 * w2);
+            return mag * (1.0f + 0.5f * r_sc);
         }
-        return std::pow(mag, state.currentStages);
-    }
+        }
+
 } // getMagnitudeForFrequency の閉じ括弧

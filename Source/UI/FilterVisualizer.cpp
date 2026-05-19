@@ -199,39 +199,60 @@ void FilterVisualizer::paint(juce::Graphics& g)
                     if (modelIdx == 9)
                         mag *= juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 1.0f, 5.0f);
                 }
-                else if (modelIdx == 1 || modelIdx == 12 || modelIdx == 13 || modelIdx == 15)
-                {
-                    int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 1 : (slopeIdx == 2) ? 2 : 4;
+
+                // ===== 【置き換え後】=====
+                else if (modelIdx == 1 || modelIdx == 12 || modelIdx == 13 || modelIdx == 15) {
                     float r_scale = (modelIdx == 13) ? 5.0f : 4.0f;
                     float r_moog = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, r_scale);
-                    if (stages > 1) r_moog *= std::pow(0.7f, std::log2((float)stages));
-                    float real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + r_moog;
-                    float imag_p = 4.0f * w_norm * (1.0f - w2);
-                    mag = std::pow(1.0f / std::sqrt(real_p * real_p + imag_p * imag_p), stages);
+
                     if (slopeIdx == 0) {
-                        if (t == 1) mag *= w_norm; else if (t == 2) mag *= w2; else if (t == 3) mag *= std::abs(1.0f - w2);
+                        // 12dB: y2 タップ = 2次 LP 応答
+                        float Q_eff = juce::jlimit(0.5f, 50.0f, 0.5f + r_moog * (r_scale > 4.0f ? 6.0f : 4.0f));
+                        float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w_norm / Q_eff, 2.0f));
+                        mag = 1.0f / den;
+                        if (t == 1) mag *= w_norm;
+                        else if (t == 2) mag *= w2;
+                        else if (t == 3) mag *= std::abs(1.0f - w2);
+                        mag *= (1.0f + 0.25f * r_moog);
                     }
                     else {
-                        if (t == 1) mag *= w2; else if (t == 2) mag *= w2 * w2; else if (t == 3) mag *= std::abs(1.0f - w2 * w2);
+                        // 24dB+: y4 タップ = 4次 LP 応答（カスケード）
+                        int cascade = (slopeIdx == 1) ? 1 : (slopeIdx == 2) ? 2 : 4;
+                        float r_sc = r_moog * std::pow(0.7f, std::log2((float)cascade));
+                        float real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + r_sc;
+                        float imag_p = 4.0f * w_norm * (1.0f - w2);
+                        mag = std::pow(1.0f / std::sqrt(real_p * real_p + imag_p * imag_p), cascade);
+                        if (t == 1) mag *= w2;
+                        else if (t == 2) mag *= w2 * w2;
+                        else if (t == 3) mag *= std::abs(1.0f - w2 * w2);
+                        mag *= (1.0f + 0.5f * r_sc);
                     }
-                    mag *= (1.0f + 0.5f * r_moog);
                 }
-                else if (modelIdx == 2)
-                {
-                    int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 1 : (slopeIdx == 2) ? 2 : 4;
-                    float r_diode = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 15.0f);
-                    if (stages > 1) r_diode *= std::pow(0.7f, std::log2((float)stages));
-                    float real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + r_diode;
-                    float imag_p = 3.5f * w_norm * (1.0f - w2);
-                    mag = std::pow(1.0f / std::sqrt(real_p * real_p + imag_p * imag_p), stages);
+
+                // ===== 【新しいコード】=====
+                else if (modelIdx == 2) {
+                    // TB-303 Diode Ladder
+                    // resonance: k = 0~4 (self-oscillation at k≈4)
+                    float k = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 4.0f);
+
                     if (slopeIdx == 0) {
-                        if (t == 1) mag *= w_norm; else if (t == 2) mag *= w2; else if (t == 3) mag *= std::abs(1.0f - w2);
+                        // 12dB: y2 タップ = 2次 LP 応答
+                        float Q_eff = juce::jlimit(0.5f, 40.0f, 0.5f + k * 3.0f);
+                        float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w_norm / Q_eff, 2.0f));
+                        mag = 1.0f / den;
                     }
                     else {
-                        if (t == 1) mag *= w2 * w_norm; else if (t == 2) mag *= w2 * w2; else if (t == 3) mag *= std::abs(1.0f - w2 * w_norm);
+                        // 24dB: y4 タップ = TB-303 本来の出力
+                        // Diode Ladder は 3.5 係数（Stinchcombe: 強結合の影響）
+                        float real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + k;
+                        float imag_p = 3.5f * w_norm * (1.0f - w2);
+                        mag = 1.0f / std::sqrt(real_p * real_p + imag_p * imag_p);
                     }
-                    mag *= (1.0f + 0.2f * r_diode);
+
+                    // TB-303 は LP のみ有効（typeは常に LP）
+                    mag *= (1.0f + k * 0.25f);
                 }
+
                 else if (modelIdx == 5)
                 {
                     float v = juce::jmap(std::log10(freqLimit), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f);

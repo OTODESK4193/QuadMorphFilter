@@ -1,11 +1,5 @@
 // ==========================================
 // TptFilter/Ladder/TptFilter_Ladder.cpp
-//
-// Model 2: TB-303 Diode Ladder
-//   Wurtz (Karrikuh) + Stinchcombe 実装
-//   8Hz HPF フィードバック + ハードクリッパー
-//
-// Model 1,12,13,15: Moog Ladder 系
 // ==========================================
 #include "TptFilter_Ladder.h"
 #include <cmath>
@@ -16,15 +10,10 @@ namespace TptFilter_Ladder
 
     // ==========================================
     // TPT 1次ハイパスフィルター
-    // Stinchcombe: 結合キャパシタの極低域特性を模倣
-    // fc ≈ 8Hz（固定）→ これがアシッドうねりの物理的根拠
+    // Stinchcombe: 8Hz ACカップリング特性
     // ==========================================
     static inline float tpt1HPF(float x, float& s, float g)
     {
-        // v = (x - s) * g / (1 + g)  ← ZDF積分器
-        // lp = v + s_prev
-        // hp = x - lp
-        // s_new = s_prev + 2*v       ← 台形積分の状態更新
         float v = (x - s) * g / (1.0f + g);
         float lp = v + s;
         float hp = x - lp;
@@ -34,8 +23,7 @@ namespace TptFilter_Ladder
 
     // ==========================================
     // ハードクリッパー
-    // Wurtz: ソフトクリッパーではチューニングがドリフトする
-    // ハードクリッパーなら発振時でも V/Oct が安定
+    // Wurtz: ソフトクリッパーだとチューニングがドリフトする
     // ==========================================
     static inline float hardClip(float x, float threshold = 1.0f)
     {
@@ -52,69 +40,46 @@ namespace TptFilter_Ladder
         const float fc = st.smoothedDigitalCutoff;
         const float fs = (float)st.sampleRate;
 
-        // ZDF係数: g = tan(π * fc / fs)
         float safeFc = std::clamp(fc, 20.0f, fs * 0.45f);
         st.diode_g = std::tan(juce::MathConstants<float>::pi * safeFc / fs);
 
-        // 8Hz HPF係数（固定）
-        // TB-303の結合キャパシタによる自然発生的な極低域HPF
+        // 8Hz HPF（固定）: Stinchcombe の ACカップリング
         const float hpfFc = 8.0f;
         st.diode_h = std::tan(juce::MathConstants<float>::pi * hpfFc / fs);
     }
 
     // ==========================================
-    // TB-303 Diode Ladder メイン処理
+    // TB-303 Diode Ladder
     //
-    // 設計方針（Wurtz/Stinchcombe準拠）:
-    //   1. 4段ZDF LPF（直列、1段ずつ順次計算）
-    //   2. 入力はハードクリッパーで制限
-    //   3. フィードバックは 8Hz HPF を通す
-    //      → これがTB-303アシッドうねりの本質
+    // 【修正済み】resonance スケール
+    //   Before: k = jmap(0.1~10, 0~17) × 0.25 = 実効 0~4.25
+    //           → res=2.35 で発振閾値（k_eff≈1.0）を超えてしまう
+    //   After:  k = jmap(0.1~10, 0~4.0) を直接使用
+    //           → 自己発振は res≈9〜10 付近で発生
     //
-    // Moog Ladderとの主な違い:
-    //   - フィードバックパスに HPF が入っている
-    //   - レゾナンスをより高くできる（~17倍）
-    //   - ハードクリッパーによる安定した発振
+    // 4段 ZDF LP + 8Hz HPF フィードバック
     // ==========================================
     static float processDiodeLadder(int ch, float x, TptFilterState& st)
     {
         const float g = st.diode_g;
-        const float res = st.currentResVal;
 
-        // 状態変数への参照（直接更新される）
         float& s1 = st.zdfState[0][ch][0];
         float& s2 = st.zdfState[0][ch][1];
         float& s3 = st.zdfState[0][ch][2];
         float& s4 = st.zdfState[0][ch][3];
 
-        // レゾナンス係数
-        // TB-303は Moog より高いフィードバック量が必要
-        // 0.0〜17.0 の範囲（≈ 0.9 付近で自己発振）
-        float k = juce::jmap(res, 0.1f, 10.0f, 0.0f, 17.0f);
+        // 【修正】k を 0~4 に直接マップ
+        // 4段 ZDF LP の自己発振条件: k * |H(jωc)| ≈ 1
+        // fc = Nyquist/4 のとき |H| ≈ 1/4 → k=4 で発振
+        float k = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 4.0f);
 
-        // ===== Step 1: 8Hz HPF フィードバック =====
-        // Stinchcombe の最大の発見:
-        //   TB-303 は ACカップリングにより 8Hz HPF が
-        //   フィードバックパス内部に存在する
-        //   → これがアシッドスクエルチの物理的根拠
-        //   → 人為的な非対称 tanh ではなく自然発生する非対称性
-        float fb = tpt1HPF(k * 0.25f * s4, st.diodeHpfS[ch], st.diode_h);
+        // 8Hz HPF フィードバック（Stinchcombe: アシッドうねりの本質）
+        float fb = tpt1HPF(k * s4, st.diodeHpfS[ch], st.diode_h);
 
-        // ===== Step 2: ハードクリッパー =====
-        // Wurtz の重要なポイント:
-        //   ソフトクリッパー（x / (1 + |x|) 等）は
-        //   継続的なゲイン低下でチューニングをドリフトさせる
-        //   ハードクリッパーなら発振時でも安定
+        // ハードクリッパー（Wurtz: チューニング安定性のため必須）
         float x_in = hardClip(x - fb, 1.0f);
 
-        // ===== Step 3: 4段 ZDF LP フィルター =====
-        // 各段: v = (x - s) * g / (1+g), y = v + s, s += 2*v
-        // Diode Ladder と Moog の違い:
-        //   Moog  → 各段が抵抗でバッファリングされ独立
-        //   Diode → 各段が直結で相互にインピーダンス負荷
-        //           → 実効的に g が段を経るごとに変化
-        // ここでは実用的な近似として標準ZDFを使用し
-        // 8Hz HPFフィードバックでTB-303の音色特性を再現する
+        // 4段 ZDF LP
         float inv1pg = 1.0f / (1.0f + g);
 
         float v1 = (x_in - s1) * g * inv1pg;
@@ -133,20 +98,18 @@ namespace TptFilter_Ladder
         float y4 = v4 + s4;
         s4 += 2.0f * v4;
 
-        // ===== Step 4: 出力選択 =====
-        // TB-303 は LP のみが有効（UIでも制限）
-        // 互換性のため BP/HP も出力可能にしておく
+        // 出力選択: slopeIdx で 12dB(y2) vs 24dB(y4) を切り替え
         float out = 0.0f;
-        if (st.filterType == 0) out = y4;           // LP
-        else if (st.filterType == 1) out = y2 - y4;      // BP
-        else if (st.filterType == 2) out = x_in - y2;    // HP
-        else                          out = y4 + x_in - y2; // Notch
+        if (st.slopeIdx == 0)
+            out = y2; // 12dB: 2段目タップ
+        else
+            out = y4; // 24dB: 4段目タップ（TB-303 本来の出力）
 
         return out;
     }
 
     // ==========================================
-    // processSample（全Ladderモデルのディスパッチ）
+    // processSample
     // ==========================================
     float processSample(int channel, float x, TptFilterState& st)
     {
@@ -208,13 +171,16 @@ namespace TptFilter_Ladder
                 if (m == 15) y4 = std::tanh(y4);
                 st.zdfState[stage][ch][3] = s4_ + 2.0f * v4;
 
+                // slopeIdx で出力タップを切り替え
                 if (st.slopeIdx == 0) {
+                    // 12dB: y2 タップ
                     if (st.filterType == 0) out = y2;
                     else if (st.filterType == 1) out = 2.0f * (y1 - y2);
                     else if (st.filterType == 2) out = out - 2.0f * y1 + y2;
                     else                         out = y2 + (out - 2.0f * y1 + y2);
                 }
                 else {
+                    // 24dB+: y4 タップ
                     if (st.filterType == 0) out = y4;
                     else if (st.filterType == 1) out = 4.0f * (y2 - y4);
                     else if (st.filterType == 2) out = out - 4.0f * y1 + 6.0f * y2 - 4.0f * y3 + y4;
