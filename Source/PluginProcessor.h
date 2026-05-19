@@ -4,7 +4,7 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "DSP/TptFilter.h"
-#include "DSP/FilterA_SVF.h"          // ← 残しておく（後で削除可能）
+
 #include "DSP/FilterA_SVF_SIMD.h"     // ← 追加
 #include "DSP/LfoEngine.h"
 #include "DSP/MorphEngine.h"
