@@ -584,39 +584,39 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
     }
 
 
-    // ===== 既存コード の else ブロック全体を以下に置き換え =====
+    // ===== 【置き換え後】=====
     else {
+        // 8Hz HPF補正（TB-303用）
+        auto hpfCorr = [](float f) -> float {
+            return (f / 8.0f) / std::sqrt(1.0f + std::pow(f / 8.0f, 2.0f));
+            };
+
         if (m == 2) {
-            // TB-303: 実装と同じ k スケール
-            float k = juce::jmap(res, 0.1f, 10.0f, 0.0f, 4.5f);
+            // TB-303: DSP と同じ k スケール
+            float k = juce::jmap(res, 0.1f, 10.0f, 0.0f, 4.0f);
+
             if (state.slopeIdx == 0) {
-                // 12dB: 線形Q
-                float Q_eff = juce::jlimit(0.5f, 8.0f, 0.5f + k * 1.5f);
+                float Q_eff = juce::jlimit(0.5f, 12.0f, 0.5f + k * 1.8f);
                 float den = std::sqrt(std::pow(1.0f - w2, 2.0f)
                     + std::pow(w / Q_eff, 2.0f));
-                return (1.0f / den) * (1.0f + k * 0.12f);
+                return std::min((1.0f / den) * hpfCorr(frequency) * (1.0f + k * 0.12f),
+                    1000.0f);
             }
             else {
-                // 24dB: Diode 3.5 係数 + 18dB/oct ブレンド
-                float real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + k;
-                float imag_p = 3.5f * w * (1.0f - w2);
-                float mag4 = 1.0f / std::sqrt(real_p * real_p + imag_p * imag_p);
-                float den3 = std::pow(1.0f + w2 * w2 * w * 2.0f, 0.75f);
-                float mag3 = 1.0f / den3;
-                float blend = juce::jlimit(0.0f, 1.0f, k / 3.0f);
-                float mag_out = mag3 * (1.0f - blend * 0.4f) + mag4 * blend * 0.4f
-                    + mag4 * (1.0f - blend) * 0.6f;
-                return mag_out * (1.0f + k * 0.2f);
+                float real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + k;
+                float imag_p = 4.0f * w * (1.0f - w2);
+                float denom = std::max(std::sqrt(real_p * real_p + imag_p * imag_p),
+                    0.005f);
+                return std::min((1.0f / denom) * hpfCorr(frequency) * (1.0f + k * 0.15f),
+                    1000.0f);
             }
         }
 
         // Moog 系 (1,12,13,15)
         float r_scale = (m == 13) ? 5.0f : 4.0f;
-        float r_val = juce::jmap(res, 0.1f, 10.0f, 0.0f, r_scale)
-            * state.scalerMoog;
+        float r_val = juce::jmap(res, 0.1f, 10.0f, 0.0f, r_scale) * state.scalerMoog;
 
         if (state.slopeIdx == 0) {
-            // 12dB: 線形Q（エッジ跳ね上がり修正済み）
             float Q_eff = juce::jlimit(0.5f, 15.0f, 0.5f + r_val * 2.5f);
             float den = std::sqrt(std::pow(1.0f - w2, 2.0f)
                 + std::pow(w / Q_eff, 2.0f));
@@ -625,20 +625,21 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
             else if (state.filterType == 2) mag *= w2;
             else if (state.filterType == 3) mag *= std::abs(1.0f - w2);
             float peak = (r_val > 2.0f) ? (1.0f + (r_val - 2.0f) * 0.8f) : 1.0f;
-            return mag * peak;
+            return std::min(mag * peak, 1000.0f);
         }
         else {
-            // 24dB+: カスケード応答
             int cascade = (state.slopeIdx == 1) ? 1 : (state.slopeIdx == 2) ? 2 : 4;
             float r_sc = r_val * std::pow(0.7f, std::log2((float)cascade));
             float real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + r_sc;
             float imag_p = 4.0f * w * (1.0f - w2);
-            mag = std::pow(1.0f / std::sqrt(real_p * real_p + imag_p * imag_p),
-                cascade);
+            // 【修正】分母をclampして跳ね上がり防止
+            float denom = std::max(std::sqrt(real_p * real_p + imag_p * imag_p),
+                0.005f);
+            mag = std::pow(1.0f / denom, cascade);
             if (state.filterType == 1) mag *= w2;
             else if (state.filterType == 2) mag *= w2 * w2;
             else if (state.filterType == 3) mag *= std::abs(1.0f - w2 * w2);
-            return mag * (1.0f + 0.5f * r_sc);
+            return std::min(mag * (1.0f + 0.5f * r_sc), 1000.0f);
         }
         }
 
