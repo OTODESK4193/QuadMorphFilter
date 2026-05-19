@@ -200,64 +200,87 @@ void FilterVisualizer::paint(juce::Graphics& g)
                         mag *= juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 1.0f, 5.0f);
                 }
 
-                // ===== 【置き換え】slopeIdx==0 のブロックのみ差し替え =====
+                // ===== 【置き換え後】=====
                 else if (modelIdx == 1 || modelIdx == 12 || modelIdx == 13 || modelIdx == 15) {
                     float r_scale = (modelIdx == 13) ? 5.0f : 4.0f;
-                    float r_moog = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, r_scale);
+                    float r_moog = juce::jmap(juce::jlimit(0.1f, 10.0f, res),
+                        0.1f, 10.0f, 0.0f, r_scale);
 
                     if (slopeIdx == 0) {
-                        // Moog 12dB: 4段ラダーの y2 タップ
-                        // 高レゾナンスで Q が2乗的に増大 → 急峻なピーク
-                        // TB-303（線形Q）との差別化
-                        float Q_eff = juce::jlimit(0.5f, 200.0f,
-                            0.5f + r_moog * r_moog * 3.5f);
+                        // Moog 12dB: y2 タップ（2次応答）
+                        // 【修正】Q² → Q_linear に変更してエッジ跳ね上がり防止
+                        // Q_max = 0.5 + 4.0 * 2.5 = 10.5 (+20dB) に制限
+                        float Q_eff = juce::jlimit(0.5f, 15.0f,
+                            0.5f + r_moog * 2.5f);
                         float den = std::sqrt(std::pow(1.0f - w2, 2.0f)
                             + std::pow(w_norm / Q_eff, 2.0f));
                         mag = 1.0f / den;
                         if (t == 1) mag *= w_norm;
                         else if (t == 2) mag *= w2;
                         else if (t == 3) mag *= std::abs(1.0f - w2);
-                        // 発振直前で大きなピーク補正
-                        float peak = (r_moog > 2.5f) ? (1.0f + (r_moog - 2.5f) * 1.5f) : 1.0f;
+                        // Moog 特有の鋭いレゾナンスピーク補正
+                        // TB-303 の線形Q との差別化: Q が高いほど急峻
+                        float peak = (r_moog > 2.0f)
+                            ? (1.0f + (r_moog - 2.0f) * 0.8f)
+                            : 1.0f;
                         mag *= peak;
                     }
                     else {
-                        // 24dB+: 変更なし
+                        // 24dB+: カスケード4次応答（変更なし）
                         int cascade = (slopeIdx == 1) ? 1 : (slopeIdx == 2) ? 2 : 4;
                         float r_sc = r_moog * std::pow(0.7f, std::log2((float)cascade));
                         float real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + r_sc;
                         float imag_p = 4.0f * w_norm * (1.0f - w2);
-                        mag = std::pow(1.0f / std::sqrt(real_p * real_p + imag_p * imag_p), cascade);
+                        mag = std::pow(1.0f / std::sqrt(real_p * real_p + imag_p * imag_p),
+                            cascade);
                         if (t == 1) mag *= w2;
                         else if (t == 2) mag *= w2 * w2;
                         else if (t == 3) mag *= std::abs(1.0f - w2 * w2);
                         mag *= (1.0f + 0.5f * r_sc);
                     }
                 }
-
         
-// ===== 【置き換え】=====
+                // ===== 【置き換え後】=====
                 else if (modelIdx == 2) {
-                    float k = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 4.2f);
+                    float k = juce::jmap(juce::jlimit(0.1f, 10.0f, res),
+                        0.1f, 10.0f, 0.0f, 4.5f);
 
                     if (slopeIdx == 0) {
                         // TB-303 12dB: y2 タップ
-                        // Q が線形増加（Moogの2乗増加より緩やか）
-                        // → Moogとの差別化: TB-303は緩やかな丸いピーク
-                        float Q_eff = juce::jlimit(0.5f, 40.0f, 0.5f + k * 2.0f);
+                        // Q が Moog より緩やか（線形・低め）
+                        float Q_eff = juce::jlimit(0.5f, 8.0f, 0.5f + k * 1.5f);
                         float den = std::sqrt(std::pow(1.0f - w2, 2.0f)
                             + std::pow(w_norm / Q_eff, 2.0f));
                         mag = 1.0f / den;
-                        mag *= (1.0f + k * 0.15f);
+                        mag *= (1.0f + k * 0.12f);
                     }
                     else {
-                        // 24dB: 変更なし（Diode 3.5 係数）
+                        // TB-303 24dB: Stinchcombe の18dB/oct的挙動を可視化
+                        // Diode Ladder の強結合による特性:
+                        //   - Moog 4.0 係数 に対して 3.5 係数（弱い4次）
+                        //   - 可聴域の多くで 18dB/oct 的に見える
+                        //   - レゾナンスピークが Moog より低い位置に出る
+
+                        // 標準 Diode Ladder 4次応答（係数 3.5）
                         float real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + k;
                         float imag_p = 3.5f * w_norm * (1.0f - w2);
-                        mag = 1.0f / std::sqrt(real_p * real_p + imag_p * imag_p);
-                        mag *= (1.0f + k * 0.25f);
+                        float mag4 = 1.0f / std::sqrt(real_p * real_p + imag_p * imag_p);
+
+                        // Stinchcombe: 可聴域で 18dB/oct 的に振る舞う特性を
+                        // 3次応答との加重平均で近似
+                        // 3次応答（18dB/oct）
+                        float den3 = std::pow(1.0f + w2 * w2 * w_norm * 2.0f, 0.75f);
+                        float mag3 = 1.0f / den3;
+
+                        // 低〜中レゾナンスで 18dB/oct 的、高レゾナンスで 24dB/oct 的
+                        float blend = juce::jlimit(0.0f, 1.0f, k / 3.0f);
+                        mag = mag3 * (1.0f - blend * 0.4f) + mag4 * blend * 0.4f
+                            + mag4 * (1.0f - blend) * 0.6f;
+
+                        mag *= (1.0f + k * 0.2f);
                     }
                 }
+
 
                 else if (modelIdx == 5)
                 {

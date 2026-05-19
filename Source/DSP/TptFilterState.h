@@ -133,6 +133,12 @@ struct TptFilterState
     float diode_h = 0.0f;   // 8Hz HPF係数（固定）
     float diodeHpfS[2] = {};   // 8Hz HPF 状態変数
 
+    // ===== 【新規追加】前サンプルの y4 を保持 =====
+    // s4（状態変数）ではなく y4（実出力）を
+    // フィードバックに使うために必要
+    float diodePrevY4[2] = {};
+
+
     // ===== 【既存コード: AGC ここから】=====
     float rmsIn[2] = {};
     float rmsOut[2] = {};

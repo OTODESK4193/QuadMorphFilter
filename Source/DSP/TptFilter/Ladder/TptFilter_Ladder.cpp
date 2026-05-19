@@ -8,10 +8,7 @@
 namespace TptFilter_Ladder
 {
 
-    // ==========================================
-    // TPT 1次ハイパスフィルター
-    // Stinchcombe: 8Hz ACカップリング特性
-    // ==========================================
+    // TPT 1次ハイパスフィルター（8Hz固定）
     static inline float tpt1HPF(float x, float& s, float g)
     {
         float v = (x - s) * g / (1.0f + g);
@@ -21,18 +18,16 @@ namespace TptFilter_Ladder
         return hp;
     }
 
-    // ==========================================
     // ハードクリッパー
-    // Wurtz: ソフトクリッパーだとチューニングがドリフトする
-    // ==========================================
-    static inline float hardClip(float x, float threshold = 1.0f)
+    // 【修正】threshold を 4.0 に引き上げ
+    // → 1.0 では信号振幅が制限されすぎて自己発振できなかった
+    // → 自己発振時の振幅は k×y4 ≈ 4.5×1.0 = 4.5 程度
+    static inline float hardClip(float x, float threshold = 4.0f)
     {
         return std::clamp(x, -threshold, threshold);
     }
 
-    // ==========================================
     // updateCoeffs（TB-303 専用）
-    // ==========================================
     void updateCoeffs(TptFilterState& st)
     {
         if (st.filterModel != 2) return;
@@ -43,7 +38,6 @@ namespace TptFilter_Ladder
         float safeFc = std::clamp(fc, 20.0f, fs * 0.45f);
         st.diode_g = std::tan(juce::MathConstants<float>::pi * safeFc / fs);
 
-        // 8Hz HPF（固定）: Stinchcombe の ACカップリング
         const float hpfFc = 8.0f;
         st.diode_h = std::tan(juce::MathConstants<float>::pi * hpfFc / fs);
     }
@@ -51,13 +45,13 @@ namespace TptFilter_Ladder
     // ==========================================
     // TB-303 Diode Ladder
     //
-    // 【修正済み】resonance スケール
-    //   Before: k = jmap(0.1~10, 0~17) × 0.25 = 実効 0~4.25
-    //           → res=2.35 で発振閾値（k_eff≈1.0）を超えてしまう
-    //   After:  k = jmap(0.1~10, 0~4.0) を直接使用
-    //           → 自己発振は res≈9〜10 付近で発生
-    //
-    // 4段 ZDF LP + 8Hz HPF フィードバック
+    // 【修正内容】
+    //   1. フィードバックに y4_prev（実出力）を使用
+    //      → s4（状態変数）より正確な発振条件を満たす
+    //   2. hardClip 閾値: 1.0 → 4.0
+    //      → 発振振幅が制限されなくなる
+    //   3. k_max: 4.2 → 4.5
+    //      → 確実に自己発振条件を超える
     // ==========================================
     static float processDiodeLadder(int ch, float x, TptFilterState& st)
     {
@@ -68,16 +62,15 @@ namespace TptFilter_Ladder
         float& s3 = st.zdfState[0][ch][2];
         float& s4 = st.zdfState[0][ch][3];
 
-        // ===== 【置き換え】=====
-            // k=4.0 は理論閾値（4段×各1/√2 = 1/4）だが
-            // 数値精度と8Hz HPFの損失で届かない → 4.2 に上げる
-        float k = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 4.2f);
+        // 【修正】k_max = 4.5（発振閾値 4.0 を確実に超える）
+        float k = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 4.5f);
 
-        // 8Hz HPF フィードバック（Stinchcombe: アシッドうねりの本質）
-        float fb = tpt1HPF(k * s4, st.diodeHpfS[ch], st.diode_h);
+        // 【修正】y4_prev（前サンプルの実出力）でフィードバック
+        // s4（状態変数）では高周波でゲインが減衰し発振できなかった
+        float fb = tpt1HPF(k * st.diodePrevY4[ch], st.diodeHpfS[ch], st.diode_h);
 
-        // ハードクリッパー（Wurtz: チューニング安定性のため必須）
-        float x_in = hardClip(x - fb, 1.0f);
+        // ハードクリッパー（threshold=4.0）
+        float x_in = hardClip(x - fb);
 
         // 4段 ZDF LP
         float inv1pg = 1.0f / (1.0f + g);
@@ -98,26 +91,20 @@ namespace TptFilter_Ladder
         float y4 = v4 + s4;
         s4 += 2.0f * v4;
 
-        // 出力選択: slopeIdx で 12dB(y2) vs 24dB(y4) を切り替え
-        float out = 0.0f;
-        if (st.slopeIdx == 0)
-            out = y2; // 12dB: 2段目タップ
-        else
-            out = y4; // 24dB: 4段目タップ（TB-303 本来の出力）
+        // 前サンプル y4 を保存（次サンプルのフィードバック用）
+        st.diodePrevY4[ch] = y4;
 
-        return out;
+        // 出力選択: slopeIdx で 12dB(y2) vs 24dB(y4)
+        return (st.slopeIdx == 0) ? y2 : y4;
     }
 
-    // ==========================================
     // processSample
-    // ==========================================
     float processSample(int channel, float x, TptFilterState& st)
     {
         float out = x;
         const int m = st.filterModel;
         const int ch = channel;
 
-        // ----- Model 2: TB-303 Diode Ladder -----
         if (m == 2)
         {
             for (int stage = 0; stage < st.currentStages; ++stage)
@@ -125,7 +112,6 @@ namespace TptFilter_Ladder
             return out;
         }
 
-        // ----- Model 1,12,13,15: Moog Ladder 系 -----
         if (m == 1 || m == 12 || m == 13 || m == 15)
         {
             for (int stage = 0; stage < st.currentStages; ++stage)
@@ -171,16 +157,13 @@ namespace TptFilter_Ladder
                 if (m == 15) y4 = std::tanh(y4);
                 st.zdfState[stage][ch][3] = s4_ + 2.0f * v4;
 
-                // slopeIdx で出力タップを切り替え
                 if (st.slopeIdx == 0) {
-                    // 12dB: y2 タップ
                     if (st.filterType == 0) out = y2;
                     else if (st.filterType == 1) out = 2.0f * (y1 - y2);
                     else if (st.filterType == 2) out = out - 2.0f * y1 + y2;
                     else                         out = y2 + (out - 2.0f * y1 + y2);
                 }
                 else {
-                    // 24dB+: y4 タップ
                     if (st.filterType == 0) out = y4;
                     else if (st.filterType == 1) out = 4.0f * (y2 - y4);
                     else if (st.filterType == 2) out = out - 4.0f * y1 + 6.0f * y2 - 4.0f * y3 + y4;
