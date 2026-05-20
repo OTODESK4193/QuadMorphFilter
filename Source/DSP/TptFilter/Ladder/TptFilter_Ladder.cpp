@@ -38,9 +38,10 @@ namespace TptFilter_Ladder
         float x_hp = tpt1HPF(x, st.diodeHpfS[ch], st.diode_h);
 
         // Accent に応じた k 係数
+        // slopeIdx: 0=Off, 1=Low, 2=High
         float accentMult = 1.0f;
-        if (st.slopeIdx == 1) accentMult = 1.15f;
-        else if (st.slopeIdx == 2) accentMult = 1.30f;
+        if (st.slopeIdx == 1) accentMult = 1.08f;  // Low: 控えめに
+        else if (st.slopeIdx == 2) accentMult = 1.16f;  // High: 適度に
 
         float k = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 4.5f) * accentMult;
         k = juce::jlimit(0.0f, 4.8f, k);
@@ -60,12 +61,10 @@ namespace TptFilter_Ladder
         float denom = 1.0f + k * G4;
         float u = (x_hp - k * sigma) / denom;
 
-        // ===== ノイズ注入（改良版）=====
-        // u に直接注入することで ZDF ループが確実に励起される
-        // k が発振閾値に近いとき常に微小値を加算
-        // → DAW のスマートディセーブル対策
+        // ===== ノイズ注入（強化版）=====
+        // 1e-4 に増強: 低いカットオフでも発振開始できる強度
         if (k > 3.8f)
-            u += 1e-6f;
+            u += 1e-4f;
 
         // ソフトサチュレーション
         u = std::tanh(u * 0.9f) / 0.9f;

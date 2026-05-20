@@ -241,18 +241,19 @@ void FilterVisualizer::paint(juce::Graphics& g)
                 else if (modelIdx == 2)
                 {
                     // TB-303 Diode Ladder
-                    // slopeIdx を Accent として使用
-                    // 物理特性: 18dB/oct 的挙動（y4タップ固定）
+                    // slopeIdx: 0=Accent Off, 1=Low, 2=High
+                    // 物理特性: 18dB/oct 的挙動（Stinchcombe 3.5係数）
 
                     float accentMult = 1.0f;
-                    if (slopeIdx == 1) accentMult = 1.15f;
-                    else if (slopeIdx == 2) accentMult = 1.30f;
+                    if (slopeIdx == 1) accentMult = 1.08f;
+                    else if (slopeIdx == 2) accentMult = 1.16f;
 
-                    // 可視化用 k は発振閾値 3.4 以下にクランプ
-                    // （閾値超えると分母が反転してピークが逆に小さくなるため）
-                    float k = juce::jmap(juce::jlimit(0.1f, 10.0f, res),
-                        0.1f, 10.0f, 0.0f, 3.4f) * accentMult;
-                    k = juce::jlimit(0.0f, 3.4f, k);
+                    // 可視化用 k: 発振閾値付近まで使う
+                    // クランプを 3.49 にして分母ゼロを回避しつつ
+                    // Accent ごとに異なる値を維持する
+                    float k_base = juce::jmap(juce::jlimit(0.1f, 10.0f, res),
+                        0.1f, 10.0f, 0.0f, 3.0f);
+                    float k = juce::jlimit(0.0f, 3.49f, k_base * accentMult);
 
                     // 8Hz HPF 補正（ACカップリング特性）
                     float hpf_mag = (freq / 8.0f)
@@ -264,14 +265,14 @@ void FilterVisualizer::paint(juce::Graphics& g)
                     float denom = std::max(
                         std::sqrt(real_p * real_p + imag_p * imag_p), 0.005f);
 
-                    mag = (1.0f / denom) * hpf_mag * (1.0f + k * 0.15f);
+                    mag = (1.0f / denom) * hpf_mag;
 
                     // Accent が高いほどピークが鋭くなる
-                    float accentBoost = 1.0f + (accentMult - 1.0f) * 3.0f;
-                    mag *= accentBoost;
+                    // k_base ではなく k（accentMult 済み）を使うことで
+                    // Off < Low < High の順が保証される
+                    mag *= (1.0f + k * 0.2f);
                     mag = std::min(mag, 1000.0f);
                 }
-
 
                 else if (modelIdx == 5)
                 {

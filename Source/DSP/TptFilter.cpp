@@ -162,10 +162,19 @@ void TptFilter::setSlope(int index)
         state.filterOrder = (index == 0) ? 2 : (index == 1) ? 4 : (index == 2) ? 8 : 16;
         state.currentStages = state.filterOrder / 2;
     }
-    else if (m == 0 || m == 3 || m == 4 || m == 6 || m == 7 || m == 9 || m == 14 || m == 16 || m == 23)
+    else if (m == 0 || m == 3 || m == 4 || m == 6 || m == 7 || m == 9 ||
+        m == 14 || m == 16 || m == 23)
     {
         state.currentStages = (index == 0) ? 1 : (index == 1) ? 2 : (index == 2) ? 4 : 8;
         state.filterOrder = state.currentStages * 2;
+    }
+    // ===== 【新規追加】TB-303: 常に1段固定 =====
+    // Accent (slopeIdx) はパラメータ再利用のため
+    // currentStages は常に 1
+    else if (m == 2)
+    {
+        state.currentStages = 1;
+        state.filterOrder = 4;
     }
     else
     {
