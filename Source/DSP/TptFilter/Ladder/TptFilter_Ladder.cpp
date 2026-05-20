@@ -1,11 +1,5 @@
 // ==========================================
 // TptFilter/Ladder/TptFilter_Ladder.cpp
-//
-// 【根本修正】TB-303 自己発振
-//   Before: diodePrevY4（前サンプル）でフィードバック
-//           → 1サンプル遅延で位相がずれ発振不可
-//   After:  Moogと同じZDF代数解（遅延ゼロ）
-//           → k=4.0で正しく自己発振
 // ==========================================
 #include "TptFilter_Ladder.h"
 #include <cmath>
@@ -14,10 +8,6 @@
 namespace TptFilter_Ladder
 {
 
-    // ==========================================
-    // TPT 1次ハイパスフィルター（8Hz固定）
-    // TB-303 の ACカップリング特性
-    // ==========================================
     static inline float tpt1HPF(float x, float& s, float g)
     {
         float v = (x - s) * g / (1.0f + g);
@@ -26,36 +16,16 @@ namespace TptFilter_Ladder
         return x - lp;
     }
 
-    // ==========================================
-    // updateCoeffs（TB-303 専用）
-    // ==========================================
     void updateCoeffs(TptFilterState& st)
     {
         if (st.filterModel != 2) return;
-
         const float fc = st.smoothedDigitalCutoff;
         const float fs = (float)st.sampleRate;
         float safeFc = std::clamp(fc, 20.0f, fs * 0.45f);
         st.diode_g = std::tan(juce::MathConstants<float>::pi * safeFc / fs);
-
-        // 8Hz HPF（固定）: TB-303のACカップリング
         st.diode_h = std::tan(juce::MathConstants<float>::pi * 8.0f / fs);
     }
 
-    // ==========================================
-    // TB-303 Diode Ladder
-    //
-    // 【正しいZDF実装】Moogと同じ代数解法を使用
-    //
-    //   y4 = (G^4 * x + sigma) / (1 + k * G^4)
-    //   u  = (x - k * sigma)  / (1 + k * G^4)
-    //
-    // これにより:
-    //   - 1サンプル遅延ゼロ
-    //   - k≈4で正しく自己発振
-    //   - Moogとの違い: 8Hz HPFを入力に適用
-    //                   異なるソフトサチュレーション
-    // ==========================================
     static float processDiodeLadder(int ch, float x, TptFilterState& st)
     {
         const float g = st.diode_g;
@@ -64,21 +34,16 @@ namespace TptFilter_Ladder
         const float G3 = G * G2;
         const float G4 = G * G3;
 
-        // ===== Step 1: 8Hz HPF を入力に適用 =====
-        // TB-303のACカップリング特性
-        // これが「アシッドうねり」の物理的根拠
         float x_hp = tpt1HPF(x, st.diodeHpfS[ch], st.diode_h);
 
-        // ===== Step 2: ZDF代数解 =====
-        // k = 0〜4.0 （k=4.0付近で自己発振）
-        float k = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 4.0f);
+        // 【修正】k_max = 4.5（発振閾値 4.0 を確実に超える）
+        float k = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 4.5f);
 
         float s1 = st.zdfState[0][ch][0];
         float s2 = st.zdfState[0][ch][1];
         float s3 = st.zdfState[0][ch][2];
         float s4 = st.zdfState[0][ch][3];
 
-        // 状態変数の寄与
         float inv1pg = 1.0f / (1.0f + g);
         float S1 = s1 * inv1pg;
         float S2 = s2 * inv1pg;
@@ -86,19 +51,11 @@ namespace TptFilter_Ladder
         float S4 = s4 * inv1pg;
 
         float sigma = G3 * S1 + G2 * S2 + G * S3 + S4;
-
-        // 分母（常に正 → 数値安定）
         float denom = 1.0f + k * G4;
         float u = (x_hp - k * sigma) / denom;
 
-        // ===== Step 3: TB-303 ソフトサチュレーション =====
-        // Moogの強いtanhより柔らかい特性
-        // 自己発振振幅を自然に制限する
         u = std::tanh(u * 0.9f) / 0.9f;
 
-        // ===== Step 4: 4段 ZDF LP フォワードパス =====
-        // y_i = G*(x_i - s_i) + s_i
-        // s_i_new = 2*y_i - s_i_old
         float y1 = G * (u - s1) + s1;  s1 = 2.0f * y1 - s1;
         float y2 = G * (y1 - s2) + s2;  s2 = 2.0f * y2 - s2;
         float y3 = G * (y2 - s3) + s3;  s3 = 2.0f * y3 - s3;
@@ -108,17 +65,11 @@ namespace TptFilter_Ladder
         st.zdfState[0][ch][1] = s2;
         st.zdfState[0][ch][2] = s3;
         st.zdfState[0][ch][3] = s4;
-
-        // diodePrevY4は互換性のため保持
         st.diodePrevY4[ch] = y4;
 
-        // 12dB: y2タップ, 24dB: y4タップ
         return (st.slopeIdx == 0) ? y2 : y4;
     }
 
-    // ==========================================
-    // processSample
-    // ==========================================
     float processSample(int channel, float x, TptFilterState& st)
     {
         float out = x;

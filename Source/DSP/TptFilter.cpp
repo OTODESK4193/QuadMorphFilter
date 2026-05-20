@@ -228,9 +228,6 @@ void TptFilter::rebuildOversampler(int newFactor)
     lastCutoff = -1.0f;
 }
 
-// ==========================================
-// updateCoefficients（共通 + カテゴリへ dispatch）
-// ==========================================
 void TptFilter::updateCoefficients()
 {
     float targetCutoff = cutoff.getTargetValue();
@@ -244,27 +241,21 @@ void TptFilter::updateCoefficients()
         std::abs(currentRes - lastRes) < 0.001f)
         return;
 
-    // カテゴリ dispatch 用にキャッシュ
     state.currentCutoffVal = cutoff.getCurrentValue();
     state.currentResVal = currentRes;
 
     const int m = state.filterModel;
 
-    // ===== 既存コード =====
     if (m == 5 || m == 22)
         TptFilter_AnalogEmulation::updateCoeffs(state);
     else if (m >= 17 && m <= 20)
         TptFilter_DigitalPrecision::updateCoeffs(state);
     else if (m == 11 || m == 25)
         TptFilter_Spectral::updateCoeffs(state);
-
-    // ===== 【新規追加】TB-303 の係数更新 =====
     else if (m == 2)
         TptFilter_Ladder::updateCoeffs(state);
-
     else
     {
-        // 共通 g / ladderG / R / h / ladderRes の計算
         float maxSafeFreq = (float)state.sampleRate * 0.45f;
         float safeCutoff = std::clamp(state.smoothedDigitalCutoff, 20.0f, maxSafeFreq);
         float wd = juce::MathConstants<float>::pi * safeCutoff / (float)state.sampleRate;
@@ -280,12 +271,10 @@ void TptFilter::updateCoefficients()
         }
         else if (m == 1 || m == 12 || m == 13 || m == 15)
         {
-            float r_scale = (m == 13) ? 5.0f : 4.0f;
-            state.ladderRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, r_scale) * state.scalerMoog;
-        }
-        else if (m == 2)
-        {
-            state.ladderRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, 15.0f) * state.scalerDiode;
+            // 【修正】r_scale: Moog=4.5 に引き上げ（発振閾値確保）
+            float r_scale = (m == 13) ? 5.0f : 4.5f;
+            state.ladderRes = juce::jmap(currentRes, 0.1f, 10.0f, 0.0f, r_scale)
+                * state.scalerMoog;
         }
     }
 
@@ -293,14 +282,10 @@ void TptFilter::updateCoefficients()
     lastRes = currentRes;
 }
 
-// ==========================================
-// processSample（カテゴリへ dispatch）
-// ==========================================
 float TptFilter::processSample(int ch, float x)
 {
     const int m = state.filterModel;
 
-    // キャッシュ更新
     state.currentCutoffVal = cutoff.getCurrentValue();
     state.currentResVal = resonance.getCurrentValue();
 
@@ -349,12 +334,12 @@ float TptFilter::processSample(int ch, float x)
     else if (m == 10)
         out = TptFilter_Experimental::processSample(ch, x, state);
     else
-        out = x; // fallback
+        out = x;
 
     // ===== RMS 出力 + AGC =====
+// ===== ここから processSample の末尾全体を置き換え =====
     state.rmsOut[ch] = (1.0f - 0.005f) * state.rmsOut[ch] + 0.005f * (out * out);
 
-    // ↑ここの直後から新しいブロックが始まる（重複なし）
     float targetGain = 1.0f;
     if (state.rmsOut[ch] > 1e-8f) {
         targetGain = std::sqrt((state.rmsIn[ch] + 1e-8f) / (state.rmsOut[ch] + 1e-8f));
@@ -362,7 +347,6 @@ float TptFilter::processSample(int ch, float x)
     }
     state.agcGain[ch] = (1.0f - 0.0005f) * state.agcGain[ch] + 0.0005f * targetGain;
 
-    // ===== Ladder 自己発振時の AGC バイパス =====
     float finalGain = state.agcGain[ch];
     if (m == 1 || m == 2 || m == 12 || m == 13 || m == 15)
     {
@@ -371,13 +355,13 @@ float TptFilter::processSample(int ch, float x)
             k_norm = juce::jmap(state.currentResVal, 0.1f, 10.0f, 0.0f, 1.0f);
         }
         else {
-            float r_scale = (m == 13) ? 5.0f : 4.0f;
+            float r_scale = (m == 13) ? 5.0f : 4.5f;
             k_norm = (r_scale > 0.0f) ? (state.ladderRes / r_scale) : 0.0f;
         }
         k_norm = juce::jlimit(0.0f, 1.0f, k_norm);
 
-        if (k_norm > 0.95f) {
-            float bypassFactor = juce::jlimit(0.0f, 1.0f, (k_norm - 0.95f) * 20.0f);
+        if (k_norm > 0.85f) {
+            float bypassFactor = juce::jlimit(0.0f, 1.0f, (k_norm - 0.85f) * 10.0f);
             state.agcGain[ch] = state.agcGain[ch] * (1.0f - bypassFactor * 0.01f)
                 + 1.0f * (bypassFactor * 0.01f);
             finalGain = state.agcGain[ch] * (1.0f - bypassFactor)
@@ -385,8 +369,9 @@ float TptFilter::processSample(int ch, float x)
         }
     }
     return out * finalGain;
-}  // processSample の閉じ括弧   
-   
+}  // processSample の閉じ括弧
+
+
    // ==========================================
 // process（OS 対応）
 // ==========================================
@@ -614,11 +599,9 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         auto hpfCorr = [](float f) -> float {
             return (f / 8.0f) / std::sqrt(1.0f + std::pow(f / 8.0f, 2.0f));
             };
-
         if (m == 2) {
             // TB-303: DSP と同じ k スケール
             float k = juce::jmap(res, 0.1f, 10.0f, 0.0f, 4.0f);
-
             if (state.slopeIdx == 0) {
                 float Q_eff = juce::jlimit(0.5f, 12.0f, 0.5f + k * 1.8f);
                 float den = std::sqrt(std::pow(1.0f - w2, 2.0f)
@@ -635,11 +618,9 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
                     1000.0f);
             }
         }
-
         // Moog 系 (1,12,13,15)
-        float r_scale = (m == 13) ? 5.0f : 4.0f;
+        float r_scale = (m == 13) ? 5.0f : 4.5f;
         float r_val = juce::jmap(res, 0.1f, 10.0f, 0.0f, r_scale) * state.scalerMoog;
-
         if (state.slopeIdx == 0) {
             float Q_eff = juce::jlimit(0.5f, 15.0f, 0.5f + r_val * 2.5f);
             float den = std::sqrt(std::pow(1.0f - w2, 2.0f)
@@ -666,5 +647,4 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
             return std::min(mag * (1.0f + 0.5f * r_sc), 1000.0f);
         }
         }
-
 } // getMagnitudeForFrequency の閉じ括弧
