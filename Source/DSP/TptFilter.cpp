@@ -353,6 +353,8 @@ float TptFilter::processSample(int ch, float x)
 
     // ===== RMS 出力 + AGC =====
     state.rmsOut[ch] = (1.0f - 0.005f) * state.rmsOut[ch] + 0.005f * (out * out);
+
+    // ↑ここの直後から新しいブロックが始まる（重複なし）
     float targetGain = 1.0f;
     if (state.rmsOut[ch] > 1e-8f) {
         targetGain = std::sqrt((state.rmsIn[ch] + 1e-8f) / (state.rmsOut[ch] + 1e-8f));
@@ -360,10 +362,32 @@ float TptFilter::processSample(int ch, float x)
     }
     state.agcGain[ch] = (1.0f - 0.0005f) * state.agcGain[ch] + 0.0005f * targetGain;
 
-    return out * state.agcGain[ch];
-}
+    // ===== Ladder 自己発振時の AGC バイパス =====
+    float finalGain = state.agcGain[ch];
+    if (m == 1 || m == 2 || m == 12 || m == 13 || m == 15)
+    {
+        float k_norm;
+        if (m == 2) {
+            k_norm = juce::jmap(state.currentResVal, 0.1f, 10.0f, 0.0f, 1.0f);
+        }
+        else {
+            float r_scale = (m == 13) ? 5.0f : 4.0f;
+            k_norm = (r_scale > 0.0f) ? (state.ladderRes / r_scale) : 0.0f;
+        }
+        k_norm = juce::jlimit(0.0f, 1.0f, k_norm);
 
-// ==========================================
+        if (k_norm > 0.95f) {
+            float bypassFactor = juce::jlimit(0.0f, 1.0f, (k_norm - 0.95f) * 20.0f);
+            state.agcGain[ch] = state.agcGain[ch] * (1.0f - bypassFactor * 0.01f)
+                + 1.0f * (bypassFactor * 0.01f);
+            finalGain = state.agcGain[ch] * (1.0f - bypassFactor)
+                + 1.0f * bypassFactor;
+        }
+    }
+    return out * finalGain;
+}  // processSample の閉じ括弧   
+   
+   // ==========================================
 // process（OS 対応）
 // ==========================================
 void TptFilter::process(juce::AudioBuffer<float>& buffer)

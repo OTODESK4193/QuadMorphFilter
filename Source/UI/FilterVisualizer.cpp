@@ -240,39 +240,29 @@ void FilterVisualizer::paint(juce::Graphics& g)
 
 
 
-                // ===== 既存コード（この else if ブロック全体を置き換え）=====
-                else if (modelIdx == 2) {
-                    // ... 既存コード ...
-                }
+
 
                 // ===== 【置き換え後】=====
                 else if (modelIdx == 2) {
                     // DSP と同じ k スケール（k=4.0 で自己発振）
                     float k = juce::jmap(juce::jlimit(0.1f, 10.0f, res),
                         0.1f, 10.0f, 0.0f, 4.0f);
-
                     // 8Hz HPF 補正（可視化に ACカップリング特性を反映）
                     float hpf_mag = (freq / 8.0f) / std::sqrt(1.0f + std::pow(freq / 8.0f, 2.0f));
-
                     if (slopeIdx == 0) {
-                        // TB-303 12dB: Moogより柔らかいQ（Diode Ladderの特性）
                         float Q_eff = juce::jlimit(0.5f, 12.0f, 0.5f + k * 1.8f);
                         float den = std::sqrt(std::pow(1.0f - w2, 2.0f)
                             + std::pow(w_norm / Q_eff, 2.0f));
                         mag = (1.0f / den) * hpf_mag * (1.0f + k * 0.12f);
                     }
                     else {
-                        // TB-303 24dB: 4次 Moog LP 応答（同じ係数 4.0）
-                        // Moogとの違い: 8Hz HPF効果 + 若干低いQ
                         float real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + k;
                         float imag_p = 4.0f * w_norm * (1.0f - w2);
-                        float denom = std::sqrt(real_p * real_p + imag_p * imag_p);
-                        denom = std::max(denom, 0.005f);
+                        float denom = std::max(std::sqrt(real_p * real_p + imag_p * imag_p), 0.005f);
                         mag = (1.0f / denom) * hpf_mag * (1.0f + k * 0.15f);
                     }
                     mag = std::min(mag, 1000.0f);
                 }
-            
 
                 else if (modelIdx == 5)
                 {
