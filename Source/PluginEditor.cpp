@@ -115,29 +115,53 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
 {
     auto [maxSlope, hasLP, hasBP, hasHP, hasNotch] = getModelCaps(modelIdx);
 
-    // ===== スロープ: 有効なオプションのみ選択可能 =====
-    // JUCE ComboBox の setItemEnabled は 1-indexed
-    for (int i = 1; i <= 4; ++i)
-        g.slope.setItemEnabled(i, (i - 1) <= maxSlope);
-
-    // 現在値が無効なら有効な最大値に補正
-    int curSlope = g.slope.getSelectedId(); // 1-indexed
-    if (curSlope - 1 > maxSlope)
+    // ===== スロープ: TB-303 は Accent コンボに差し替え =====
+    if (modelIdx == 2)
     {
-        g.slope.setSelectedId(maxSlope + 1, juce::sendNotification);
-        // APVTS にも反映
-        if (auto* p = audioProcessor.apvts.getParameter("slope" + suffix))
-            p->setValueNotifyingHost(
-                p->convertTo0to1((float)maxSlope));
+        // Accent ラベルに変更（ID は 1/2/3 のまま流用）
+        g.slope.clear(juce::dontSendNotification);
+        g.slope.addItem("Accent: Off", 1);
+        g.slope.addItem("Accent: Low", 2);
+        g.slope.addItem("Accent: High", 3);
+
+        // 選択値が範囲外なら 1 に戻す
+        if (g.slope.getSelectedId() < 1 || g.slope.getSelectedId() > 3)
+            g.slope.setSelectedId(1, juce::sendNotification);
+    }
+    else
+    {
+        // 通常スロープラベルに戻す
+        // Accent ラベルになっている場合のみリセット
+        if (g.slope.getNumItems() < 4 ||
+            g.slope.getItemText(0) == "Accent: Off")
+        {
+            g.slope.clear(juce::dontSendNotification);
+            g.slope.addItem("12dB", 1);
+            g.slope.addItem("24dB", 2);
+            g.slope.addItem("48dB", 3);
+            g.slope.addItem("96dB", 4);
+        }
+
+        // 有効なスロープのみ選択可能に
+        for (int i = 1; i <= 4; ++i)
+            g.slope.setItemEnabled(i, (i - 1) <= maxSlope);
+
+        // 現在値が無効なら補正
+        int curSlope = g.slope.getSelectedId();
+        if (curSlope - 1 > maxSlope)
+        {
+            g.slope.setSelectedId(maxSlope + 1, juce::sendNotification);
+            if (auto* p = audioProcessor.apvts.getParameter("slope" + suffix))
+                p->setValueNotifyingHost(p->convertTo0to1((float)maxSlope));
+        }
     }
 
-    // ===== タイプ: 有効なオプションのみ =====
+    // ===== タイプ =====
     g.type.setItemEnabled(1, hasLP);
     g.type.setItemEnabled(2, hasBP);
     g.type.setItemEnabled(3, hasHP);
     g.type.setItemEnabled(4, hasNotch);
 
-    // 現在値が無効なら LP(1) に戻す
     int curType = g.type.getSelectedId();
     bool typeOk = (curType == 1 && hasLP)
         || (curType == 2 && hasBP)
@@ -146,17 +170,14 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
 
     if (!typeOk)
     {
-        // 最初の有効なタイプを選ぶ
         int fallback = hasLP ? 1 : hasBP ? 2 : hasHP ? 3 : 4;
         g.type.setSelectedId(fallback, juce::sendNotification);
         if (auto* p = audioProcessor.apvts.getParameter("type" + suffix))
-            p->setValueNotifyingHost(
-                p->convertTo0to1((float)(fallback - 1)));
+            p->setValueNotifyingHost(p->convertTo0to1((float)(fallback - 1)));
     }
 
-    // ===== ラベル変更: モデル固有のコントロール名を表示 =====
-    // Bitcrush だけ別の意味を持つ
-    if (modelIdx == 4) // Bitcrush / SRR
+    // ===== ラベル変更 =====
+    if (modelIdx == 4) // Bitcrush
     {
         g.cutoffLabel.setText("SRR", juce::dontSendNotification);
         g.resLabel.setText("Bits", juce::dontSendNotification);
@@ -167,7 +188,6 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
         g.resLabel.setText("Res", juce::dontSendNotification);
     }
 }
-
 
 void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g,
     juce::String s,

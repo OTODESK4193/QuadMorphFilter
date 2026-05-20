@@ -1,5 +1,12 @@
 // ==========================================
 // TptFilter/Ladder/TptFilter_Ladder.cpp
+//
+// Model 2: TB-303 Diode Ladder
+//   ZDF + 8Hz HPF + Accent（slopeIdx 再利用）
+//   ノイズ注入による自己発振対応
+//
+// Model 1,12,13,15: Moog Ladder 系
+//   ZDF + tanh + ノイズ注入
 // ==========================================
 #include "TptFilter_Ladder.h"
 #include <cmath>
@@ -8,6 +15,9 @@
 namespace TptFilter_Ladder
 {
 
+    // ==========================================
+    // TPT 1次ハイパスフィルター（8Hz固定）
+    // ==========================================
     static inline float tpt1HPF(float x, float& s, float g)
     {
         float v = (x - s) * g / (1.0f + g);
@@ -16,9 +26,13 @@ namespace TptFilter_Ladder
         return x - lp;
     }
 
+    // ==========================================
+    // updateCoeffs（TB-303 専用）
+    // ==========================================
     void updateCoeffs(TptFilterState& st)
     {
         if (st.filterModel != 2) return;
+
         const float fc = st.smoothedDigitalCutoff;
         const float fs = (float)st.sampleRate;
         float safeFc = std::clamp(fc, 20.0f, fs * 0.45f);
@@ -26,6 +40,20 @@ namespace TptFilter_Ladder
         st.diode_h = std::tan(juce::MathConstants<float>::pi * 8.0f / fs);
     }
 
+    // ==========================================
+    // TB-303 Diode Ladder メイン処理
+    //
+    // slopeIdx の再利用（Accent）:
+    //   0 = Accent: Off  → 通常動作
+    //   1 = Accent: Low  → k を 1.15倍（TB-303のアクセント回路相当）
+    //   2 = Accent: High → k を 1.30倍（強いアクセント）
+    //
+    // 出力: 常に y4 タップ（18dB/oct 的特性）
+    //
+    // ノイズ注入:
+    //   k > 3.8 かつ状態変数がゼロに近いとき
+    //   微小値を注入 → アナログの熱雑音相当
+    // ==========================================
     static float processDiodeLadder(int ch, float x, TptFilterState& st)
     {
         const float g = st.diode_g;
@@ -34,16 +62,29 @@ namespace TptFilter_Ladder
         const float G3 = G * G2;
         const float G4 = G * G3;
 
+        // 8Hz HPF（ACカップリング特性）
         float x_hp = tpt1HPF(x, st.diodeHpfS[ch], st.diode_h);
 
-        // 【修正】k_max = 4.5（発振閾値 4.0 を確実に超える）
-        float k = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 4.5f);
+        // Accent に応じた k 係数
+        float accentMult = 1.0f;
+        if (st.slopeIdx == 1) accentMult = 1.15f; // Low accent
+        else if (st.slopeIdx == 2) accentMult = 1.30f; // High accent
+
+        float k = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 4.5f) * accentMult;
+        k = juce::jlimit(0.0f, 4.8f, k);
 
         float s1 = st.zdfState[0][ch][0];
         float s2 = st.zdfState[0][ch][1];
         float s3 = st.zdfState[0][ch][2];
         float s4 = st.zdfState[0][ch][3];
 
+        // ===== ノイズ注入: 自己発振の種 =====
+        // k が発振閾値に近く、状態変数がゼロに近いとき
+        // アナログ熱雑音相当の微小値を注入する
+        if (k > 3.8f && std::abs(s1) < 1e-8f && std::abs(s4) < 1e-8f)
+            s1 = 1e-6f;
+
+        // ZDF代数解
         float inv1pg = 1.0f / (1.0f + g);
         float S1 = s1 * inv1pg;
         float S2 = s2 * inv1pg;
@@ -54,8 +95,10 @@ namespace TptFilter_Ladder
         float denom = 1.0f + k * G4;
         float u = (x_hp - k * sigma) / denom;
 
+        // ソフトサチュレーション
         u = std::tanh(u * 0.9f) / 0.9f;
 
+        // 4段 ZDF LP フォワードパス
         float y1 = G * (u - s1) + s1;  s1 = 2.0f * y1 - s1;
         float y2 = G * (y1 - s2) + s2;  s2 = 2.0f * y2 - s2;
         float y3 = G * (y2 - s3) + s3;  s3 = 2.0f * y3 - s3;
@@ -67,15 +110,21 @@ namespace TptFilter_Ladder
         st.zdfState[0][ch][3] = s4;
         st.diodePrevY4[ch] = y4;
 
-        return (st.slopeIdx == 0) ? y2 : y4;
+        // TB-303 は y4 タップ固定（18dB/oct 的特性）
+        // Accent による変化はカットオフ付近の鋭さに現れる
+        return y4;
     }
 
+    // ==========================================
+    // processSample
+    // ==========================================
     float processSample(int channel, float x, TptFilterState& st)
     {
         float out = x;
         const int m = st.filterModel;
         const int ch = channel;
 
+        // ----- Model 2: TB-303 Diode Ladder -----
         if (m == 2)
         {
             for (int stage = 0; stage < st.currentStages; ++stage)
@@ -83,6 +132,7 @@ namespace TptFilter_Ladder
             return out;
         }
 
+        // ----- Model 1,12,13,15: Moog Ladder 系 -----
         if (m == 1 || m == 12 || m == 13 || m == 15)
         {
             for (int stage = 0; stage < st.currentStages; ++stage)
@@ -91,6 +141,12 @@ namespace TptFilter_Ladder
                 float s2_ = st.zdfState[stage][ch][1];
                 float s3_ = st.zdfState[stage][ch][2];
                 float s4_ = st.zdfState[stage][ch][3];
+
+                // ===== ノイズ注入: Moog 自己発振の種 =====
+                // ladderRes が発振閾値（3.5）に近く
+                // 状態変数がゼロに近いとき微小値を注入
+                if (st.ladderRes > 3.5f && std::abs(s1_) < 1e-8f && std::abs(s4_) < 1e-8f)
+                    s1_ = 1e-6f;
 
                 float S1 = s1_ / (1.0f + st.g);
                 float S2 = s2_ / (1.0f + st.g);

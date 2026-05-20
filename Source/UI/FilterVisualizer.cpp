@@ -238,31 +238,39 @@ void FilterVisualizer::paint(juce::Graphics& g)
                     mag = std::min(mag, 1000.0f);
                 }
 
+                else if (modelIdx == 2)
+                {
+                    // TB-303 Diode Ladder
+                    // slopeIdx を Accent として使用
+                    // 物理特性: 18dB/oct 的挙動（y4タップ固定）
 
+                    float accentMult = 1.0f;
+                    if (slopeIdx == 1) accentMult = 1.15f; // Accent: Low
+                    else if (slopeIdx == 2) accentMult = 1.30f; // Accent: High
 
-
-
-                // ===== 【置き換え後】=====
-                else if (modelIdx == 2) {
-                    // DSP と同じ k スケール（k=4.0 で自己発振）
                     float k = juce::jmap(juce::jlimit(0.1f, 10.0f, res),
-                        0.1f, 10.0f, 0.0f, 4.0f);
-                    // 8Hz HPF 補正（可視化に ACカップリング特性を反映）
-                    float hpf_mag = (freq / 8.0f) / std::sqrt(1.0f + std::pow(freq / 8.0f, 2.0f));
-                    if (slopeIdx == 0) {
-                        float Q_eff = juce::jlimit(0.5f, 12.0f, 0.5f + k * 1.8f);
-                        float den = std::sqrt(std::pow(1.0f - w2, 2.0f)
-                            + std::pow(w_norm / Q_eff, 2.0f));
-                        mag = (1.0f / den) * hpf_mag * (1.0f + k * 0.12f);
-                    }
-                    else {
-                        float real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + k;
-                        float imag_p = 4.0f * w_norm * (1.0f - w2);
-                        float denom = std::max(std::sqrt(real_p * real_p + imag_p * imag_p), 0.005f);
-                        mag = (1.0f / denom) * hpf_mag * (1.0f + k * 0.15f);
-                    }
+                        0.1f, 10.0f, 0.0f, 4.5f) * accentMult;
+                    k = juce::jlimit(0.0f, 4.8f, k);
+
+                    // 8Hz HPF 補正（ACカップリング特性）
+                    float hpf_mag = (freq / 8.0f)
+                        / std::sqrt(1.0f + std::pow(freq / 8.0f, 2.0f));
+
+                    // y4 タップ（24dB/oct 構造、実効 18dB/oct 的挙動）
+                    // Moog との違い: 3.5 係数（Stinchcombe の強結合モデル）
+                    float real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + k;
+                    float imag_p = 3.5f * w_norm * (1.0f - w2);
+                    float denom = std::max(
+                        std::sqrt(real_p * real_p + imag_p * imag_p), 0.005f);
+
+                    mag = (1.0f / denom) * hpf_mag * (1.0f + k * 0.15f);
+
+                    // Accent による可視ピーク強調
+                    mag *= accentMult;
                     mag = std::min(mag, 1000.0f);
                 }
+
+
 
                 else if (modelIdx == 5)
                 {
