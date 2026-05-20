@@ -367,7 +367,7 @@
     bool QuadMorphFilterAudioProcessor::acceptsMidi()  const { return false; }
     bool QuadMorphFilterAudioProcessor::producesMidi() const { return false; }
     bool QuadMorphFilterAudioProcessor::isMidiEffect() const { return false; }
-    double QuadMorphFilterAudioProcessor::getTailLengthSeconds() const { return 0.0; }
+    double QuadMorphFilterAudioProcessor::getTailLengthSeconds() const { return 10.0; }
     int  QuadMorphFilterAudioProcessor::getNumPrograms() { return 1; }
     int  QuadMorphFilterAudioProcessor::getCurrentProgram() { return 0; }
     void QuadMorphFilterAudioProcessor::setCurrentProgram(int) {}

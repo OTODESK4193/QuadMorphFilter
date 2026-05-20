@@ -245,19 +245,20 @@ void FilterVisualizer::paint(juce::Graphics& g)
                     // 物理特性: 18dB/oct 的挙動（y4タップ固定）
 
                     float accentMult = 1.0f;
-                    if (slopeIdx == 1) accentMult = 1.15f; // Accent: Low
-                    else if (slopeIdx == 2) accentMult = 1.30f; // Accent: High
+                    if (slopeIdx == 1) accentMult = 1.15f;
+                    else if (slopeIdx == 2) accentMult = 1.30f;
 
+                    // 可視化用 k は発振閾値 3.4 以下にクランプ
+                    // （閾値超えると分母が反転してピークが逆に小さくなるため）
                     float k = juce::jmap(juce::jlimit(0.1f, 10.0f, res),
-                        0.1f, 10.0f, 0.0f, 4.5f) * accentMult;
-                    k = juce::jlimit(0.0f, 4.8f, k);
+                        0.1f, 10.0f, 0.0f, 3.4f) * accentMult;
+                    k = juce::jlimit(0.0f, 3.4f, k);
 
                     // 8Hz HPF 補正（ACカップリング特性）
                     float hpf_mag = (freq / 8.0f)
                         / std::sqrt(1.0f + std::pow(freq / 8.0f, 2.0f));
 
-                    // y4 タップ（24dB/oct 構造、実効 18dB/oct 的挙動）
-                    // Moog との違い: 3.5 係数（Stinchcombe の強結合モデル）
+                    // Stinchcombe の 3.5 係数（Moog の 4.0 と異なる）
                     float real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + k;
                     float imag_p = 3.5f * w_norm * (1.0f - w2);
                     float denom = std::max(
@@ -265,11 +266,11 @@ void FilterVisualizer::paint(juce::Graphics& g)
 
                     mag = (1.0f / denom) * hpf_mag * (1.0f + k * 0.15f);
 
-                    // Accent による可視ピーク強調
-                    mag *= accentMult;
+                    // Accent が高いほどピークが鋭くなる
+                    float accentBoost = 1.0f + (accentMult - 1.0f) * 3.0f;
+                    mag *= accentBoost;
                     mag = std::min(mag, 1000.0f);
                 }
-
 
 
                 else if (modelIdx == 5)
