@@ -304,8 +304,15 @@ float TptFilter::processSample(int ch, float x)
         comp = 1.0f + state.currentResVal * 0.1f;
     else if (m == 1 || m == 12 || m == 13 || m == 15)
         comp = 1.0f + 0.5f * state.ladderRes;
-    else if (m == 2)
-        comp = 1.0f + 0.2f * state.ladderRes;
+    // 修正後
+    else if (m == 2) {
+        float k_max = 4.2f;
+        if (state.slopeIdx == 1) k_max = 4.6f;
+        else if (state.slopeIdx == 2) k_max = 5.0f;
+        float k_val = juce::jmap(state.currentResVal, 0.1f, 10.0f, 0.0f, k_max);
+        comp = 1.0f + 0.2f * k_val;
+    }
+
     else if (m == 7)
         comp = 1.0f + state.currentResVal * 0.15f;
     x *= comp;

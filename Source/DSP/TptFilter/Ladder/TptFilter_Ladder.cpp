@@ -34,52 +34,53 @@ namespace TptFilter_Ladder
         const float G3 = G * G2;
         const float G4 = G * G3;
 
-        // 8Hz HPF（ACカップリング特性）
-        float x_hp = tpt1HPF(x, st.diodeHpfS[ch], st.diode_h);
+        float& s1 = st.zdfState[0][ch][0];
+        float& s2 = st.zdfState[0][ch][1];
+        float& s3 = st.zdfState[0][ch][2];
+        float& s4 = st.zdfState[0][ch][3];
 
-        // Accent に応じた k 係数
-        // slopeIdx: 0=Off, 1=Low, 2=High
-        float accentMult = 1.0f;
-        if (st.slopeIdx == 1) accentMult = 1.08f;  // Low: 控えめに
-        else if (st.slopeIdx == 2) accentMult = 1.16f;  // High: 適度に
+        // slopeIdx: 0=Accent Off, 1=Accent Low, 2=Accent High
+        float k_max = 4.2f;
+        if (st.slopeIdx == 1) k_max = 4.6f;
+        else if (st.slopeIdx == 2) k_max = 5.0f;
 
-        float k = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 4.5f) * accentMult;
-        k = juce::jlimit(0.0f, 4.8f, k);
-
-        float s1 = st.zdfState[0][ch][0];
-        float s2 = st.zdfState[0][ch][1];
-        float s3 = st.zdfState[0][ch][2];
-        float s4 = st.zdfState[0][ch][3];
+        float k = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, k_max);
+        k = juce::jlimit(0.0f, k_max, k);
 
         float inv1pg = 1.0f / (1.0f + g);
         float S1 = s1 * inv1pg;
         float S2 = s2 * inv1pg;
         float S3 = s3 * inv1pg;
         float S4 = s4 * inv1pg;
-
         float sigma = G3 * S1 + G2 * S2 + G * S3 + S4;
+
+        // 診断用: HPF なし（Moog と同じ構造）
+        float fb = k * sigma;
         float denom = 1.0f + k * G4;
-        float u = (x_hp - k * sigma) / denom;
+        float u = (x - fb) / denom;
 
-        // ===== ノイズ注入（強化版）=====
-        // 1e-4 に増強: 低いカットオフでも発振開始できる強度
-        if (k > 3.8f)
-            u += 1e-4f;
+        // Moog と同じノイズ注入
+        if (k > 3.5f)
+            u += 1e-6f;
 
-        // ソフトサチュレーション
-        u = std::tanh(u * 0.9f) / 0.9f;
+        u = std::tanh(u);
 
         // 4段 ZDF LP フォワードパス
-        float y1 = G * (u - s1) + s1;  s1 = 2.0f * y1 - s1;
-        float y2 = G * (y1 - s2) + s2;  s2 = 2.0f * y2 - s2;
-        float y3 = G * (y2 - s3) + s3;  s3 = 2.0f * y3 - s3;
-        float y4 = G * (y3 - s4) + s4;  s4 = 2.0f * y4 - s4;
+        float v1 = (u - s1) * g * inv1pg;
+        float y1 = v1 + s1;
+        s1 += 2.0f * v1;
 
-        st.zdfState[0][ch][0] = s1;
-        st.zdfState[0][ch][1] = s2;
-        st.zdfState[0][ch][2] = s3;
-        st.zdfState[0][ch][3] = s4;
-        st.diodePrevY4[ch] = y4;
+        float v2 = (y1 - s2) * g * inv1pg;
+        float y2 = v2 + s2;
+        s2 += 2.0f * v2;
+
+        float v3 = (y2 - s3) * g * inv1pg;
+        float y3 = v3 + s3;
+        s3 += 2.0f * v3;
+
+        float v4 = (y3 - s4) * g * inv1pg;
+        float y4 = v4 + s4;
+        s4 += 2.0f * v4;
 
         return y4;
     }
@@ -117,13 +118,12 @@ namespace TptFilter_Ladder
 
                 float u = out - st.ladderRes * sigma;
 
-                // ===== ノイズ注入（Moog）=====
-                // ladderRes が発振閾値に近いとき u に直接注入
                 if (st.ladderRes > 3.5f)
                     u += 1e-6f;
 
                 if (m == 1)  u = std::tanh(u / (1.0f + st.ladderRes
-                    * st.ladderG * st.ladderG * st.ladderG * st.ladderG));
+                    * st.ladderG * st.ladderG
+                    * st.ladderG * st.ladderG));
                 else if (m == 12) u = std::tanh(u * 1.1f) / 1.1f;
                 else if (m == 13) u = std::tanh(u * 1.5f) / 1.5f;
                 else if (m == 15) u = u / (1.0f + std::abs(u * 0.5f));

@@ -240,39 +240,56 @@ void FilterVisualizer::paint(juce::Graphics& g)
 
                 else if (modelIdx == 2)
                 {
-                    // TB-303 Diode Ladder
+                    // TB-303 Diode Ladder ビジュアライザー
+                    // DSP と同じ k スケールを使用
                     // slopeIdx: 0=Accent Off, 1=Low, 2=High
-                    // 物理特性: 18dB/oct 的挙動（Stinchcombe 3.5係数）
 
-                    float accentMult = 1.0f;
-                    if (slopeIdx == 1) accentMult = 1.08f;
-                    else if (slopeIdx == 2) accentMult = 1.16f;
+                    float k_max = 4.2f;
+                    if (slopeIdx == 1) k_max = 4.6f;
+                    else if (slopeIdx == 2) k_max = 5.0f;
 
-                    // 可視化用 k: 発振閾値付近まで使う
-                    // クランプを 3.49 にして分母ゼロを回避しつつ
-                    // Accent ごとに異なる値を維持する
-                    float k_base = juce::jmap(juce::jlimit(0.1f, 10.0f, res),
-                        0.1f, 10.0f, 0.0f, 3.0f);
-                    float k = juce::jlimit(0.0f, 3.49f, k_base * accentMult);
+                    float k = juce::jmap(juce::jlimit(0.1f, 10.0f, res),
+                        0.1f, 10.0f, 0.0f, k_max);
+                    k = juce::jlimit(0.0f, k_max, k);
 
-                    // 8Hz HPF 補正（ACカップリング特性）
+                    // 8Hz HPF は音声帯域でほぼ unity gain のため
+                    // ビジュアライザーでは省略（fc >> 8Hz）
+
+                    // 4段 LP の周波数応答（線形近似）
+                    // 分母: 1 + k * G^4  where G = g/(1+g), g = tan(pi*fc/fs)
+                    // ビジュアライザー用に w_norm で近似
+                    float g_vis = std::tan(juce::MathConstants<float>::pi
+                        * juce::jlimit(20.0f, 20000.0f, fc)
+                        / 44100.0f);
+                    float G_vis = g_vis / (1.0f + g_vis);
+                    float G4_vis = G_vis * G_vis * G_vis * G_vis;
+
+                    // 入力周波数での G
+                    float g_freq = std::tan(juce::MathConstants<float>::pi * freq / 44100.0f);
+                    float G_freq = g_freq / (1.0f + g_freq);
+
+                    // 4段LP の単純な振幅近似
+                    // G^4 = (1-pole LP)^4 の振幅
+                    float lp4_mag = std::pow(G_freq / G_vis, 4.0f);
+
+                    // フィードバックによる共振ピーク
+                    // |H| = lp4_mag / |1 - k * lp4_at_fc * phase_term|
+                    // fc 付近で分母が最小になる
+                    float w_norm = freq / juce::jlimit(20.0f, 20000.0f, fc);
+                    float w2 = w_norm * w_norm;
+                    float real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + k;
+                    float imag_p = 3.5f * w_norm * (1.0f - w2);
+                    float denom = std::max(std::sqrt(real_p * real_p + imag_p * imag_p),
+                        0.005f);
+
+                    // 8Hz HPF 補正（低域カット特性）
                     float hpf_mag = (freq / 8.0f)
                         / std::sqrt(1.0f + std::pow(freq / 8.0f, 2.0f));
 
-                    // Stinchcombe の 3.5 係数（Moog の 4.0 と異なる）
-                    float real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + k;
-                    float imag_p = 3.5f * w_norm * (1.0f - w2);
-                    float denom = std::max(
-                        std::sqrt(real_p * real_p + imag_p * imag_p), 0.005f);
-
-                    mag = (1.0f / denom) * hpf_mag;
-
-                    // Accent が高いほどピークが鋭くなる
-                    // k_base ではなく k（accentMult 済み）を使うことで
-                    // Off < Low < High の順が保証される
-                    mag *= (1.0f + k * 0.2f);
+                    mag = (1.0f / denom) * hpf_mag * (1.0f + k * 0.2f);
                     mag = std::min(mag, 1000.0f);
                 }
+
 
                 else if (modelIdx == 5)
                 {
