@@ -250,6 +250,7 @@ void TptFilter::updateCoefficients()
         std::abs(currentRes - lastRes) < 0.001f)
         return;
 
+    state.currentResVal = currentRes;  // ← この行を追加
     state.currentCutoffVal = cutoff.getCurrentValue();
     state.currentResVal = currentRes;
 
@@ -296,7 +297,7 @@ float TptFilter::processSample(int ch, float x)
     const int m = state.filterModel;
 
     state.currentCutoffVal = cutoff.getCurrentValue();
-    state.currentResVal = resonance.getCurrentValue();
+
 
     // ===== 共通前処理: comp =====
     float comp = 1.0f;
