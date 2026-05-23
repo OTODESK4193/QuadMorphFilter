@@ -145,7 +145,8 @@ void TptFilter::setType(int newType) { state.filterType = newType; }
 
 void TptFilter::setSlope(int index)
 {
-    state.slopeIdx = index;
+    // ===== TB-303 は Accent なので、変換は不要（index は常に 0,1,2）=====
+    state.slopeIdx = index;  // 全モデル共通で、変換なし
     const int m = state.filterModel;
 
     if (m == 5 || m == 10 || m == 21 || m == 22 || m == 24 || m == 25 || m == 27)
@@ -168,9 +169,6 @@ void TptFilter::setSlope(int index)
         state.currentStages = (index == 0) ? 1 : (index == 1) ? 2 : (index == 2) ? 4 : 8;
         state.filterOrder = state.currentStages * 2;
     }
-    // ===== 【新規追加】TB-303: 常に1段固定 =====
-    // Accent (slopeIdx) はパラメータ再利用のため
-    // currentStages は常に 1
     else if (m == 2)
     {
         state.currentStages = 1;
@@ -181,7 +179,6 @@ void TptFilter::setSlope(int index)
         state.currentStages = (index == 0) ? 1 : (index == 1) ? 1 : (index == 2) ? 2 : 4;
         state.filterOrder = state.currentStages * 4;
     }
-
     state.scalerSVF = (state.currentStages > 1)
         ? std::pow(0.6f, std::log2((float)state.currentStages)) : 1.0f;
     state.scalerMoog = (state.currentStages > 1)

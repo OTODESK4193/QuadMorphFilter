@@ -3,22 +3,18 @@
 // ==========================================
 #include "FilterVisualizer.h"
 #include "../PluginProcessor.h"
-
 FilterVisualizer::FilterVisualizer(QuadMorphFilterAudioProcessor& p)
     : processor(p)
 {
     startTimerHz(60);
 }
-
 void FilterVisualizer::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colour(0xff1E272E));
     auto w = (float)getWidth();
     auto h = (float)getHeight();
-
     const float dbTop = 60.0f;
     const float dbBottom = -120.0f;
-
     // ----- 0dB ライン -----
     float y0dB = juce::jmap(0.0f, dbTop, dbBottom, 0.0f, h);
     g.setColour(juce::Colours::white.withAlpha(0.25f));
@@ -26,7 +22,6 @@ void FilterVisualizer::paint(juce::Graphics& g)
     g.setFont(10.0f);
     g.setColour(juce::Colours::white.withAlpha(0.6f));
     g.drawText("0dB", 2, (int)y0dB - 12, 35, 10, juce::Justification::left);
-
     // ----- dB グリッド -----
     float dbGridLines[] = { -20.0f, -40.0f, -60.0f, -80.0f, -100.0f };
     for (float dbLine : dbGridLines)
@@ -38,7 +33,6 @@ void FilterVisualizer::paint(juce::Graphics& g)
         g.drawText(juce::String((int)dbLine) + "dB", 2, (int)yDb - 12, 40, 10,
             juce::Justification::left);
     }
-
     // ----- 周波数グリッド -----
     float freqs[] = { 100.0f, 500.0f, 1000.0f, 5000.0f, 10000.0f };
     juce::String labels[] = { "100Hz", "500Hz", "1kHz", "5kHz", "10kHz" };
@@ -50,20 +44,16 @@ void FilterVisualizer::paint(juce::Graphics& g)
         g.setColour(juce::Colours::white.withAlpha(0.5f));
         g.drawText(labels[i], (int)x + 2, (int)h - 15, 40, 10, juce::Justification::left);
     }
-
     g.setColour(juce::Colour(0xff00D2D3));
-
     // ----- LFO 情報取得 -----
     auto cPos = processor.getLfoPos(1);
     auto rPos = processor.getLfoPos(2);
     auto lfo1Mod4 = processor.getLfoMod4(1);
     auto lfo2Mod4 = processor.getLfoMod4(2);
-
     bool lfo1_isRand1 = ((int)processor.apvts.getRawParameterValue("lfo2wave")->load() == 3)
         && (processor.apvts.getRawParameterValue("lfo2en")->load() > 0.5f);
     bool lfo2_isRand1 = ((int)processor.apvts.getRawParameterValue("lfo3wave")->load() == 3)
         && (processor.apvts.getRawParameterValue("lfo3en")->load() > 0.5f);
-
     auto getM = [](juce::Point<float> p, const std::array<float, 4>& m4, bool isRand1)
         -> std::array<float, 4>
         {
@@ -77,24 +67,19 @@ void FilterVisualizer::paint(juce::Graphics& g)
             }
             return res;
         };
-
     std::array<float, 4> cM = getM(cPos, lfo1Mod4, lfo1_isRand1);
     std::array<float, 4> rM = getM(rPos, lfo2Mod4, lfo2_isRand1);
-
     // ----- XYモード情報（ループ外で1回計算）-----
     int   xyMode = (int)processor.apvts.getRawParameterValue("xyMode")->load();
     auto  mPos = processor.getLfoPos(0);
-
     // X: 20Hz〜20kHz、Y: 上=大（反転）
     float xyCutoff = 20.0f * std::pow(1000.0f, mPos.x);
     float xyRes = juce::jlimit(0.1f, 10.0f, 0.1f + (1.0f - mPos.y) * 9.9f);
-
     // ----- 有効フィルター・wMix（ループ外）-----
     bool visEnA = processor.apvts.getRawParameterValue("enableA")->load() > 0.5f;
     bool visEnB = processor.apvts.getRawParameterValue("enableB")->load() > 0.5f;
     bool visEnC = processor.apvts.getRawParameterValue("enableC")->load() > 0.5f;
     bool visEnD = processor.apvts.getRawParameterValue("enableD")->load() > 0.5f;
-
     float wA, wB, wC, wD;
     if (xyMode == 1)
     {
@@ -113,7 +98,6 @@ void FilterVisualizer::paint(juce::Graphics& g)
         float cosY = std::cos(angleY), sinY = std::sin(angleY);
         wA = cosX * cosY;  wB = sinX * cosY;
         wC = cosX * sinY;  wD = sinX * sinY;
-
         float sumSq = 0.0f;
         if (visEnA) sumSq += wA * wA;
         if (visEnB) sumSq += wB * wB;
@@ -128,30 +112,18 @@ void FilterVisualizer::paint(juce::Graphics& g)
             if (visEnD) wD *= norm;
         }
     }
-
     // ----- 周波数応答の計算 -----
     int wInt = (int)w;
     std::vector<float> rawMag(wInt + 1, 0.0f);
-
     for (int px = 0; px <= wInt; ++px)
     {
         float freq = 20.0f * std::pow(1000.0f, (float)px / w);
-
-        // =====================================================
-        // calc: 1フィルターの周波数応答を計算
-        //
-        // lfoCutOn の意味（Processor と完全に一致）:
-        //   Cutoffモード: true → XY使用+LFO2変調 / false → スライダー使用
-        //   Morphモード:  true → スライダー+LFO2変調 / false → スライダーのみ
-        // =====================================================
         auto calc = [&](juce::String s, int idx) -> float
             {
                 if (processor.apvts.getRawParameterValue("enable" + s)->load() < 0.5f)
                     return 0.0f;
-
                 bool lfoCutOn = processor.apvts.getRawParameterValue("lfoCut" + s)->load() > 0.5f;
                 bool lfoResOn = processor.apvts.getRawParameterValue("lfoRes" + s)->load() > 0.5f;
-
                 float fc, res;
                 if (xyMode == 1)
                 {
@@ -169,19 +141,15 @@ void FilterVisualizer::paint(juce::Graphics& g)
                     fc = lfoCutOn ? baseCutoff * std::pow(2.0f, 4.0f * cM[idx]) : baseCutoff;
                     res = lfoResOn ? baseRes * std::pow(2.0f, 2.0f * rM[idx]) : baseRes;
                 }
-
                 fc = juce::jlimit(20.0f, 20000.0f, fc);
                 res = juce::jlimit(0.1f, 10.0f, res);
-
                 int modelIdx = (int)processor.apvts.getRawParameterValue("model" + s)->load();
                 int slopeIdx = (int)processor.apvts.getRawParameterValue("slope" + s)->load();
                 int t = (int)processor.apvts.getRawParameterValue("type" + s)->load();
-
                 float freqLimit = fc;
                 float w_norm = freq / freqLimit;
                 float w2 = w_norm * w_norm;
                 float mag = 1.0f;
-
                 if (modelIdx == 0 || modelIdx == 3 || modelIdx == 4 || modelIdx == 9
                     || modelIdx == 14 || modelIdx == 16 || modelIdx == 23)
                 {
@@ -199,15 +167,13 @@ void FilterVisualizer::paint(juce::Graphics& g)
                     if (modelIdx == 9)
                         mag *= juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 1.0f, 5.0f);
                 }
-
-                // ===== 【置き換え後】=====
                 else if (modelIdx == 1 || modelIdx == 12 || modelIdx == 13 || modelIdx == 15) {
-                    float r_scale = (modelIdx == 13) ? 5.0f : 4.0f;
+                    // r_scale を DSP と一致させる (Moog=4.5, SSM2040=5.0)
+                    float r_scale = (modelIdx == 13) ? 5.0f : 4.5f;
                     float r_moog = juce::jmap(juce::jlimit(0.1f, 10.0f, res),
                         0.1f, 10.0f, 0.0f, r_scale);
-
                     if (slopeIdx == 0) {
-                        // 12dB: y2 タップ = 2次 LP 近似
+                        // 12dB: 2段出力 (y2) を近似
                         float Q_eff = juce::jlimit(0.5f, 15.0f, 0.5f + r_moog * 2.5f);
                         float den = std::sqrt(std::pow(1.0f - w2, 2.0f)
                             + std::pow(w_norm / Q_eff, 2.0f));
@@ -219,88 +185,58 @@ void FilterVisualizer::paint(juce::Graphics& g)
                         mag *= peak;
                     }
                     else {
-                        // 24dB: 4次 Moog LP 応答
-                        // 【修正】magnitude clamp でエッジ跳ね上がりを防止
+                        // 24dB/48dB/96dB: 4段ラダー多段カスケード
                         int cascade = (slopeIdx == 1) ? 1 : (slopeIdx == 2) ? 2 : 4;
                         float r_sc = r_moog * std::pow(0.7f, std::log2((float)cascade));
                         float real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + r_sc;
                         float imag_p = 4.0f * w_norm * (1.0f - w2);
-                        float denom = std::sqrt(real_p * real_p + imag_p * imag_p);
-                        // 分母がゼロに近い（自己発振点）の場合、最大表示値に制限
-                        denom = std::max(denom, 0.005f);   // +46dB 以上にはしない
+                        float denom = std::max(std::sqrt(real_p * real_p + imag_p * imag_p), 0.005f);
                         mag = std::pow(1.0f / denom, cascade);
                         if (t == 1) mag *= w2;
                         else if (t == 2) mag *= w2 * w2;
                         else if (t == 3) mag *= std::abs(1.0f - w2 * w2);
                         mag *= (1.0f + 0.5f * r_sc);
                     }
-                    // 最大 +60dB に制限（ビジュアライザー上限）
                     mag = std::min(mag, 1000.0f);
                 }
-
                 else if (modelIdx == 2)
                 {
-                    // TB-303 Diode Ladder【高精度版可視化】
-                    // 
-                    // 実装: 4段正確な状態変数 + ダイオード非線形（段別）
-                    // 8Hz HPF による低域カット特性を反映
-                    // Accentによる k_max 制御を正確に計算
+                    // TB-303 Diode Ladder 可視化
                     //
-                    // slopeIdx: 0=Accent Off, 1=Accent Low, 2=Accent High
+                    // 【設計方針】
+                    // 4極ラダーの発振閾値は連続時間モデルで k = 4.0。
+                    // k > 4 の領域は線形式として「不安定」になり、k が増えるほど
+                    // 分母が大きくなってピークが逆に下がる現象が起きる。
+                    // そのため Off/Low/High すべてを安定域（k_eff < 4.0）に収め、
+                    // 閾値への近さでピーク高さを制御する。
+                    //
+                    // Off  → k_eff_max = 3.50  ピーク小
+                    // Low  → k_eff_max = 3.75  ピーク中
+                    // High → k_eff_max = 3.92  ピーク大（発振直前を表現）
 
-                    // ✅ 【重要】ComboBox は 1-indexed で値を返すため、0-indexed に変換
-                    int accentIdx = slopeIdx - 1;
+                    float k_norm = juce::jmap(juce::jlimit(0.1f, 10.0f, res),
+                        0.1f, 10.0f, 0.0f, 1.0f);
 
-                    float k_max = 4.2f;
+                    float k_eff_max = (slopeIdx == 0) ? 3.50f
+                                    : (slopeIdx == 1) ? 3.75f
+                                    :                   3.92f;
+                    float k = k_norm * k_eff_max;
 
-                    if (accentIdx == 0)
-                    {
-                        k_max = 4.2f;   // Off
-                    }
-                    else if (accentIdx == 1)
-                    {
-                        k_max = 4.6f;   // Low
-                    }
-                    else if (accentIdx == 2)
-                    {
-                        k_max = 5.0f;   // High
-                    }
+                    float w_norm_local = freq / juce::jlimit(20.0f, 20000.0f, fc);
+                    float w2_local = w_norm_local * w_norm_local;
 
-                    float k = juce::jmap(juce::jlimit(0.1f, 10.0f, res),
-                        0.1f, 10.0f, 0.0f, k_max);
-                    k = juce::jlimit(0.0f, k_max, k);
-
-                    float g_vis = std::tan(juce::MathConstants<float>::pi
-                        * juce::jlimit(20.0f, 20000.0f, fc)
-                        / 44100.0f);
-                    float G_vis = g_vis / (1.0f + g_vis);
-
-                    float g_freq = std::tan(juce::MathConstants<float>::pi * freq / 44100.0f);
-                    float G_freq = g_freq / (1.0f + g_freq);
-
-                    float w_norm = freq / juce::jlimit(20.0f, 20000.0f, fc);
-                    float w2 = w_norm * w_norm;
-
-                    float real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + k;
-                    float imag_p = 3.5f * w_norm * (1.0f - w2);
-                    float denom = std::max(std::sqrt(real_p * real_p + imag_p * imag_p),
-                        0.005f);
-
+                    // 8Hz HPF補正（Stinchcombe モデルに基づく）
                     float hpf_mag = (freq / 8.0f)
                         / std::sqrt(1.0f + std::pow(freq / 8.0f, 2.0f));
 
+                    // 統一4極ラダー伝達関数 |H| = 1 / |(1+jω)^4 + k|
+                    float real_p = std::pow(1.0f - w2_local, 2.0f) - 4.0f * w2_local + k;
+                    float imag_p = 4.0f * w_norm_local * (1.0f - w2_local);
+                    float denom = std::max(std::sqrt(real_p * real_p + imag_p * imag_p),
+                        0.005f);
                     mag = (1.0f / denom) * hpf_mag;
-
-                    // ===== Accent による k_max の差異をピークに反映 =====
-                    float accentPeakBoost = 1.0f + (k_max - 4.2f) * 0.3f;
-                    mag *= accentPeakBoost;
-
-                    mag *= (1.0f + k * 0.3f);
-
                     mag = std::min(mag, 1000.0f);
                 }
-
-
                 else if (modelIdx == 5)
                 {
                     float v = juce::jmap(std::log10(freqLimit), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f);
@@ -350,7 +286,7 @@ void FilterVisualizer::paint(juce::Graphics& g)
                 {
                     int stages = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
                     float phi = -2.0f * std::atan(freq / freqLimit);
-                    float fb = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 0.95f);
+                    float fb = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 0.8f);
                     if (t == 1 || t == 3) fb = -fb;
                     float c_ap = std::cos(stages * phi); float s_ap = std::sin(stages * phi);
                     float den2 = (1.0f - fb * c_ap) * (1.0f - fb * c_ap) + (fb * s_ap) * (fb * s_ap);
@@ -480,20 +416,15 @@ void FilterVisualizer::paint(juce::Graphics& g)
                     float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w_norm * d, 2.0f));
                     mag = std::pow(1.0f / den, 4.0f);
                 }
-
                 return static_cast<float>(mag);
-            }; // end calc
-
+            };
         rawMag[px] = calc("A", 0) * wA
             + calc("B", 1) * wB
             + calc("C", 2) * wC
             + calc("D", 3) * wD;
     }
-
-    // ----- スムージングと描画 -----
     juce::Path path;
     const int smoothRadius = 8;
-
     for (int px = 0; px <= wInt; ++px)
     {
         float sum = 0.0f; int count = 0;
@@ -506,10 +437,8 @@ void FilterVisualizer::paint(juce::Graphics& g)
         float db = 20.0f * std::log10(smoothedMag + 1e-5f);
         float yPos = juce::jmap(db, dbTop, dbBottom, 0.0f, h);
         yPos = juce::jlimit(0.0f, h, yPos);
-
         if (px == 0) path.startNewSubPath((float)px, yPos);
         else         path.lineTo((float)px, yPos);
     }
-
     g.strokePath(path, juce::PathStrokeType(2.0f));
 }

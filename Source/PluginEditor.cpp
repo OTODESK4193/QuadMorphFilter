@@ -107,9 +107,9 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
     if (modelIdx == 2)
     {
         g.slope.clear(juce::dontSendNotification);
-        g.slope.addItem("Accent: Off", 1);
-        g.slope.addItem("Accent: Low", 2);
-        g.slope.addItem("Accent: High", 3);
+        g.slope.addItem("Accent: Off", 1);   // ID=1（インデックス 0）
+        g.slope.addItem("Accent: Low", 2);   // ID=2（インデックス 1）
+        g.slope.addItem("Accent: High", 3);  // ID=3（インデックス 2）
 
         if (g.slope.getSelectedId() < 1 || g.slope.getSelectedId() > 3)
             g.slope.setSelectedId(1, juce::sendNotification);
@@ -133,11 +133,13 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
             g.slope.setItemEnabled(i, (i - 1) <= maxSlope);
 
         int curSlope = g.slope.getSelectedId();
-        if (curSlope - 1 > maxSlope)
+        // curSlope < 1 は「空欄」（ID=0）、これもデフォルト12dBに戻す
+        if (curSlope < 1 || curSlope - 1 > maxSlope)
         {
-            g.slope.setSelectedId(maxSlope + 1, juce::sendNotification);
+            int newId = (curSlope >= 1) ? (maxSlope + 1) : 1;
+            g.slope.setSelectedId(newId, juce::sendNotification);
             if (auto* p = audioProcessor.apvts.getParameter("slope" + suffix))
-                p->setValueNotifyingHost(p->convertTo0to1((float)maxSlope));
+                p->setValueNotifyingHost(p->convertTo0to1((float)(newId - 1)));
         }
     }
 
