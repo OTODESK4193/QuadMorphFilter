@@ -38,6 +38,7 @@ namespace TptFilter_Ladder
         return std::tanh(x * strength);
     }
 
+
     static float processDiodeLadder(int ch, float x, TptFilterState& st)
     {
         const float g = st.diode_g;
@@ -51,31 +52,27 @@ namespace TptFilter_Ladder
         float& s3 = st.zdfState[0][ch][2];
         float& s4 = st.zdfState[0][ch][3];
 
-        // ===== 【改善】Accent による非線形強度の制御 =====
+        // ===== Accent による k_max の制御 =====
         // slopeIdx: 0=Accent Off, 1=Accent Low, 2=Accent High
-        float satStrength = 1.0f;  // デフォルト
         float k_max = 4.2f;
 
         if (st.slopeIdx == 0)
         {
-            satStrength = 0.8f;   // Off: 非線形を弱める
-            k_max = 4.2f;
+            k_max = 4.2f;   // Off: 基本値
         }
         else if (st.slopeIdx == 1)
         {
-            satStrength = 1.0f;   // Low: 標準
-            k_max = 4.6f;
+            k_max = 4.6f;   // Low: やや高い
         }
         else if (st.slopeIdx == 2)
         {
-            satStrength = 1.2f;   // High: 非線形を強調
-            k_max = 5.0f;
+            k_max = 5.0f;   // High: より高い
         }
 
         float k = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, k_max);
         k = juce::jlimit(0.0f, k_max, k);
 
-        // ===== 【改善】フィードバック計算（正確な4段シグマ）=====
+        // ===== フィードバック計算 =====
         float inv1pg = 1.0f / (1.0f + g);
         float S1 = s1 * inv1pg;
         float S2 = s2 * inv1pg;
@@ -87,40 +84,37 @@ namespace TptFilter_Ladder
         float denom = 1.0f + k * G4;
         float u = (x - fb) / denom;
 
-        // ノイズ注入（数値安定性の向上）
+        // ノイズ注入
         if (k > 3.5f)
             u += 1e-7f;
 
-        // ===== 【改善】入力段での非線形（段別に異なる強度）=====
-        u = diodeSat(u, satStrength * 0.9f);  // 入力: 弱い飽和
+        // ===== 入力段での非線形 =====
+        u = std::tanh(u);
 
-        // ===== 4段 ZDF LP フォワードパス（各段で非線形適用）=====
+        // ===== 4段 ZDF LP フォワードパス =====
         float v1 = (u - s1) * g * inv1pg;
         float y1 = v1 + s1;
-        y1 = diodeSat(y1, satStrength);  // 各段出力で非線形
+        y1 = std::tanh(y1);
         s1 = s1 + 2.0f * v1;
 
         float v2 = (y1 - s2) * g * inv1pg;
         float y2 = v2 + s2;
-        y2 = diodeSat(y2, satStrength);
+        y2 = std::tanh(y2);
         s2 = s2 + 2.0f * v2;
 
         float v3 = (y2 - s3) * g * inv1pg;
         float y3 = v3 + s3;
-        y3 = diodeSat(y3, satStrength);
+        y3 = std::tanh(y3);
         s3 = s3 + 2.0f * v3;
 
         float v4 = (y3 - s4) * g * inv1pg;
         float y4 = v4 + s4;
-        y4 = diodeSat(y4, satStrength);  // 出力段で最強の非線形
+        y4 = std::tanh(y4);
         s4 = s4 + 2.0f * v4;
 
-        // ===== 【改善】8Hz HPF（ACカップリング特性）=====
-        // TB-303 実機特性: 低域 -3dB @ 8Hz
+        // ===== 8Hz HPF =====
         float& hpf_s = st.diodeHpfS[ch];
         float hpf_out = tpt1HPF(y4, hpf_s, st.diode_h);
-
-        // HPFゲイン補正（高域がブーストされるのを防ぐ）
         hpf_out *= 0.95f;
 
         return hpf_out;
