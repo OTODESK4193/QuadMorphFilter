@@ -127,31 +127,46 @@ namespace TptFilter_Ladder
 
         // 初期推定値（明示的 ZDF 近似）
         float u_pre = (x - k * sigma) / (1.0f + k * G4);
-        if (k > 3.5f) u_pre += 1e-7f;  // 自己発振安定化ノイズ
+        if (k > 3.5f) u_pre += 1e-5f;  // 自己発振シードノイズ（アナログ回路の熱雑音に相当）
 
-        // NR 反復
-        for (int nr = 0; nr < 3; ++nr)
+        // ============================================================
+        // ハイブリッド ソルバー
+        //
+        // 【NR の自己発振問題】
+        //   x=0（無音）かつ全状態=0 の時、f(u) = u + k·y4(u) = 0 の
+        //   唯一解は u=0。NR は常に trivial 解へ収束し自己発振しない。
+        //
+        // 【解決策】
+        //   k ≤ 4.0（安定域）: NR で高精度な解を求める
+        //   k > 4.0（不安定域）: 明示的 ZDF をそのまま使用
+        //     → 明示的 ZDF の数値誤差がシードとなり limit cycle が成長する
+        // ============================================================
+        if (k <= 4.0f)
         {
-            const float u_sat = std::tanh(u_pre);
-            const float y1    = std::tanh(G * u_sat + S1);
-            const float y2    = std::tanh(G * y1    + S2);
-            const float y3    = std::tanh(G * y2    + S3);
-            const float y4    = std::tanh(G * y3    + S4);
+            for (int nr = 0; nr < 3; ++nr)
+            {
+                const float u_sat = std::tanh(u_pre);
+                const float y1    = std::tanh(G * u_sat + S1);
+                const float y2    = std::tanh(G * y1    + S2);
+                const float y3    = std::tanh(G * y2    + S3);
+                const float y4    = std::tanh(G * y3    + S4);
 
-            const float f = u_pre + k * y4 - x;
+                const float f = u_pre + k * y4 - x;
 
-            // 連鎖律: dy4/du_pre = G⁴ · ∏ sech²
-            const float dchain = G4
-                * (1.0f - u_sat * u_sat)
-                * (1.0f - y1   * y1)
-                * (1.0f - y2   * y2)
-                * (1.0f - y3   * y3)
-                * (1.0f - y4   * y4);
+                // 連鎖律: dy4/du_pre = G⁴ · ∏ sech²
+                const float dchain = G4
+                    * (1.0f - u_sat * u_sat)
+                    * (1.0f - y1   * y1)
+                    * (1.0f - y2   * y2)
+                    * (1.0f - y3   * y3)
+                    * (1.0f - y4   * y4);
 
-            const float f_prime = 1.0f + k * dchain;
-            if (std::abs(f_prime) < 1e-10f) break;
-            u_pre -= f / f_prime;
+                const float f_prime = 1.0f + k * dchain;
+                if (std::abs(f_prime) < 1e-10f) break;
+                u_pre -= f / f_prime;
+            }
         }
+        // k > 4.0: 明示的 ZDF の初期推定値をそのまま使用（自己発振維持）
 
         // ===== NR 収束値で状態を更新（1 回のみ）=====
         //
@@ -166,22 +181,16 @@ namespace TptFilter_Ladder
         //   単純な入力 tanh への適用は音響的に正しくない。
         //   エイリアス抑制は既存の Oversampling (OS) に委ねる。
         //
-        // ===== Accent による diode サチュレーション強度 =====
+        // ===== 入力段 tanh（NR ソルバーと一致させる）=====
         //
-        // 【diodeSat strength の役割】
-        //   NR ソルバーは常に strength=1.0 の tanh で収束解を求める（精度優先）。
-        //   最終フォワードパスの入力段 tanh のみ strength を適用し、
-        //   Accent モードごとの音色差（ソフト〜ハード）を生み出す。
+        // 【diodeSat strength を入力段に適用しない理由】
+        //   NR ソルバーは tanh(u_pre) で収束解を求めている。
+        //   状態更新で tanh(u_pre * strength) を使うと NR の解と矛盾し、
+        //   フィードバックゲインが変化して自己発振条件（k > 4.0）が
+        //   崩れるため、strength=1.0 の std::tanh を使用する。
+        //   Accent の音色差は k_max（Off=4.2/Low=4.6/High=5.0）によって実現する。
         //
-        //   Off  (0.85): ソフトなサチュレーション → 丸みのある音色
-        //   Low  (1.00): 標準サチュレーション（基準）
-        //   High (1.25): ハードなサチュレーション → エッジの立った音色
-        //
-        const float strength = (st.slopeIdx == 0) ? 0.85f
-                             : (st.slopeIdx == 1) ? 1.00f
-                             :                      1.25f;
-
-        const float u_sat = diodeSat(u_pre, strength);
+        const float u_sat = std::tanh(u_pre);
 
         const float v1 = (u_sat - s1) * G;
         const float y1 = std::tanh(v1 + s1);
@@ -258,18 +267,24 @@ namespace TptFilter_Ladder
                     // ============================================================
                     const float inv_norm = 1.0f / (1.0f + st.ladderRes * G4);
                     float u_hat = c;
-                    if (st.ladderRes > 3.5f) u_hat += 1e-6f;
+                    if (st.ladderRes > 3.5f) u_hat += 1e-5f;  // 自己発振シードノイズ
 
-                    for (int nr = 0; nr < 3; ++nr)
+                    // ハイブリッド: ladderRes ≤ 4.0 は NR、> 4.0 は明示的 ZDF
+                    if (st.ladderRes <= 4.0f)
                     {
-                        const float t     = std::tanh(u_hat * inv_norm);
-                        const float sech2 = 1.0f - t * t;
-                        const float f_val = u_hat + st.ladderRes * G4 * t - c;
-                        const float f_prime = 1.0f
-                            + st.ladderRes * G4 * inv_norm * sech2;
-                        if (std::abs(f_prime) < 1e-10f) break;
-                        u_hat -= f_val / f_prime;
+                        for (int nr = 0; nr < 3; ++nr)
+                        {
+                            const float t     = std::tanh(u_hat * inv_norm);
+                            const float sech2 = 1.0f - t * t;
+                            const float f_val = u_hat + st.ladderRes * G4 * t - c;
+                            const float f_prime = 1.0f
+                                + st.ladderRes * G4 * inv_norm * sech2;
+                            if (std::abs(f_prime) < 1e-10f) break;
+                            u_hat -= f_val / f_prime;
+                        }
                     }
+                    // ladderRes > 4.0: 明示的 ZDF の初期推定値をそのまま使用（自己発振維持）
+
                     // ADAA: 入力 tanh に適用
                     const float tanh_input = u_hat * inv_norm;
                     u = tanhAdaa(tanh_input, st.moogAdaaPrevInput[stage][ch]);
