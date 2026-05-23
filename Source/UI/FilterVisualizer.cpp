@@ -210,17 +210,25 @@ void FilterVisualizer::paint(juce::Graphics& g)
                     // そのため Off/Low/High すべてを安定域（k_eff < 4.0）に収め、
                     // 閾値への近さでピーク高さを制御する。
                     //
-                    // Off  → k_eff_max = 3.50  ピーク小
-                    // Low  → k_eff_max = 3.75  ピーク中
-                    // High → k_eff_max = 3.92  ピーク大（発振直前を表現）
+                    // 【k_norm に冪乗カーブを適用する理由】
+                    //   線形マッピングでは中〜高レゾナンス域で Low/High の差が
+                    //   ほとんど視覚化されない（どちらも 0dB を超えない）。
+                    //   pow(k_norm, 0.4) で上位レゾナンス域を引き上げ、
+                    //   Off < Low < High のカーブ差を明確に表現する。
+                    //
+                    // Off  → k_eff_max = 3.30  ピーク小（非アクセント）
+                    // Low  → k_eff_max = 3.65  ピーク中（軽い自己発振）
+                    // High → k_eff_max = 3.90  ピーク大（発振直前を表現）
 
                     float k_norm = juce::jmap(juce::jlimit(0.1f, 10.0f, res),
                         0.1f, 10.0f, 0.0f, 1.0f);
+                    // 冪乗カーブ: 中高レゾナンスで Off/Low/High の差を強調
+                    float k_norm_curved = std::pow(k_norm, 0.4f);
 
-                    float k_eff_max = (slopeIdx == 0) ? 3.50f
-                                    : (slopeIdx == 1) ? 3.75f
-                                    :                   3.92f;
-                    float k = k_norm * k_eff_max;
+                    float k_eff_max = (slopeIdx == 0) ? 3.30f
+                                    : (slopeIdx == 1) ? 3.65f
+                                    :                   3.90f;
+                    float k = k_norm_curved * k_eff_max;
 
                     float w_norm_local = freq / juce::jlimit(20.0f, 20000.0f, fc);
                     float w2_local = w_norm_local * w_norm_local;

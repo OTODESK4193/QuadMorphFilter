@@ -153,22 +153,36 @@ namespace TptFilter_Ladder
             u_pre -= f / f_prime;
         }
 
-        // ===== NR 収束値で状態を更新（ADAA 適用・1 回のみ）=====
+        // ===== NR 収束値で状態を更新（1 回のみ）=====
         //
-        // 【ADAA 適用方針】
-        //   入力段 tanh（u_pre → u_sat）のみ ADAA を適用する。
+        // 【TB-303 に ADAA を適用しない理由】
+        //   TB-303 Diode Ladder は Stateful System（再帰的帰還フィルター）である。
+        //   ADAA の実体は H_AA1(z) = (1+z⁻¹)/2 という 0.5 サンプル遅延フィルターであり、
+        //   これを帰還ループ内の非線形要素（入力 tanh）に適用すると、
+        //   ループ全体の位相が狂い、4 極ラダーの共振周波数・Q が変化してリップルが発生する。
+        //   （Bilbao et al., "Antiderivative Antialiasing for Stateful Systems", MDPI 2020 参照）
         //
-        //   内部 ZDF ステージ（lp1〜lp4）への ADAA は適用しない。
-        //   理由: 再帰フィードバックループ内部で ADAA（≈ハーフサンプル遅延）を
-        //   多段適用すると、小信号線形解析でリップルが発生し
-        //   フィルター本来の周波数特性が損なわれる。
-        //   非線形エイリアス低減の主要効果は入力段 ADAA のみで得られる。
+        //   Stateful System への ADAA 適用には線形ブランチ全体への同期フィルター挿入が必要で、
+        //   単純な入力 tanh への適用は音響的に正しくない。
+        //   エイリアス抑制は既存の Oversampling (OS) に委ねる。
         //
-        // 入力段 tanh: ADAA 適用
-        const float u_sat = tanhAdaa(u_pre, st.diodeAdaaPrevInput[ch]);
-        st.diodeAdaaPrevInput[ch] = u_pre;
+        // ===== Accent による diode サチュレーション強度 =====
+        //
+        // 【diodeSat strength の役割】
+        //   NR ソルバーは常に strength=1.0 の tanh で収束解を求める（精度優先）。
+        //   最終フォワードパスの入力段 tanh のみ strength を適用し、
+        //   Accent モードごとの音色差（ソフト〜ハード）を生み出す。
+        //
+        //   Off  (0.85): ソフトなサチュレーション → 丸みのある音色
+        //   Low  (1.00): 標準サチュレーション（基準）
+        //   High (1.25): ハードなサチュレーション → エッジの立った音色
+        //
+        const float strength = (st.slopeIdx == 0) ? 0.85f
+                             : (st.slopeIdx == 1) ? 1.00f
+                             :                      1.25f;
 
-        // 各 ZDF 段: 標準 tanh（フィルター特性を保全）
+        const float u_sat = diodeSat(u_pre, strength);
+
         const float v1 = (u_sat - s1) * G;
         const float y1 = std::tanh(v1 + s1);
         s1 += 2.0f * v1;
