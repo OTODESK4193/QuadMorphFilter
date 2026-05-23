@@ -138,6 +138,17 @@ struct TptFilterState
     // フィードバックに使うために必要
     float diodePrevY4[2] = {};
 
+    // ===== ADAA (Antiderivative Antialiasing) 用前サンプル入力値 =====
+    // 各 tanh の前サンプル入力 x_prev を保持する。
+    // ADAA 式: y = (log(cosh(x)) - log(cosh(x_prev))) / (x - x_prev)
+    //
+    // Moog (model 1): 入力段 tanh のみ [stage][channel]
+    float moogAdaaPrevInput[8][2] = {};
+    //
+    // TB-303 (model 2): 入力段 + 4 ZDF 段の LP 出力 tanh
+    float diodeAdaaPrevInput[2]   = {};   // u_pre  [channel]
+    float diodeAdaaPrevLp[4][2]   = {};   // lp1-4  [stage_idx 0-3][channel]
+
 
     // ===== 【既存コード: AGC ここから】=====
     float rmsIn[2] = {};
