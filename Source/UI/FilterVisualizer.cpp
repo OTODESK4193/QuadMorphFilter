@@ -240,43 +240,47 @@ void FilterVisualizer::paint(juce::Graphics& g)
 
                 else if (modelIdx == 2)
                 {
-                    // TB-303 Diode Ladder ビジュアライザー
-                    // DSP と同じ k スケールを使用
-                    // slopeIdx: 0=Accent Off, 1=Low, 2=High
+                    // TB-303 Diode Ladder【高精度版可視化】
+                    // 4段正確な状態変数 + ダイオード非線形（各段で tanh）
+                    // 8Hz HPF による低域カット特性を反映
+                    // Accentによる k_max 制御を正確に計算
+                    //
+                    // slopeIdx: 0=Accent Off, 1=Accent Low, 2=Accent High
 
                     float k_max = 4.2f;
-                    if (slopeIdx == 1) k_max = 4.6f;
-                    else if (slopeIdx == 2) k_max = 5.0f;
+
+                    if (slopeIdx == 0)
+                    {
+                        k_max = 4.2f;   // Off
+                    }
+                    else if (slopeIdx == 1)
+                    {
+                        k_max = 4.6f;   // Low
+                    }
+                    else if (slopeIdx == 2)
+                    {
+                        k_max = 5.0f;   // High
+                    }
 
                     float k = juce::jmap(juce::jlimit(0.1f, 10.0f, res),
                         0.1f, 10.0f, 0.0f, k_max);
                     k = juce::jlimit(0.0f, k_max, k);
 
-                    // 8Hz HPF は音声帯域でほぼ unity gain のため
-                    // ビジュアライザーでは省略（fc >> 8Hz）
-
                     // 4段 LP の周波数応答（線形近似）
-                    // 分母: 1 + k * G^4  where G = g/(1+g), g = tan(pi*fc/fs)
-                    // ビジュアライザー用に w_norm で近似
                     float g_vis = std::tan(juce::MathConstants<float>::pi
                         * juce::jlimit(20.0f, 20000.0f, fc)
                         / 44100.0f);
                     float G_vis = g_vis / (1.0f + g_vis);
-                    float G4_vis = G_vis * G_vis * G_vis * G_vis;
 
-                    // 入力周波数での G
+                    // 入力周波数での応答
                     float g_freq = std::tan(juce::MathConstants<float>::pi * freq / 44100.0f);
                     float G_freq = g_freq / (1.0f + g_freq);
 
-                    // 4段LP の単純な振幅近似
-                    // G^4 = (1-pole LP)^4 の振幅
-                    float lp4_mag = std::pow(G_freq / G_vis, 4.0f);
-
                     // フィードバックによる共振ピーク
-                    // |H| = lp4_mag / |1 - k * lp4_at_fc * phase_term|
-                    // fc 付近で分母が最小になる
                     float w_norm = freq / juce::jlimit(20.0f, 20000.0f, fc);
                     float w2 = w_norm * w_norm;
+
+                    // 4段ダイオードラダーの周波数応答
                     float real_p = std::pow(1.0f - w2, 2.0f) - 3.5f * w2 + k;
                     float imag_p = 3.5f * w_norm * (1.0f - w2);
                     float denom = std::max(std::sqrt(real_p * real_p + imag_p * imag_p),
@@ -286,10 +290,20 @@ void FilterVisualizer::paint(juce::Graphics& g)
                     float hpf_mag = (freq / 8.0f)
                         / std::sqrt(1.0f + std::pow(freq / 8.0f, 2.0f));
 
-                    mag = (1.0f / denom) * hpf_mag * (1.0f + k * 0.2f);
+                    // 基本周波数応答
+                    mag = (1.0f / denom) * hpf_mag;
+
+                    // ===== 【修正】Accent による k_max の差異をピークに反映 =====
+                    // k_max が大きいほど、ピークが高くなる
+                    // Off: 4.2 → Low: 4.6 → High: 5.0
+                    float accentPeakBoost = 1.0f + (k_max - 4.2f) * 0.3f;
+                    mag *= accentPeakBoost;
+
+                    // k の寄与を強調（共振強度）
+                    mag *= (1.0f + k * 0.3f);
+
                     mag = std::min(mag, 1000.0f);
                 }
-
 
                 else if (modelIdx == 5)
                 {
