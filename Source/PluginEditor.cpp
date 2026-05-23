@@ -1,11 +1,8 @@
 ﻿// ==========================================
 // PluginEditor.cpp
 // ==========================================
-// ===== 既存コード =====
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
-
-// ===== 【新規追加】=====
 #include "DSP/ModelCapabilities.h"
 
 QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
@@ -44,7 +41,6 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
     setupMaster(dryWetLabel, dryWetSlider, "Dry/Wet", "dryWet", dwAtt);
     setupMaster(ceilingLabel, ceilingSlider, "Limit Ceil", "limiterCeiling", clAtt);
 
-    // ===== XY Mode =====
     xyModeLabel.setText("Mode", juce::dontSendNotification);
     xyModeLabel.setJustificationType(juce::Justification::centredRight);
     addAndMakeVisible(xyModeLabel);
@@ -53,20 +49,13 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
     xyModeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         audioProcessor.apvts, "xyMode", xyModeCombo);
 
-    // ===== 【新規追加】ここに挿入 =====
     osModeLabel.setText("OS", juce::dontSendNotification);
     osModeLabel.setJustificationType(juce::Justification::centredRight);
     addAndMakeVisible(osModeLabel);
-
     osModeCombo.addItemList({ "Off", "Auto", "2x", "4x" }, 1);
     addAndMakeVisible(osModeCombo);
     osModeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         audioProcessor.apvts, "osMode", osModeCombo);
-
-    // ===== LFO Cut/Res per-filter スイッチ =====
-    // 【色改善】
-    //   LFO Cut: 0xffC2185B (Material Pink 700) - 視認性の高い深いピンク
-    //   LFO Res: 0xffE65100 (Material Orange 900) - 視認性の高い深いオレンジ
 
     lfoCutLabel.setText("LFO Cut", juce::dontSendNotification);
     lfoCutLabel.setJustificationType(juce::Justification::centredRight);
@@ -115,23 +104,18 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
 {
     auto [maxSlope, hasLP, hasBP, hasHP, hasNotch] = getModelCaps(modelIdx);
 
-    // ===== スロープ: TB-303 は Accent コンボに差し替え =====
     if (modelIdx == 2)
     {
-        // Accent ラベルに変更（ID は 1/2/3 のまま流用）
         g.slope.clear(juce::dontSendNotification);
         g.slope.addItem("Accent: Off", 1);
         g.slope.addItem("Accent: Low", 2);
         g.slope.addItem("Accent: High", 3);
 
-        // 選択値が範囲外なら 1 に戻す
         if (g.slope.getSelectedId() < 1 || g.slope.getSelectedId() > 3)
             g.slope.setSelectedId(1, juce::sendNotification);
     }
     else
     {
-        // 通常スロープラベルに戻す
-        // Accent ラベルになっている場合のみリセット
         if (g.slope.getNumItems() < 4 ||
             g.slope.getItemText(0) == "Accent: Off")
         {
@@ -140,13 +124,14 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
             g.slope.addItem("24dB", 2);
             g.slope.addItem("48dB", 3);
             g.slope.addItem("96dB", 4);
+
+            // ✅ 【修正】デフォルト値を 12dB（ID=1）に設定
+            g.slope.setSelectedId(1, juce::sendNotification);
         }
 
-        // 有効なスロープのみ選択可能に
         for (int i = 1; i <= 4; ++i)
             g.slope.setItemEnabled(i, (i - 1) <= maxSlope);
 
-        // 現在値が無効なら補正
         int curSlope = g.slope.getSelectedId();
         if (curSlope - 1 > maxSlope)
         {
@@ -156,7 +141,6 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
         }
     }
 
-    // ===== タイプ =====
     g.type.setItemEnabled(1, hasLP);
     g.type.setItemEnabled(2, hasBP);
     g.type.setItemEnabled(3, hasHP);
@@ -176,8 +160,7 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
             p->setValueNotifyingHost(p->convertTo0to1((float)(fallback - 1)));
     }
 
-    // ===== ラベル変更 =====
-    if (modelIdx == 4) // Bitcrush
+    if (modelIdx == 4)
     {
         g.cutoffLabel.setText("SRR", juce::dontSendNotification);
         g.resLabel.setText("Bits", juce::dontSendNotification);
@@ -238,19 +221,14 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g,
     setup(g.cutoffLabel, g.cutoff, "Cut", "cutoff", g.cAtt);
     setup(g.resLabel, g.res, "Res", "res", g.rAtt);
 
-    // ===== 【新規追加】モデル変更リスナー =====
-   // モデルが変わったらスロープ・タイプを更新
     g.model.onChange = [this, &g, s]()
         {
-            int modelIdx = g.model.getSelectedId() - 1; // 1-indexed → 0-indexed
+            int modelIdx = g.model.getSelectedId() - 1;
             refreshFilterGroupControls(g, s, modelIdx);
         };
 
-    // 初期状態を設定（現在のモデル値で更新）
     int initialModel = (int)audioProcessor.apvts.getRawParameterValue("model" + s)->load();
     refreshFilterGroupControls(g, s, initialModel);
-
-
 }
 
 void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, juce::String name)
@@ -334,23 +312,18 @@ void QuadMorphFilterAudioProcessorEditor::resized()
     const int rightX = b.getX() + visW;
     const int rightW = b.getRight() - rightX;
 
-    // ===== 上段（300px）: ビジュアライザー + XYパッド =====
     {
         auto top = b.removeFromTop(300);
         visualizer.setBounds(top.removeFromLeft(visW).reduced(5));
         xyPad.setBounds(top.reduced(5));
     }
-    b.removeFromTop(4); // 最小限の間隔
+    b.removeFromTop(4);
 
-    // ===== 右パネルコントロール（フィルター行と同じY帯に絶対配置）=====
-    // フィルター行は左側 ~640px のみ使用するため右パネルは空き
-    // → Mode/LFO を右パネルに重ねることで余白をゼロにする
     {
         int ctrlY = b.getY();
         const int rowH = 24;
         const int gap = 2;
 
-        // Mode + OS 行
         {
             auto area = juce::Rectangle<int>(rightX, ctrlY, rightW, rowH).reduced(4, 1);
             auto modeHalf = area.removeFromLeft(area.getWidth() / 2 - 4);
@@ -362,7 +335,6 @@ void QuadMorphFilterAudioProcessorEditor::resized()
             ctrlY += rowH + gap;
         }
 
-        // LFO Cut 行
         {
             auto area = juce::Rectangle<int>(rightX, ctrlY, rightW, rowH).reduced(4, 1);
             lfoCutLabel.setBounds(area.removeFromLeft(52).reduced(0, 1));
@@ -372,7 +344,6 @@ void QuadMorphFilterAudioProcessorEditor::resized()
             ctrlY += rowH + gap;
         }
 
-        // LFO Res 行
         {
             auto area = juce::Rectangle<int>(rightX, ctrlY, rightW, rowH).reduced(4, 1);
             lfoResLabel.setBounds(area.removeFromLeft(52).reduced(0, 1));
@@ -382,7 +353,6 @@ void QuadMorphFilterAudioProcessorEditor::resized()
         }
     }
 
-    // ===== フィルター行（右パネルコントロールと同じY帯から開始）=====
     const int sliderW = 155;
     for (auto* g : { &groupA, &groupB, &groupC, &groupD })
     {
@@ -405,7 +375,6 @@ void QuadMorphFilterAudioProcessorEditor::resized()
     }
     b.removeFromTop(6);
 
-    // ===== LFO 行 =====
     for (int i = 0; i < 3; ++i)
     {
         auto r = b.removeFromTop(28).reduced(5, 2);
@@ -440,7 +409,6 @@ void QuadMorphFilterAudioProcessorEditor::resized()
 
     b.removeFromTop(10);
 
-    // ===== マスターコントロール =====
     auto masterArea = b.removeFromTop(28).reduced(5, 2);
     auto cellW = masterArea.getWidth() / 3;
 
