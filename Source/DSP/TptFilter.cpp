@@ -152,6 +152,13 @@ void TptFilter::setType(int newType) { state.filterType = newType; }
 
 void TptFilter::setSlope(int index)
 {
+    // slopeIdx が変わった場合（例: Accent Off→Low→High の切り替え）は
+    // lastCutoff を無効化し、次の updateCoefficients で係数再計算を強制する。
+    // ※ updateCoefficients は cutoff/res 変化がなければ早期 return するため、
+    //   slopeIdx 変更だけでは TptFilter_Ladder::updateCoeffs が呼ばれない。
+    if (state.slopeIdx != index)
+        lastCutoff = -1.0f;
+
     // ===== TB-303 は Accent なので、変換は不要（index は常に 0,1,2）=====
     state.slopeIdx = index;  // 全モデル共通で、変換なし
     const int m = state.filterModel;
@@ -637,8 +644,10 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
             static constexpr float accentPhi[4] = { 1.0f, 1.21f, 1.56f, 1.56f };
             const float phi    = accentPhi[juce::jlimit(0, 3, state.slopeIdx)];
             const float fc_eff = juce::jlimit(20.0f, 20000.0f, fc * phi);
-            // k_max per accent mode: Off=4.2, Low=4.6, High=5.0
-            static constexpr float kMaxTab[4] = { 4.2f, 4.6f, 5.0f, 5.0f };
+            // k_max per accent mode（PluginDoctor/解析用 — DSP とは別値）
+            // 4.0 未満に揃えることで Stinchcombe ピーク高 = 1/|k-4| が
+            // Off < Low < High の順で正しく増大する。
+            static constexpr float kMaxTab[4] = { 3.5f, 3.7f, 3.85f, 3.85f };
             const float k_max = kMaxTab[juce::jlimit(0, 3, state.slopeIdx)];
             float k = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, k_max);
             // Soft clamp (tanh近似)

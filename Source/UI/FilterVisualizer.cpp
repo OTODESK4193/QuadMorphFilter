@@ -143,9 +143,9 @@ void FilterVisualizer::paint(juce::Graphics& g)
                 }
                 fc = juce::jlimit(20.0f, 20000.0f, fc);
                 res = juce::jlimit(0.1f, 10.0f, res);
-                int modelIdx = (int)processor.apvts.getRawParameterValue("model" + s)->load();
-                int slopeIdx = (int)processor.apvts.getRawParameterValue("slope" + s)->load();
-                int t = (int)processor.apvts.getRawParameterValue("type" + s)->load();
+                int modelIdx = juce::roundToInt(processor.apvts.getRawParameterValue("model" + s)->load());
+                int slopeIdx = juce::roundToInt(processor.apvts.getRawParameterValue("slope" + s)->load());
+                int t        = juce::roundToInt(processor.apvts.getRawParameterValue("type" + s)->load());
                 float freqLimit = fc;
                 float w_norm = freq / freqLimit;
                 float w2 = w_norm * w_norm;
@@ -227,8 +227,12 @@ void FilterVisualizer::paint(juce::Graphics& g)
                     const float phi    = accentPhi[juce::jlimit(0, 3, slopeIdx)];
                     const float fc_eff = juce::jlimit(20.0f, 20000.0f, fc * phi);
 
-                    // ── k_max: Accent モード別 ──
-                    static constexpr float kMaxTab[4] = { 4.2f, 4.6f, 5.0f, 5.0f };
+                    // ── k_max: Accent モード別（ビジュアライザー専用）──
+                    // Stinchcombe 式のピーク高さ = 1/|k-4|。k が 4 に近いほどピーク大。
+                    // k_max を 4.0 未満に揃え、High が最も 4 に近い値を持つことで
+                    // Off < Low < High の順でピークが高く表示されるよう設計。
+                    // ※ DSP（TptFilter_Ladder.cpp）の k_max（4.2/4.6/5.0）は別管理。
+                    static constexpr float kMaxTab[4] = { 3.5f, 3.7f, 3.85f, 3.85f };
                     const float k_max = kMaxTab[juce::jlimit(0, 3, slopeIdx)];
 
                     // ── k: 線形マッピング（res → k）──

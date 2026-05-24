@@ -230,11 +230,11 @@
         auto updateTpt = [&](TptFilter& f, const juce::String& s, int idx)
             {
                 auto [fc, res] = getFilterParams(s, idx);
-                f.setModel((int)apvts.getRawParameterValue("model" + s)->load());
+                f.setModel(juce::roundToInt(apvts.getRawParameterValue("model" + s)->load()));
                 f.setCutoff(fc);
                 f.setResonance(res);
-                f.setType((int)apvts.getRawParameterValue("type" + s)->load());
-                f.setSlope((int)apvts.getRawParameterValue("slope" + s)->load());
+                f.setType (juce::roundToInt(apvts.getRawParameterValue("type"  + s)->load()));
+                f.setSlope(juce::roundToInt(apvts.getRawParameterValue("slope" + s)->load()));
             };
 
         updateTpt(filterA, "A", 0);
