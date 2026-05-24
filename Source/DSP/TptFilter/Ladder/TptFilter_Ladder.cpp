@@ -69,7 +69,8 @@ namespace TptFilter_Ladder
         //   Low  → 1.21× (約 3.2 半音 = Accent ポット中点相当)
         //   High → 1.56× (約 7.7 半音 = Accent ポット最大相当)
         // =====================================================
-        static constexpr float accentPhi[4] = { 1.0f, 1.21f, 1.56f, 1.56f };
+        // ===== 診断テスト: High を 3.0× にして slopeIdx=2 が届くか確認 =====
+        static constexpr float accentPhi[4] = { 1.0f, 1.21f, 3.0f, 3.0f };
         const float phi = accentPhi[juce::jlimit(0, 3, st.slopeIdx)];
 
         const float safeFc = std::clamp(st.smoothedDigitalCutoff * phi,
