@@ -54,9 +54,26 @@ namespace TptFilter_Ladder
     void updateCoeffs(TptFilterState& st)
     {
         if (st.filterModel != 2) return;
-        const float fc = st.smoothedDigitalCutoff;
         const float fs = (float)st.sampleRate;
-        float safeFc = std::clamp(fc, 20.0f, fs * 0.45f);
+
+        // =====================================================
+        // Accent モードによる実効カットオフ上方シフト（Phi 関数）
+        //
+        // 実機 TB-303 では Accent トリガー時に MEG エンベロープ電圧が
+        // VCF カットオフ制御電流に加算され、フィルターが高域側にシフトする。
+        // 静的実装ではエンベロープが走らないため、そのピーク効果を
+        // 定常カットオフへの乗算として "投影" する。
+        //
+        // 研究値（Tim Stinchcombe / Open303 解析より）:
+        //   Off  → 1.00× (シフトなし)
+        //   Low  → 1.21× (約 3.2 半音 = Accent ポット中点相当)
+        //   High → 1.56× (約 7.7 半音 = Accent ポット最大相当)
+        // =====================================================
+        static constexpr float accentPhi[4] = { 1.0f, 1.21f, 1.56f, 1.56f };
+        const float phi = accentPhi[juce::jlimit(0, 3, st.slopeIdx)];
+
+        const float safeFc = std::clamp(st.smoothedDigitalCutoff * phi,
+                                        20.0f, fs * 0.45f);
         st.diode_g = std::tan(juce::MathConstants<float>::pi * safeFc / fs);
         st.diode_h = std::tan(juce::MathConstants<float>::pi * 8.0f / fs);
     }

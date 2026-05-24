@@ -112,7 +112,14 @@ void TptFilter::reset()
         // ===== 既存コード（続き）=====
     }  // for (int ch...)
 
-    lastCutoff = -1.0f; lastRes = -1.0f;
+    // lastCutoff = -1.0f は「強制再計算」のセンチネルとして安全に使える。
+    // しかし lastRes = -1.0f はスムージング計算に直接使われるため危険:
+    //   currentRes = lastRes + coef*(target - lastRes) → 初回に負値になる
+    //   → R = 1/(2 * negative) < 0 → SVF が正帰還発散 → state が inf になり
+    //   PluginDoctor 等の線形解析ツールに「カーブなし」として見える。
+    // 修正: lastRes は resonance の現在値（常に正）で初期化する。
+    lastCutoff = -1.0f;
+    lastRes = resonance.getCurrentValue();
     state.smoothedDigitalCutoff = cutoff.getCurrentValue();
 
     if (oversampler != nullptr)
@@ -362,7 +369,18 @@ float TptFilter::processSample(int ch, float x)
     state.agcGain[ch] = (1.0f - 0.0005f) * state.agcGain[ch] + 0.0005f * targetGain;
 
     float finalGain = state.agcGain[ch];
-    if (m == 1 || m == 2 || m == 12 || m == 13 || m == 15)
+
+    // ===== model 0 (CleanSVF): AGC バイパス =====
+    // CleanSVF は線形フィルターなので AGC は不要。
+    // AGC がゲインを時変にすると PluginDoctor などの LTI 解析ツールが
+    // 逆畳み込みに失敗し「カーブなし」になる。
+    // state の更新（rmsOut / agcGain）は継続することで、
+    // 他モデルへ切り替えた際の不連続を防ぐ。
+    if (m == 0)
+    {
+        finalGain = 1.0f;
+    }
+    else if (m == 1 || m == 2 || m == 12 || m == 13 || m == 15)
     {
         float k_norm;
         if (m == 2) {
@@ -614,23 +632,26 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
             return (f / 8.0f) / std::sqrt(1.0f + std::pow(f / 8.0f, 2.0f));
             };
         if (m == 2) {
-            // TB-303: DSP と同じ k スケール
-            float k = juce::jmap(res, 0.1f, 10.0f, 0.0f, 4.0f);
-            if (state.slopeIdx == 0) {
-                float Q_eff = juce::jlimit(0.5f, 12.0f, 0.5f + k * 1.8f);
-                float den = std::sqrt(std::pow(1.0f - w2, 2.0f)
-                    + std::pow(w / Q_eff, 2.0f));
-                return std::min((1.0f / den) * hpfCorr(frequency) * (1.0f + k * 0.12f),
-                    1000.0f);
-            }
-            else {
-                float real_p = std::pow(1.0f - w2, 2.0f) - 4.0f * w2 + k;
-                float imag_p = 4.0f * w * (1.0f - w2);
-                float denom = std::max(std::sqrt(real_p * real_p + imag_p * imag_p),
-                    0.005f);
-                return std::min((1.0f / denom) * hpfCorr(frequency) * (1.0f + k * 0.15f),
-                    1000.0f);
-            }
+            // TB-303: Phi function でアクセントモード別カットオフシフト
+            // Off=1.00x, Low=1.21x (+3.2st), High=1.56x (+7.7st)
+            static constexpr float accentPhi[4] = { 1.0f, 1.21f, 1.56f, 1.56f };
+            const float phi    = accentPhi[juce::jlimit(0, 3, state.slopeIdx)];
+            const float fc_eff = juce::jlimit(20.0f, 20000.0f, fc * phi);
+            // k_max per accent mode: Off=4.2, Low=4.6, High=5.0
+            static constexpr float kMaxTab[4] = { 4.2f, 4.6f, 5.0f, 5.0f };
+            const float k_max = kMaxTab[juce::jlimit(0, 3, state.slopeIdx)];
+            float k = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, k_max);
+            // Soft clamp (tanh近似)
+            if (k > 3.8f) { const float excess = k - 3.8f; k = 3.8f + excess / (1.0f + excess * 0.6f); }
+            const float w_tb  = frequency / fc_eff;
+            const float w2_tb = w_tb * w_tb;
+            // Stinchcombe formula
+            const float real_p = std::pow(1.0f - w2_tb, 2.0f) - 4.0f * w2_tb + k;
+            const float imag_p = 4.0f * w_tb * (1.0f - w2_tb);
+            const float denom  = std::max(std::sqrt(real_p * real_p + imag_p * imag_p), 0.003f);
+            const float g_loss = 1.0f / (1.0f + k * 0.07f);
+            float mag_tb = (1.0f / denom) * hpfCorr(frequency) * g_loss;
+            return std::min(mag_tb, 1000.0f);
         }
         // Moog 系 (1,12,13,15)
         float r_scale = (m == 13) ? 5.0f : 4.5f;

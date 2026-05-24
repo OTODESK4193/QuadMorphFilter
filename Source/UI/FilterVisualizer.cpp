@@ -201,48 +201,66 @@ void FilterVisualizer::paint(juce::Graphics& g)
                 }
                 else if (modelIdx == 2)
                 {
-                    // TB-303 Diode Ladder 可視化
+                    // =====================================================
+                    // TB-303 Diode Ladder ビジュアライザー
+                    // （研究資料: Tim Stinchcombe + Deep Research 推奨モデル）
                     //
-                    // 【設計方針】
-                    // 4極ラダーの発振閾値は連続時間モデルで k = 4.0。
-                    // k > 4 の領域は線形式として「不安定」になり、k が増えるほど
-                    // 分母が大きくなってピークが逆に下がる現象が起きる。
-                    // そのため Off/Low/High すべてを安定域（k_eff < 4.0）に収め、
-                    // 閾値への近さでピーク高さを制御する。
+                    // 【Phi 関数による実効カットオフ上方シフト】
+                    //   実機では Accent トリガー時に MEG 電圧が VCF カットオフ
+                    //   制御電流に加算され、フィルターが高域へシフトする。
+                    //   静的ビジュアライザーでは動的エンベロープが走らないため、
+                    //   そのピーク効果を「定常カットオフへの乗算」として投影する。
                     //
-                    // 【k_norm に冪乗カーブを適用する理由】
-                    //   線形マッピングでは中〜高レゾナンス域で Low/High の差が
-                    //   ほとんど視覚化されない（どちらも 0dB を超えない）。
-                    //   pow(k_norm, 0.4) で上位レゾナンス域を引き上げ、
-                    //   Off < Low < High のカーブ差を明確に表現する。
+                    //   Off  → Φ = 1.00  (シフトなし)
+                    //   Low  → Φ = 1.21  (約 3.2 半音 ≈ Accent ポット中点)
+                    //   High → Φ = 1.56  (約 7.7 半音 ≈ Accent ポット最大)
                     //
-                    // Off  → k_eff_max = 3.30  ピーク小（非アクセント）
-                    // Low  → k_eff_max = 3.65  ピーク中（軽い自己発振）
-                    // High → k_eff_max = 3.90  ピーク大（発振直前を表現）
+                    // 【k_max（各モードの自己発振上限）】
+                    //   Off=4.2 / Low=4.6 / High=5.0
+                    //   k > 3.8 でソフトクランプし +∞ 発散を防止。
+                    //
+                    // 【G_loss】レゾナンス上昇に伴うパスバンドゲインロスを近似。
+                    // =====================================================
 
-                    float k_norm = juce::jmap(juce::jlimit(0.1f, 10.0f, res),
-                        0.1f, 10.0f, 0.0f, 1.0f);
-                    // 冪乗カーブ: 中高レゾナンスで Off/Low/High の差を強調
-                    float k_norm_curved = std::pow(k_norm, 0.4f);
+                    // ── Phi 関数: Accent モード別カットオフシフト ──
+                    static constexpr float accentPhi[4] = { 1.0f, 1.21f, 1.56f, 1.56f };
+                    const float phi    = accentPhi[juce::jlimit(0, 3, slopeIdx)];
+                    const float fc_eff = juce::jlimit(20.0f, 20000.0f, fc * phi);
 
-                    float k_eff_max = (slopeIdx == 0) ? 3.30f
-                                    : (slopeIdx == 1) ? 3.65f
-                                    :                   3.90f;
-                    float k = k_norm_curved * k_eff_max;
+                    // ── k_max: Accent モード別 ──
+                    static constexpr float kMaxTab[4] = { 4.2f, 4.6f, 5.0f, 5.0f };
+                    const float k_max = kMaxTab[juce::jlimit(0, 3, slopeIdx)];
 
-                    float w_norm_local = freq / juce::jlimit(20.0f, 20000.0f, fc);
-                    float w2_local = w_norm_local * w_norm_local;
+                    // ── k: 線形マッピング（res → k）──
+                    float k = juce::jmap(juce::jlimit(0.1f, 10.0f, res),
+                                         0.1f, 10.0f, 0.0f, k_max);
 
-                    // 8Hz HPF補正（Stinchcombe モデルに基づく）
-                    float hpf_mag = (freq / 8.0f)
+                    // ── ソフトクランプ: tanh 飽和によるピーク頭打ち近似 ──
+                    if (k > 3.8f)
+                    {
+                        const float excess = k - 3.8f;
+                        k = 3.8f + excess / (1.0f + excess * 0.6f);
+                    }
+
+                    // ── 正規化周波数（Phi シフト後の fc_eff を基準）──
+                    const float w_tb  = freq / fc_eff;
+                    const float w2_tb = w_tb * w_tb;
+
+                    // ── 8Hz HPF 補正（結合コンデンサ由来の低域減衰）──
+                    const float hpf_mag = (freq / 8.0f)
                         / std::sqrt(1.0f + std::pow(freq / 8.0f, 2.0f));
 
-                    // 統一4極ラダー伝達関数 |H| = 1 / |(1+jω)^4 + k|
-                    float real_p = std::pow(1.0f - w2_local, 2.0f) - 4.0f * w2_local + k;
-                    float imag_p = 4.0f * w_norm_local * (1.0f - w2_local);
-                    float denom = std::max(std::sqrt(real_p * real_p + imag_p * imag_p),
-                        0.005f);
-                    mag = (1.0f / denom) * hpf_mag;
+                    // ── Stinchcombe 4極ダイオードラダー伝達関数 ──
+                    //   |H| = 1 / |(1-ω²)² - 4ω² + k + j·4ω(1-ω²)|
+                    const float real_p = std::pow(1.0f - w2_tb, 2.0f) - 4.0f * w2_tb + k;
+                    const float imag_p = 4.0f * w_tb * (1.0f - w2_tb);
+                    const float denom  = std::max(
+                        std::sqrt(real_p * real_p + imag_p * imag_p), 0.003f);
+
+                    // ── G_loss: レゾナンス上昇に伴うパスバンドゲインロス ──
+                    const float g_loss = 1.0f / (1.0f + k * 0.07f);
+
+                    mag = (1.0f / denom) * hpf_mag * g_loss;
                     mag = std::min(mag, 1000.0f);
                 }
                 else if (modelIdx == 5)
