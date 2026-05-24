@@ -243,19 +243,13 @@
         updateTpt(filterD, "D", 3);
 
         // ===== SIMD SVF パラメータ更新 =====
+        // 【注意】FilterA_SVF_SIMD はスロープ（ステージ数）に非対応のため常に無効化。
+        // CleanSVF (model==0) を含む全モデルを TptFilter 経由で処理することで
+        // 12dB/24dB/48dB/96dB のスロープ選択が正しく機能する。
         juce::StringArray suffixes = { "A", "B", "C", "D" };
         for (int idx = 0; idx < 4; ++idx)
         {
-            const juce::String& s = suffixes[idx];
-            int  model = (int)apvts.getRawParameterValue("model" + s)->load();
-            bool enabled = apvts.getRawParameterValue("enable" + s)->load() > 0.5f && model == 0;
-
-            auto [fc, res] = getFilterParams(s, idx);
-
-            svfQuad.setEnabled(idx, enabled);
-            svfQuad.setCutoff(idx, fc);
-            svfQuad.setResonance(idx, res);
-            svfQuad.setType(idx, (int)apvts.getRawParameterValue("type" + s)->load());
+            svfQuad.setEnabled(idx, false);
         }
 
         // ===== 有効フィルター =====
@@ -312,7 +306,9 @@
         auto procTptIfNeeded = [&](juce::AudioBuffer<float>& dst,
             TptFilter& tpt, int model, bool enabled)
             {
-                if (model == 0) return;
+                // model==0 (CleanSVF) も TptFilter 経由で処理する。
+                // これにより currentStages (1/2/4/8) が正しく適用され、
+                // 12dB/24dB/48dB/96dB スロープが実際の音声に反映される。
                 if (!enabled) { dst.clear(); return; }
                 for (int ch = 0; ch < numChannels; ++ch)
                     dst.copyFrom(ch, 0, buffer, ch, 0, numSamples);
