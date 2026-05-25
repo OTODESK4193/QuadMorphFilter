@@ -32,24 +32,52 @@ namespace TptFilter_SVF
                 else                         out = lp + hp;
             }
         }
-        // ----- Model 3, 14: SEM / CS-80 (Driven SVF) -----
-        else if (m == 3 || m == 14)
+        // ----- Model 3: SEM (Oberheim) - OTA 非線形モデル -----
+        // 実機解析:
+        //   Oberheim SEM の VCF は OTA ベース 2 極 SVF。
+        //   飽和は OTA のテール電流（共鳴 BP フィードバック経路）で発生。
+        //   インテグレータはキャパシタ → 線形。
+        //   入力への直接 tanh は回路的に誤り（廃止）。
+        //
+        // 数学モデル（半陰的 ZDF）:
+        //   bp_sat = tanh(s1)             ← OTA 飽和
+        //   hp = (in - 2R·bp_sat - g·s1 - s2) / (1 + g²)
+        //   bp = g·hp + s1
+        //   lp = g·bp + s2
+        //   s1_new = g·hp + bp            ← 線形インテグレータ更新
+        //   s2_new = g·bp + lp
+        //   notch  = lp + hp              ← = in - 2R·bp_sat（SEM 固有）
+        else if (m == 3)
+        {
+            const float inv1g2 = 1.0f / (1.0f + st.g * st.g);
+            for (int stage = 0; stage < st.currentStages; ++stage)
+            {
+                const float bp_sat = std::tanh(st.s1[stage][ch]);
+                float hp = (out
+                            - 2.0f * st.R * bp_sat
+                            - st.g * st.s1[stage][ch]
+                            - st.s2[stage][ch]) * inv1g2;
+                float bp = st.g * hp + st.s1[stage][ch];
+                float lp = st.g * bp + st.s2[stage][ch];
+                st.s1[stage][ch] = st.g * hp + bp;
+                st.s2[stage][ch] = st.g * bp + lp;
+                if (st.filterType == 0) out = lp;
+                else if (st.filterType == 1) out = bp;
+                else if (st.filterType == 2) out = hp;
+                else                         out = lp + hp; // = in - 2R·bp_sat
+            }
+        }
+        // ----- Model 14: CS-80 (Yamaha) - 線形 SVF -----
+        else if (m == 14)
         {
             for (int stage = 0; stage < st.currentStages; ++stage)
             {
-                float drivenOut = (m == 14) ? out : std::tanh(out * 1.2f);
-                float hp = (drivenOut - (2.0f * st.R + st.g) * st.s1[stage][ch]
+                float hp = (out - (2.0f * st.R + st.g) * st.s1[stage][ch]
                     - st.s2[stage][ch]) * st.h;
                 float bp = st.g * hp + st.s1[stage][ch];
                 float lp = st.g * bp + st.s2[stage][ch];
-                if (m == 14) {
-                    st.s1[stage][ch] = st.g * hp + bp;
-                    st.s2[stage][ch] = st.g * bp + lp;
-                }
-                else {
-                    st.s1[stage][ch] = std::tanh(st.g * hp + bp);
-                    st.s2[stage][ch] = std::tanh(st.g * bp + lp);
-                }
+                st.s1[stage][ch] = st.g * hp + bp;
+                st.s2[stage][ch] = st.g * bp + lp;
                 if (st.filterType == 0) out = lp;
                 else if (st.filterType == 1) out = bp;
                 else if (st.filterType == 2) out = hp;

@@ -24,6 +24,7 @@ static inline std::tuple<int, bool, bool, bool, bool> getModelCaps(int m)
     case 15: return { 1, true,  false, false, false }; // Jupiter: 12/24dB, LPのみ
 
            // ===== SVF系 (固定/制限あり) =====
+    case 3:  return { 1, true,  true,  true,  true };  // SEM: 12/24dB (実機は2-pole固定; 24dBはダブルSEM拡張)
     case 5:  return { 0, true,  true,  true,  true };  // Formant: 12dBのみ
     case 10: return { 0, true,  true,  true,  true };  // Reverb FDN: 12dBのみ
     case 21: return { 0, true,  false, false, false }; // Vactrol LPG: 12dB, LPのみ
