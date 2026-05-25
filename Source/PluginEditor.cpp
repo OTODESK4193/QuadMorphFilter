@@ -106,18 +106,38 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
 
     if (modelIdx == 2)
     {
-        g.slope.clear(juce::dontSendNotification);
-        g.slope.addItem("Accent: Off", 1);   // ID=1（インデックス 0）
-        g.slope.addItem("Accent: Low", 2);   // ID=2（インデックス 1）
-        g.slope.addItem("Accent: High", 3);  // ID=3（インデックス 2）
+        // ── TB-303: ComboBoxAttachment を破棄し直接書き込みに切り替え ──
+        // ComboBoxAttachment はコンボ再構築後に内部マッピングがずれ、
+        // "Accent: High"（position 2）が slopeIdx=2 として伝わらない問題を回避。
+        g.slAtt.reset();
 
-        if (g.slope.getSelectedId() < 1 || g.slope.getSelectedId() > 3)
-            g.slope.setSelectedId(1, juce::sendNotification);
+        g.slope.clear(juce::dontSendNotification);
+        g.slope.addItem("Accent: Off", 1);   // position 0 → slopeIdx 0
+        g.slope.addItem("Accent: Low", 2);   // position 1 → slopeIdx 1
+        g.slope.addItem("Accent: High", 3);  // position 2 → slopeIdx 2
+
+        // 現在の APVTS 値を読んでコンボに反映（選択をリセットしない）
+        const int curAccent = juce::roundToInt(
+            audioProcessor.apvts.getRawParameterValue("slope" + suffix)->load());
+        g.slope.setSelectedId(juce::jlimit(1, 3, curAccent + 1),
+                              juce::dontSendNotification);
+
+        // getSelectedItemIndex()（0 基準）をそのまま slopeIdx として APVTS へ書き込む
+        g.slope.onChange = [this, &g, sfx = suffix]()
+        {
+            const int idx = g.slope.getSelectedItemIndex(); // 0=Off, 1=Low, 2=High
+            if (auto* p = audioProcessor.apvts.getParameter("slope" + sfx))
+                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
+        };
     }
     else
     {
-        if (g.slope.getNumItems() < 4 ||
-            g.slope.getItemText(0) == "Accent: Off")
+        // ── 非 TB-303: TB-303 用ハンドラを解除 ──
+        g.slope.onChange = nullptr;
+
+        // TB-303 から切り替えた場合はコンボ再構築＋アタッチメント再生成
+        if (g.slope.getNumItems() != 4 ||
+            (g.slope.getNumItems() > 0 && g.slope.getItemText(0) == "Accent: Off"))
         {
             g.slope.clear(juce::dontSendNotification);
             g.slope.addItem("12dB", 1);
@@ -125,7 +145,10 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
             g.slope.addItem("48dB", 3);
             g.slope.addItem("96dB", 4);
 
-            // ✅ 【修正】デフォルト値を 12dB（ID=1）に設定
+            // TB-303 で reset() したアタッチメントをここで再生成
+            g.slAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+                audioProcessor.apvts, "slope" + suffix, g.slope);
+
             g.slope.setSelectedId(1, juce::sendNotification);
         }
 
@@ -133,7 +156,6 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
             g.slope.setItemEnabled(i, (i - 1) <= maxSlope);
 
         int curSlope = g.slope.getSelectedId();
-        // curSlope < 1 は「空欄」（ID=0）、これもデフォルト12dBに戻す
         if (curSlope < 1 || curSlope - 1 > maxSlope)
         {
             int newId = (curSlope >= 1) ? (maxSlope + 1) : 1;
