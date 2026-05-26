@@ -44,6 +44,45 @@ namespace TptFilter_Ladder
         return std::tanh(0.5f * (x + x_prev));
     }
 
+    // ============================================================
+    // SSM2040 非対称クリップ（各段出力バッファ）
+    //
+    // 【実機の物理特性】
+    //   SSM2040 の各 OTA 段はカレントミラー出力バッファを持ち、
+    //   負方向スイングが約 -500mV でハード飽和する（Q2 カットオフ）。
+    //   正方向はソフト飽和（tanh）。
+    //   4 段全てが電流反転型 OTA のため、奇数段通過後は信号が反転する。
+    //   → 偶数段: 入力負側がクリップ / 奇数段: 入力正側がクリップ（反転後等価）
+    //
+    // 【生成される高調波】
+    //   非対称クリップは偶数次高調波（2nd, 4th…）を主に生成し、
+    //   SSM2040 特有のウォームで倍音豊かな音色の源となる。
+    //
+    // 【係数】
+    //   kHard = 3.0: 約 ±333mV相当（−500mV 実機をノーマライズ）
+    //   正方向 tanh はそのまま使用（ゲイン補正は 1/1 でスケール維持）
+    // ============================================================
+    static inline float ssm2040Sat(float x, int stageIdx) noexcept
+    {
+        constexpr float kHard = 3.0f;
+        if ((stageIdx & 1) == 0)
+        {
+            // 偶数段 (0, 2): 負側ハードクリップ、正側 tanh ソフト飽和
+            if (x >= 0.0f)
+                return std::tanh(x);
+            else
+                return x / (1.0f - x * kHard);   // x<0 なので分母 > 1
+        }
+        else
+        {
+            // 奇数段 (1, 3): 正側ハードクリップ、負側 tanh ソフト飽和（反転後等価）
+            if (x <= 0.0f)
+                return -std::tanh(-x);
+            else
+                return x / (1.0f + x * kHard);
+        }
+    }
+
     static inline float tpt1HPF(float x, float& s, float g)
     {
         float v = (x - s) * g / (1.0f + g);
@@ -309,28 +348,46 @@ namespace TptFilter_Ladder
                 }
                 else
                 {
-                    // model 12 / 13 / 15: 明示的 ZDF（既存）
+                    // model 12 / 13 / 15: 明示的 ZDF
                     float u_pre = c;
                     if (st.ladderRes > 3.5f) u_pre += 1e-6f;
-                    if      (m == 12) u = std::tanh(u_pre * 1.1f) / 1.1f;
-                    else if (m == 13) u = std::tanh(u_pre * 1.5f) / 1.5f;
-                    else              u = u_pre / (1.0f + std::abs(u_pre * 0.5f));
+                    if (m == 12)
+                    {
+                        // CEM3320 (Curtis): 入力 OTA は対称飽和
+                        // ゲイン 1.4 = 実機 Prophet-5 Rev3 の入力レベル相当
+                        // （Rev1/2 の SSM2040 より強めに駆動される）
+                        u = std::tanh(u_pre * 1.4f) / 1.4f;
+                    }
+                    else if (m == 13)
+                    {
+                        // SSM2040: 入力は線形（飽和は各段バッファで発生）
+                        u = u_pre;
+                    }
+                    else
+                    {
+                        // IR3109 (Jupiter-8): ソフトクリップ（OTA 入力差動対）
+                        u = u_pre / (1.0f + std::abs(u_pre * 0.5f));
+                    }
                 }
                 float v1 = (u - s1_) * st.ladderG;
                 float y1 = v1 + s1_;
-                if (m == 15) y1 = std::tanh(y1);
+                if      (m == 13) y1 = ssm2040Sat(y1, 0);
+                else if (m == 15) y1 = std::tanh(y1);
                 st.zdfState[stage][ch][0] = s1_ + 2.0f * v1;
                 float v2 = (y1 - s2_) * st.ladderG;
                 float y2 = v2 + s2_;
-                if (m == 15) y2 = std::tanh(y2);
+                if      (m == 13) y2 = ssm2040Sat(y2, 1);
+                else if (m == 15) y2 = std::tanh(y2);
                 st.zdfState[stage][ch][1] = s2_ + 2.0f * v2;
                 float v3 = (y2 - s3_) * st.ladderG;
                 float y3 = v3 + s3_;
-                if (m == 15) y3 = std::tanh(y3);
+                if      (m == 13) y3 = ssm2040Sat(y3, 2);
+                else if (m == 15) y3 = std::tanh(y3);
                 st.zdfState[stage][ch][2] = s3_ + 2.0f * v3;
                 float v4 = (y3 - s4_) * st.ladderG;
                 float y4 = v4 + s4_;
-                if (m == 15) y4 = std::tanh(y4);
+                if      (m == 13) y4 = ssm2040Sat(y4, 3);
+                else if (m == 15) y4 = std::tanh(y4);
                 st.zdfState[stage][ch][3] = s4_ + 2.0f * v4;
                 if (st.slopeIdx == 0) {
                     if (st.filterType == 0) out = y2;

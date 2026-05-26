@@ -135,33 +135,37 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
         // ── 非 TB-303: TB-303 用ハンドラを解除 ──
         g.slope.onChange = nullptr;
 
-        // TB-303 から切り替えた場合はコンボ再構築＋アタッチメント再生成
-        if (g.slope.getNumItems() != 4 ||
-            (g.slope.getNumItems() > 0 && g.slope.getItemText(0) == "Accent: Off"))
-        {
-            g.slope.clear(juce::dontSendNotification);
-            g.slope.addItem("12dB", 1);
-            g.slope.addItem("24dB", 2);
-            g.slope.addItem("48dB", 3);
-            g.slope.addItem("96dB", 4);
+        // ── モデル切替のたびにスロープコンボを再構築 ──
+        // setItemEnabled だけでは ComboBoxAttachment の sendInitialUpdate と競合し
+        // 無効化が確実に反映されない場合がある。アタッチメントを先に破棄してから
+        // アイテムを再構成し、最後にアタッチメントを再生成することで順序を確定する。
+        const int curSlopeRaw = juce::roundToInt(
+            audioProcessor.apvts.getRawParameterValue("slope" + suffix)->load());
+        const int clampedSlope = juce::jlimit(0, maxSlope, curSlopeRaw);
 
-            // TB-303 で reset() したアタッチメントをここで再生成
-            g.slAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-                audioProcessor.apvts, "slope" + suffix, g.slope);
+        g.slAtt.reset();  // 先にアタッチメントを破棄（removeListener）
+        g.slope.clear(juce::dontSendNotification);
+        g.slope.addItem("12dB", 1);
+        g.slope.addItem("24dB", 2);
+        g.slope.addItem("48dB", 3);
+        g.slope.addItem("96dB", 4);
 
-            g.slope.setSelectedId(1, juce::sendNotification);
-        }
-
+        // maxSlope を超えるアイテムを無効化（アタッチメント生成前に設定）
         for (int i = 1; i <= 4; ++i)
             g.slope.setItemEnabled(i, (i - 1) <= maxSlope);
 
-        int curSlope = g.slope.getSelectedId();
-        if (curSlope < 1 || curSlope - 1 > maxSlope)
+        // アタッチメント再生成（sendInitialUpdate は setItemEnabled 後に発火）
+        g.slAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+            audioProcessor.apvts, "slope" + suffix, g.slope);
+
+        // clamped 値で選択を確定（通知なし：アタッチメントが同期済みのため）
+        g.slope.setSelectedId(clampedSlope + 1, juce::dontSendNotification);
+
+        // APVTS 値がクランプにより変化した場合のみ書き戻す
+        if (curSlopeRaw != clampedSlope)
         {
-            int newId = (curSlope >= 1) ? (maxSlope + 1) : 1;
-            g.slope.setSelectedId(newId, juce::sendNotification);
             if (auto* p = audioProcessor.apvts.getParameter("slope" + suffix))
-                p->setValueNotifyingHost(p->convertTo0to1((float)(newId - 1)));
+                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(clampedSlope)));
         }
     }
 
