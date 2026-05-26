@@ -56,7 +56,7 @@
             "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR",
             "Formant (Vowel)", "Comb Filter", "MS-20 (Screaming)", "All-Pass Phaser", "Wavefolder",
             "Reverb (Metallic)", "Kilo All-Pass",
-            "Prophet (Curtis)", "SSM 2040", "CS-80 (Yamaha)", "Jupiter (Roland)", "EDP Wasp (CMOS)",
+            "CEM3320", "SSM 2040", "CS-80 (Yamaha)", "Jupiter (Roland)", "EDP Wasp (CMOS)",
             "Butterworth (Flat)", "Chebyshev (Ripple)", "Bessel (Phase)", "Elliptic (Notch)",
             "Vactrol LPG", "Modal Resonator", "Waveguide Mesh", "Bode Freq Shifter",
             "Z-Plane (2D Morph)", "Phased Array", "Nyquist Anti-alias"

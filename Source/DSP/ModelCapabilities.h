@@ -19,7 +19,7 @@ static inline std::tuple<int, bool, bool, bool, bool> getModelCaps(int m)
 
           // ===== Ladder系 =====
     case 1:  return { 1, true,  true,  true,  false }; // Moog: 12/24dB
-    case 12: return { 1, true,  true,  true,  false }; // Prophet: 12/24dB
+    case 12: return { 1, true,  true,  true,  false }; // CEM3320: 12/24dB, LP/BP/HP (チップ能力フル活用)
     case 13: return { 1, true,  false, false, false }; // SSM2040: 12/24dB, LPのみ
     case 15: return { 1, true,  false, false, false }; // Jupiter: 12/24dB, LPのみ
 

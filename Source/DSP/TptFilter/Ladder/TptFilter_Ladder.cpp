@@ -353,9 +353,9 @@ namespace TptFilter_Ladder
                     if (st.ladderRes > 3.5f) u_pre += 1e-6f;
                     if (m == 12)
                     {
-                        // CEM3320 (Curtis): 入力 OTA は対称飽和
-                        // ゲイン 1.4 = 実機 Prophet-5 Rev3 の入力レベル相当
-                        // （Rev1/2 の SSM2040 より強めに駆動される）
+                        // CEM3320: 入力 OTA は対称飽和
+                        // ゲイン 1.4 = Prophet-5 Rev3 / Pro-One 等の入力レベル相当
+                        // LP/BP/HP は外付け部品でチップ能力をフル活用
                         u = std::tanh(u_pre * 1.4f) / 1.4f;
                     }
                     else if (m == 13)

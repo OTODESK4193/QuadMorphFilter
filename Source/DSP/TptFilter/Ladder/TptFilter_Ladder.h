@@ -2,7 +2,7 @@
 // TptFilter/Ladder/TptFilter_Ladder.h
 // Model 1: Moog Ladder
 // Model 2: Diode TB-303 (Wurtz/Stinchcombe)
-// Model 12: Prophet Curtis
+// Model 12: CEM3320
 // Model 13: SSM 2040
 // Model 15: Jupiter Roland
 // ==========================================
