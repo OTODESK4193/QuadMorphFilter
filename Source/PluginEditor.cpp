@@ -130,6 +130,29 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
                 p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
         };
     }
+    else if (modelIdx == 21)
+    {
+        // ── Vactrol LPG: Slope → アタック時間 (At_Lo=1ms / At_Mid=5ms / At_Hi=20ms) ──
+        // TB-303 と同じく ComboBoxAttachment を破棄して直接 onChange ハンドラで書き込む。
+        g.slAtt.reset();
+
+        g.slope.clear(juce::dontSendNotification);
+        g.slope.addItem("Fast", 1);   // slopeIdx 0 → 1ms  (高速応答)
+        g.slope.addItem("Mid",  2);   // slopeIdx 1 → 5ms  (標準 Vactrol)
+        g.slope.addItem("Slow", 3);   // slopeIdx 2 → 20ms (なめらかなスウェル)
+
+        const int curAtk = juce::roundToInt(
+            audioProcessor.apvts.getRawParameterValue("slope" + suffix)->load());
+        g.slope.setSelectedId(juce::jlimit(1, 3, curAtk + 1),
+                              juce::dontSendNotification);
+
+        g.slope.onChange = [this, &g, sfx = suffix]()
+        {
+            const int idx = g.slope.getSelectedItemIndex(); // 0=Lo, 1=Mid, 2=Hi
+            if (auto* p = audioProcessor.apvts.getParameter("slope" + sfx))
+                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
+        };
+    }
     else
     {
         // ── 非 TB-303: TB-303 用ハンドラを解除 ──
@@ -174,6 +197,25 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
     g.type.setItemEnabled(3, hasHP);
     g.type.setItemEnabled(4, hasNotch);
 
+    // ── Type コンボのラベルをモデルに応じて切り替え ──
+    // Model 22 (Modal Resonator): 音楽的な LP/BP/HP/Notch 分類ではなく
+    // 「どう混ぜるか」の操作モードなので Type0〜3 と表示する。
+    // アイテム ID（1〜4）は APVTS マッピングに使用するため変えない。
+    if (modelIdx == 22)
+    {
+        g.type.changeItemText(1, "Type0");
+        g.type.changeItemText(2, "Type1");
+        g.type.changeItemText(3, "Type2");
+        g.type.changeItemText(4, "Type3");
+    }
+    else
+    {
+        g.type.changeItemText(1, "LP");
+        g.type.changeItemText(2, "BP");
+        g.type.changeItemText(3, "HP");
+        g.type.changeItemText(4, "Notch");
+    }
+
     int curType = g.type.getSelectedId();
     bool typeOk = (curType == 1 && hasLP)
         || (curType == 2 && hasBP)
@@ -190,13 +232,19 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
 
     if (modelIdx == 4)
     {
-        g.cutoffLabel.setText("SRR", juce::dontSendNotification);
-        g.resLabel.setText("Bits", juce::dontSendNotification);
+        g.cutoffLabel.setText("SRR",  juce::dontSendNotification);
+        g.resLabel.setText("Bits",    juce::dontSendNotification);
+    }
+    else if (modelIdx == 21)
+    {
+        // Vactrol LPG: Cutoff=開口量, Res=リリース時間
+        g.cutoffLabel.setText("Cut",  juce::dontSendNotification);
+        g.resLabel.setText("Rel",     juce::dontSendNotification);
     }
     else
     {
-        g.cutoffLabel.setText("Cut", juce::dontSendNotification);
-        g.resLabel.setText("Res", juce::dontSendNotification);
+        g.cutoffLabel.setText("Cut",  juce::dontSendNotification);
+        g.resLabel.setText("Res",     juce::dontSendNotification);
     }
 }
 
