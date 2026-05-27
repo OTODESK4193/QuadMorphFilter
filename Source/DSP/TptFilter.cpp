@@ -97,8 +97,8 @@ void TptFilter::reset()
         for (int h = 0; h < 4; ++h) {
             state.hilbertStateA[h][ch] = 0.0f; state.hilbertStateB[h][ch] = 0.0f;
         }
-        // ===== 既存コード: Per-channel リセットの末尾付近 =====
-        for (int a = 0; a < 4; ++a) {
+        // ===== Nyquist Anti-alias: 最大8段分クリア =====
+        for (int a = 0; a < 8; ++a) {
             state.aa_s1[a][ch] = 0.0f;
             state.aa_s2[a][ch] = 0.0f;
         }
@@ -163,9 +163,24 @@ void TptFilter::setSlope(int index)
     state.slopeIdx = index;  // 全モデル共通で、変換なし
     const int m = state.filterModel;
 
-    if (m == 5 || m == 10 || m == 21 || m == 22 || m == 24 || m == 25 || m == 27)
+    if (m == 5 || m == 10 || m == 21 || m == 22 || m == 24 || m == 25)
     {
+        // これらのモデルはStageをDSP内部で独自管理（slopeIdxは別の意味に転用）
         state.currentStages = 1; state.filterOrder = 2;
+    }
+    else if (m == 27)
+    {
+        // Nyquist Anti-alias: Slope = Stage数（急峻さ）
+        //   0→2段(24dB/oct), 1→4段(48dB/oct), 2→6段(72dB/oct), 3→8段(96dB/oct)
+        state.currentStages = (index == 0) ? 2 : (index == 1) ? 4 : (index == 2) ? 6 : 8;
+        state.filterOrder = state.currentStages * 2;
+        // Stage数が変わるとき、未使用だった内部ステート(aa_s1/s2)に
+        // ゴミが残ってポップノイズが発生するのを防ぐため全クリア
+        for (int s = 0; s < 8; ++s)
+            for (int ch = 0; ch < 2; ++ch) {
+                state.aa_s1[s][ch] = 0.0f;
+                state.aa_s2[s][ch] = 0.0f;
+            }
     }
     else if (m == 8 || m == 11 || m == 26)
     {

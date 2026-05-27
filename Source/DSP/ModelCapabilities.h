@@ -25,13 +25,17 @@ static inline std::tuple<int, bool, bool, bool, bool> getModelCaps(int m)
 
            // ===== SVF系 (固定/制限あり) =====
     case 3:  return { 1, true,  true,  true,  true };  // SEM: 12/24dB (実機は2-pole固定; 24dBはダブルSEM拡張)
-    case 5:  return { 0, true,  true,  true,  true };  // Formant: 12dBのみ
+    case 5:  return { 0, false, true,  false, false }; // Formant (Vowel): BP固定（フォルマント特徴はBPのみ）
+                                                        //   Slope固定12dB / Cutoff=母音位置 / Res=フォルマントQ
     case 10: return { 0, true,  true,  true,  true };  // Reverb FDN: 12dBのみ
-    case 21: return { 0, true,  false, false, false }; // Vactrol LPG: 12dB, LPのみ
-    case 22: return { 0, true,  true,  true,  true };  // Modal: 12dBのみ
+    case 21: return { 2, true,  false, false, false }; // Vactrol LPG: LP, Slope=Attackタイム(Fast/Med/Slow)
+                                                        //   Cutoff=CV(開口量) / Res=Decayタイム
+    case 22: return { 2, true,  true,  true,  true };  // Modal Resonator: Slope=Q(Low/Mid/High)
+                                                        //   Cutoff=基音 / Res=非調波性(Inharmonicity)
     case 24: return { 0, true,  true,  true,  true };  // Bode: 12dBのみ
     case 25: return { 0, true,  true,  true,  true };  // Z-Plane: 12dBのみ
-    case 27: return { 0, true,  false, false, false }; // Nyquist: 12dB, LPのみ
+    case 27: return { 3, true,  false, false, false }; // Nyquist Anti-alias: LP, Slope=Stage数(2/4/6/8段)
+                                                        //   Cutoff=カットオフ / Res=Q(段のキャラクター)
 
            // ===== 特殊 =====
     case 14: return { 3, true,  false, true,  false }; // CS-80: LP/HPのみ

@@ -117,8 +117,9 @@ struct TptFilterState
     float pa_s[8][2] = {};
 
     // ===== Nyquist Anti-alias =====
-    float aa_s1[4][2] = {};
-    float aa_s2[4][2] = {};
+    // Model 27: Slope=0→2段, 1→4段, 2→6段, 3→8段 に対応するため8段分確保
+    float aa_s1[8][2] = {};
+    float aa_s2[8][2] = {};
 
     // ===== 【既存コード: FDN Reverb ここから】=====
     float fdnBuffer[4][2][16384] = {};

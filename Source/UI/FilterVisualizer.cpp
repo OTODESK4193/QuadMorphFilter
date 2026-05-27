@@ -269,6 +269,10 @@ void FilterVisualizer::paint(juce::Graphics& g)
                 }
                 else if (modelIdx == 5)
                 {
+                    // Formant (Vowel) — DSPと同一アルゴリズム
+                    // Cutoff → 母音位置 (0=a, 4=o で連続補間)
+                    // Res → フォルマントQ: Q = 2.0 + res*3.0 (range≈2.3〜32)
+                    // Type固定: BP のみ（ModelCapabilitiesで強制）
                     float v = juce::jmap(std::log10(freqLimit), std::log10(20.0f), std::log10(20000.0f), 0.0f, 4.0f);
                     int idx_v = (int)v; float frac = v - idx_v;
                     if (idx_v >= 4) { idx_v = 3; frac = 1.0f; }
@@ -280,15 +284,19 @@ void FilterVisualizer::paint(juce::Graphics& g)
                         f2_m[idx_v] + (f2_m[idx_v + 1] - f2_m[idx_v]) * frac,
                         f3_m[idx_v] + (f3_m[idx_v + 1] - f3_m[idx_v]) * frac
                     };
-                    float mag_sum = 0.0f; float gains[3] = { 1.0f, 0.5f, 0.2f };
+                    // DSPと同一のQマッピング
+                    const float formQ = 2.0f + juce::jlimit(0.1f, 10.0f, res) * 3.0f;
+                    const float d_f   = 1.0f / formQ;
+                    float mag_sum = 0.0f;
+                    float gains[3] = { 1.0f, 0.5f, 0.2f };
                     for (int f = 0; f < 3; ++f) {
                         float w_f = freq / juce::jlimit(20.0f, 20000.0f, f_arr[f]);
-                        float d_f = 1.0f / juce::jlimit(0.1f, 10.0f, res);
+                        // LP mag 計算後 w_f を掛けてBP mag に変換（SVFのBP出力と一致）
                         float m_f = 1.0f / std::sqrt(std::pow(1.0f - w_f * w_f, 2.0f) + std::pow(w_f * d_f, 2.0f));
-                        if (t == 1) m_f *= w_f; else if (t == 2) m_f *= w_f * w_f; else if (t == 3) m_f *= std::abs(1.0f - w_f * w_f);
+                        m_f *= w_f;  // BP固定（Type=1相当）
                         mag_sum += m_f * gains[f];
                     }
-                    mag = mag_sum * (1.0f + res * 0.1f);
+                    mag = mag_sum;
                 }
                 else if (modelIdx == 6)
                 {
@@ -395,13 +403,21 @@ void FilterVisualizer::paint(juce::Graphics& g)
                 }
                 else if (modelIdx == 22)
                 {
+                    // Modal Resonator — DSPと同一アルゴリズム
+                    // Res → 非調波性(Inharmonicity)
+                    // Slope → qBase: 0=Low-Q(5), 1=Mid-Q(15), 2=High-Q(50)
                     float inharmonicity = juce::jmap(res, 0.1f, 10.0f, 1.0f, 2.5f);
+                    // Slope → Q変換テーブル（DSPと一致）
+                    const float qBaseVis[3] = { 5.0f, 15.0f, 50.0f };
+                    const float qBase = qBaseVis[juce::jlimit(0, 2, slopeIdx)];
                     float mag_sum = 0.0f;
                     for (int b = 0; b < 8; ++b) {
                         float bFreq = std::clamp(fc * std::pow((float)(b + 1), inharmonicity), 20.0f, 20000.0f);
                         float sw = freq / bFreq;
-                        float q = 50.0f / std::sqrt((float)(b + 1));
+                        float q = qBase / std::sqrt((float)(b + 1));
                         float d = 1.0f / q;
+                        // LP mag × sw = BP mag（SVFのBP出力と一致）
+                        // バンド重み: 1/sqrt(b+1)（高次バンドほど寄与が小さい）
                         mag_sum += (1.0f / std::sqrt(std::pow(1.0f - sw * sw, 2.0f) + std::pow(sw * d, 2.0f)))
                             * sw * (1.0f / std::sqrt((float)(b + 1)));
                     }
@@ -442,9 +458,14 @@ void FilterVisualizer::paint(juce::Graphics& g)
                 }
                 else if (modelIdx == 27)
                 {
-                    float d = 1.0f / 1.5f;
-                    float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w_norm * d, 2.0f));
-                    mag = std::pow(1.0f / den, 4.0f);
+                    // Nyquist Anti-alias — DSPと同一アルゴリズム
+                    // Res → Q: 0.5(res=0.1)〜3.0(res=10) にマップ
+                    // Slope → Stage数: 0→2段, 1→4段, 2→6段, 3→8段
+                    float aa_Q = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.5f, 3.0f);
+                    float aa_d = 1.0f / aa_Q;
+                    int aa_stages = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 6 : 8;
+                    float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w_norm * aa_d, 2.0f));
+                    mag = std::pow(1.0f / den, static_cast<float>(aa_stages));
                 }
                 return static_cast<float>(mag);
             };
