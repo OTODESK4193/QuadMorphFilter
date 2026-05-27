@@ -172,15 +172,22 @@ void TptFilter::setSlope(int index)
     {
         // Nyquist Anti-alias: Slope = Stage数（急峻さ）
         //   0→2段(24dB/oct), 1→4段(48dB/oct), 2→6段(72dB/oct), 3→8段(96dB/oct)
-        state.currentStages = (index == 0) ? 2 : (index == 1) ? 4 : (index == 2) ? 6 : 8;
+        const int newStages = (index == 0) ? 2 : (index == 1) ? 4 : (index == 2) ? 6 : 8;
+
+        // Stage数が実際に変わった場合のみ内部ステートをクリア。
+        // ※ setSlope() は processBlock から毎ブロック呼ばれるため、
+        //   無条件クリアにすると毎ブロックフィルターステートがリセットされ
+        //   Model 27 がまともに機能しなくなる。必ず変化検出を挟むこと。
+        if (newStages != state.currentStages)
+        {
+            state.currentStages = newStages;
+            for (int s = 0; s < 8; ++s)
+                for (int ch = 0; ch < 2; ++ch) {
+                    state.aa_s1[s][ch] = 0.0f;
+                    state.aa_s2[s][ch] = 0.0f;
+                }
+        }
         state.filterOrder = state.currentStages * 2;
-        // Stage数が変わるとき、未使用だった内部ステート(aa_s1/s2)に
-        // ゴミが残ってポップノイズが発生するのを防ぐため全クリア
-        for (int s = 0; s < 8; ++s)
-            for (int ch = 0; ch < 2; ++ch) {
-                state.aa_s1[s][ch] = 0.0f;
-                state.aa_s2[s][ch] = 0.0f;
-            }
     }
     else if (m == 8 || m == 11 || m == 26)
     {
