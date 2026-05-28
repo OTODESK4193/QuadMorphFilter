@@ -10,9 +10,13 @@
 // BiquadCoeffs: DigitalPrecision / Z-Plane で使用
 struct BiquadCoeffs
 {
-    float g = 0.0f;
-    float R = 0.0f;
-    float h = 0.0f;
+    float g     = 0.0f;
+    float R     = 0.0f;
+    float h     = 0.0f;
+    // Elliptic 伝達零点ブレンド係数: alpha = gp / gz (零点周波数から逆算)
+    // LP出力: lp + alpha² * hp → 零点 fz = fp/alpha で完全ノッチ
+    // 非Ellipticモデルは 1.0f（効果なし）
+    float alpha = 1.0f;
 };
 
 struct TptFilterState

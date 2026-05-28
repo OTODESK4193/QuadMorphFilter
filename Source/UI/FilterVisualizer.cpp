@@ -353,44 +353,87 @@ void FilterVisualizer::paint(juce::Graphics& g)
                 }
                 else if (modelIdx >= 17 && modelIdx <= 20)
                 {
-                    int order = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
+                    int order    = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
                     int sections = order / 2;
                     float rippleDb = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.1f, 3.0f);
-                    float eps = std::sqrt(std::pow(10.0f, rippleDb / 10.0f) - 1.0f);
+                    float eps      = std::sqrt(std::pow(10.0f, rippleDb / 10.0f) - 1.0f);
+
+                    // ── Model 20 Elliptic: 全セクション共通の零点周波数を事前計算 ──
+                    // DSP と同一式: xi = jmap(res, 0.3→0.9), fz = freqLimit/xi
+                    // alpha = fp_k / fz (連続時間近似: g ≈ 比例するため gp/gz ≈ fp/fz)
+                    float xi_ell  = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.3f, 0.9f);
+                    float fz_ell  = std::min(freqLimit / xi_ell, 20000.0f);
+
                     float mag_total = 1.0f;
                     for (int k = 0; k < sections; ++k)
                     {
-                        float theta = juce::MathConstants<float>::pi * (2.0f * k + 1.0f) / (2.0f * order);
-                        float stage_q = 0.707f;
+                        float theta     = juce::MathConstants<float>::pi * (2.0f * k + 1.0f) / (2.0f * order);
+                        float stage_q   = 0.707f;
                         float freqScale = 1.0f;
-                        if (modelIdx == 17) {
-                            stage_q = 1.0f / (2.0f * std::sin(theta));
+
+                        if (modelIdx == 17)
+                        {
+                            // Butterworth: Reso → Q 倍率（Peak）— DSP と一致
+                            float qButter = 1.0f / (2.0f * std::sin(theta));
+                            float qBoost  = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 1.0f, 3.0f);
+                            stage_q = qButter * qBoost;
                         }
-                        else if (modelIdx == 18) {
-                            float a = 1.0f / order * std::asinh(1.0f / eps);
-                            float rp = -std::sinh(a) * std::sin(theta);
-                            float ip = std::cosh(a) * std::cos(theta);
+                        else if (modelIdx == 18)
+                        {
+                            // Chebyshev: 変更なし
+                            float a   = (1.0f / order) * std::asinh(1.0f / eps);
+                            float rp  = -std::sinh(a) * std::sin(theta);
+                            float ip  =  std::cosh(a) * std::cos(theta);
                             float wn2 = rp * rp + ip * ip;
-                            freqScale = std::sqrt(wn2); stage_q = std::sqrt(wn2) / (-2.0f * rp);
+                            freqScale = std::sqrt(wn2);
+                            stage_q   = std::sqrt(wn2) / (-2.0f * rp);
                         }
-                        else if (modelIdx == 19) {
-                            stage_q = 1.0f / (2.0f * std::sin(theta)) * 0.577f;
-                            freqScale = 1.0f + (float)order * 0.1f;
+                        else if (modelIdx == 19)
+                        {
+                            // Bessel: Reso → Bessel 近似係数（Phase）— DSP と一致
+                            float besselFactor = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.577f, 1.0f);
+                            stage_q = 1.0f / (2.0f * std::sin(theta)) * besselFactor;
+                            float besselNorm = (besselFactor - 0.577f) / (1.0f - 0.577f);
+                            freqScale = 1.0f + (float)order * 0.1f * (1.0f - besselNorm);
                         }
-                        else if (modelIdx == 20) {
-                            float a = 1.0f / order * std::asinh(1.0f / (eps * 0.5f));
-                            float rp = -std::sinh(a) * std::sin(theta);
-                            float ip = std::cosh(a) * std::cos(theta);
+                        else if (modelIdx == 20)
+                        {
+                            // Elliptic: 極は Chebyshev 系（変更なし）
+                            float a   = (1.0f / order) * std::asinh(1.0f / (eps * 0.5f));
+                            float rp  = -std::sinh(a) * std::sin(theta);
+                            float ip  =  std::cosh(a) * std::cos(theta);
                             float wn2 = rp * rp + ip * ip;
-                            freqScale = std::sqrt(wn2); stage_q = std::sqrt(wn2) / (-2.0f * rp) * 1.2f;
+                            freqScale = std::sqrt(wn2);
+                            stage_q   = std::sqrt(wn2) / (-2.0f * rp) * 1.2f;
                         }
-                        float sw = freq / juce::jlimit(20.0f, 20000.0f, freqLimit * freqScale);
-                        float sw2 = sw * sw;
-                        float sd = 1.0f / stage_q;
-                        float den = std::sqrt(std::pow(1.0f - sw2, 2.0f) + std::pow(sw * sd, 2.0f));
-                        float m = 1.0f / den;
-                        if (modelIdx == 20) { m = std::abs(1.0f - sw2 * 0.5f) / den; }
-                        else { if (t == 1) m *= sw; else if (t == 2) m *= sw2; else if (t == 3) m *= std::abs(1.0f - sw2); }
+
+                        float fp_k  = juce::jlimit(20.0f, 20000.0f, freqLimit * freqScale);
+                        float sw    = freq / fp_k;
+                        float sw2   = sw * sw;
+                        float sd    = 1.0f / stage_q;
+                        float den   = std::sqrt(std::pow(1.0f - sw2, 2.0f) + std::pow(sw * sd, 2.0f));
+                        float m     = 1.0f / den;
+
+                        if (modelIdx == 20)
+                        {
+                            // Elliptic 零点: alpha = fp_k / fz (連続時間近似)
+                            // LP: |1 - α²sw²| / den → ストップバンドに完全ノッチ
+                            // HP: |sw² - α²|   / den → ストップバンド（低域側）にノッチ
+                            // BP: sw / den（零点なし）
+                            // Notch: |1 - sw²| / den（標準ノッチ）
+                            float alpha = fp_k / juce::jlimit(fp_k + 1.0f, 20000.0f, fz_ell);
+                            float a2    = alpha * alpha;
+                            if      (t == 0) m = std::abs(1.0f - a2 * sw2)  / den;   // LP Elliptic
+                            else if (t == 1) m = sw / den;                            // BP
+                            else if (t == 2) m = std::abs(sw2 - a2)         / den;   // HP Elliptic
+                            else             m = std::abs(1.0f - sw2)       / den;   // Notch
+                        }
+                        else
+                        {
+                            if (t == 1) m *= sw;
+                            else if (t == 2) m *= sw2;
+                            else if (t == 3) m *= std::abs(1.0f - sw2);
+                        }
                         mag_total *= m;
                     }
                     mag = mag_total;

@@ -232,19 +232,43 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
 
     if (modelIdx == 4)
     {
-        g.cutoffLabel.setText("SRR",  juce::dontSendNotification);
-        g.resLabel.setText("Bits",    juce::dontSendNotification);
+        g.cutoffLabel.setText("SRR",      juce::dontSendNotification);
+        g.resLabel.setText("Bits",        juce::dontSendNotification);
+    }
+    else if (modelIdx == 17)
+    {
+        // Butterworth: Reso = Q 倍率（カットオフ付近のピーク量）
+        g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
+        g.resLabel.setText("Peak",        juce::dontSendNotification);
+    }
+    else if (modelIdx == 18)
+    {
+        // Chebyshev: Reso = パスバンドリップル量
+        g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
+        g.resLabel.setText("Ripple",      juce::dontSendNotification);
+    }
+    else if (modelIdx == 19)
+    {
+        // Bessel: Reso = 位相線形度（低=線形, 高=急峻）
+        g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
+        g.resLabel.setText("Phase",       juce::dontSendNotification);
+    }
+    else if (modelIdx == 20)
+    {
+        // Elliptic: Reso = ストップバンドノッチ位置（低=Wide, 高=Steep）
+        g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
+        g.resLabel.setText("Stopband",    juce::dontSendNotification);
     }
     else if (modelIdx == 21)
     {
         // Vactrol LPG: Cutoff=開口量, Res=リリース時間
-        g.cutoffLabel.setText("Cut",  juce::dontSendNotification);
-        g.resLabel.setText("Rel",     juce::dontSendNotification);
+        g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
+        g.resLabel.setText("Rel",         juce::dontSendNotification);
     }
     else
     {
-        g.cutoffLabel.setText("Cut",  juce::dontSendNotification);
-        g.resLabel.setText("Res",     juce::dontSendNotification);
+        g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
+        g.resLabel.setText("Res",         juce::dontSendNotification);
     }
 }
 
