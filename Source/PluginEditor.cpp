@@ -130,6 +130,31 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
                 p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
         };
     }
+    else if (modelIdx == 9)
+    {
+        // ── Wavefolder: Slope → カスケード段数 (1x / 2x / 4x / 8x) ──
+        // TB-303 / Vactrol と同じくアタッチメントを破棄して直接 onChange で書き込む。
+        // slopeIdx 0=1段, 1=2段, 2=4段, 3=8段 のマッピングは既存 Slope と同一。
+        g.slAtt.reset();
+
+        g.slope.clear(juce::dontSendNotification);
+        g.slope.addItem("1x", 1);   // slopeIdx 0 → 1 fold
+        g.slope.addItem("2x", 2);   // slopeIdx 1 → 2 folds cascade
+        g.slope.addItem("4x", 3);   // slopeIdx 2 → 4 folds cascade
+        g.slope.addItem("8x", 4);   // slopeIdx 3 → 8 folds cascade
+
+        const int curFolds = juce::roundToInt(
+            audioProcessor.apvts.getRawParameterValue("slope" + suffix)->load());
+        g.slope.setSelectedId(juce::jlimit(1, 4, curFolds + 1),
+                              juce::dontSendNotification);
+
+        g.slope.onChange = [this, &g, sfx = suffix]()
+        {
+            const int idx = g.slope.getSelectedItemIndex(); // 0=1x, 1=2x, 2=4x, 3=8x
+            if (auto* p = audioProcessor.apvts.getParameter("slope" + sfx))
+                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
+        };
+    }
     else if (modelIdx == 21)
     {
         // ── Vactrol LPG: Slope → アタック時間 (At_Lo=1ms / At_Mid=5ms / At_Hi=20ms) ──
@@ -234,6 +259,12 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
     {
         g.cutoffLabel.setText("SRR",      juce::dontSendNotification);
         g.resLabel.setText("Bits",        juce::dontSendNotification);
+    }
+    else if (modelIdx == 9)
+    {
+        // Wavefolder: Res = フォールド深度（Drive）
+        g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
+        g.resLabel.setText("Drive",       juce::dontSendNotification);
     }
     else if (modelIdx == 17)
     {

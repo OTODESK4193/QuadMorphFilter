@@ -160,4 +160,13 @@ struct TptFilterState
     float rmsOut[2] = {};
     float agcGain[2] = { 1.0f, 1.0f };
     // ===== 【既存コード: AGC ここまで】=====
+
+    // ===== Wavefolder ADAA (Model 9) =====
+    // 1次 ADAA: f(x) = sin(x)、F1(x) = -cos(x)
+    // double 精度必須: float では特異点付近の差分商で量子化ノイズが可聴域に現れる。
+    // wf_F_z1 の厳密な初期値は -cos(0) = -1.0 だが、
+    // 無音スタート時は |dx| < THRESHOLD で Taylor フォールバックが機能するため実用上問題なし。
+    // 各カスケード段（最大 8 段）× 各チャンネル（2ch）分を確保。
+    double wf_x_z1[8][2] = {};   // 前サンプルの fold 入力 x[n-1]
+    double wf_F_z1[8][2] = {};   // 前サンプルの F1(x[n-1]) = -cos(x[n-1])
 };

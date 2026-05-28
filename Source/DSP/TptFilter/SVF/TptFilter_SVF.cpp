@@ -139,24 +139,56 @@ namespace TptFilter_SVF
                 else                         out = lp + hp;
             }
         }
-        // ----- Model 9: Wavefolder -----
+        // ----- Model 9: Wavefolder (1st-order ADAA + cascade) -----
+        // アーキテクチャ: (SVF 1段 → ADAA sin) × N  ← Slope で N=1/2/4/8 を選択
+        // ADAA 式: output = (F1(x_n) - F1(x_z1)) / (x_n - x_z1)
+        //   F1(x) = -cos(x)  (sin の不定積分)
+        // 特異点回避: |dx| < 1e-5 のとき Taylor 展開でフォールバック
+        //   Taylor: sin(x_z1) + 0.5 * cos(x_z1) * dx
+        // 全演算を double 精度で実行 → float では差分商の情報落ちが可聴ノイズになる
         else if (m == 9)
         {
-            float fold_gain = juce::jmap(st.currentResVal, 0.1f, 10.0f, 1.0f, 10.0f);
+            constexpr double ADAA_THRESHOLD = 1e-5;
+            const double fold_gain = static_cast<double>(
+                juce::jmap(st.currentResVal, 0.1f, 10.0f, 1.0f, 10.0f));
+
             for (int stage = 0; stage < st.currentStages; ++stage)
             {
-                float hp = (out - (2.0f * st.R + st.g) * st.s1[stage][ch]
-                    - st.s2[stage][ch]) * st.h;
-                float bp = st.g * hp + st.s1[stage][ch];
-                float lp = st.g * bp + st.s2[stage][ch];
+                // ── SVF（プリフォールド音色整形） ──
+                const float hp = (out - (2.0f * st.R + st.g) * st.s1[stage][ch]
+                               - st.s2[stage][ch]) * st.h;
+                const float bp = st.g * hp + st.s1[stage][ch];
+                const float lp = st.g * bp + st.s2[stage][ch];
                 st.s1[stage][ch] = st.g * hp + bp;
                 st.s2[stage][ch] = st.g * bp + lp;
-                if (st.filterType == 0) out = lp;
-                else if (st.filterType == 1) out = bp;
-                else if (st.filterType == 2) out = hp;
-                else                         out = lp + hp;
+
+                float svf_out;
+                if      (st.filterType == 0) svf_out = lp;
+                else if (st.filterType == 1) svf_out = bp;
+                else if (st.filterType == 2) svf_out = hp;
+                else                         svf_out = lp + hp;
+
+                // ── 1次 ADAA sin() wavefold ──
+                const double x_n  = static_cast<double>(svf_out) * fold_gain;
+                const double x_z1 = st.wf_x_z1[stage][ch];
+                const double F_n  = -std::cos(x_n);          // F1(x_n) = -cos(x_n)
+                const double F_z1 = st.wf_F_z1[stage][ch];   // F1(x_z1)
+                const double dx   = x_n - x_z1;
+
+                double folded;
+                if (std::abs(dx) < ADAA_THRESHOLD)
+                    // Taylor 展開フォールバック（特異点・情報落ち回避）
+                    folded = std::sin(x_z1) + 0.5 * std::cos(x_z1) * dx;
+                else
+                    // ADAA 差分商
+                    folded = (F_n - F_z1) / dx;
+
+                // 状態更新（次サンプルのために保存）
+                st.wf_x_z1[stage][ch] = x_n;
+                st.wf_F_z1[stage][ch] = F_n;
+
+                out = static_cast<float>(folded);
             }
-            out = std::sin(out * fold_gain);
         }
         // ----- Model 16: EDP Wasp CMOS -----
         else if (m == 16)
