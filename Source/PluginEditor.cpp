@@ -469,8 +469,11 @@ void QuadMorphFilterAudioProcessorEditor::resized()
 
         r.removeFromLeft(6);
 
-        auto resArea = r.removeFromLeft(sliderW).reduced(2, 0);
-        g->resLabel.setBounds(resArea.removeFromLeft(28));
+        // Res ラベルは行末最後の要素なので残りスペースを全て活用する。
+        // ラベル幅 55px → "Stopband" 等の長い名称も見切れない。
+        // スライダー幅は cutoff 側と同等以上を維持（短縮しない）。
+        auto resArea = r.reduced(2, 0);
+        g->resLabel.setBounds(resArea.removeFromLeft(55));
         g->res.setBounds(resArea);
     }
     b.removeFromTop(6);
