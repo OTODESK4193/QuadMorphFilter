@@ -469,10 +469,15 @@ void QuadMorphFilterAudioProcessorEditor::resized()
 
         r.removeFromLeft(6);
 
-        // Res ラベルは行末最後の要素なので残りスペースを全て活用する。
-        // ラベル幅 55px → "Stopband" 等の長い名称も見切れない。
-        // スライダー幅は cutoff 側と同等以上を維持（短縮しない）。
-        auto resArea = r.reduced(2, 0);
+        // Res スライダーの右端をフィルターカーブ描画エリア（FilterVisualizer）の
+        // 右端に揃える。
+        //   visW         = int(totalW * 0.7)  ← FilterVisualizer の幅
+        //   visInnerRight = visW - 10          ← reduced(5) の両側分を引いた内側幅
+        //   consumed      = enable(60) + model(115) + type(60) + slope(85)
+        //                   + sliderW(155) + gap(6) = 481px  (row 先頭からの消費)
+        //   resAreaW      = visInnerRight - consumed
+        const int resAreaW = visW - 10 - (60 + 115 + 60 + 85 + sliderW + 6);
+        auto resArea = r.removeFromLeft(resAreaW).reduced(2, 0);
         g->resLabel.setBounds(resArea.removeFromLeft(55));
         g->res.setBounds(resArea);
     }
