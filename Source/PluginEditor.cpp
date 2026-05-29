@@ -309,6 +309,25 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
         g.type.changeItemText(3, "HP");
         g.type.changeItemText(4, "Notch");
     }
+    else if (modelIdx == 8)
+    {
+        // Phaser: フィードバック極性の2択
+        // LP(+FB) = 正帰還 → 暖かく深いフェイザー音
+        // BP(-FB) = 負帰還 → 薄くコールドなフェイザー音
+        // HP/Notch は ModelCapabilities で無効化済み → デフォルトテキストに戻す
+        g.type.changeItemText(1, "+FB");
+        g.type.changeItemText(2, "-FB");
+        g.type.changeItemText(3, "HP");
+        g.type.changeItemText(4, "Notch");
+    }
+    else if (modelIdx == 11)
+    {
+        // Phase Shift: 段間周波数スプレッドパターン選択
+        g.type.changeItemText(1, "Lin");    // 線形分散
+        g.type.changeItemText(2, "Log");    // 対数分散（旧実装）
+        g.type.changeItemText(3, "Mirror"); // 鏡像分散
+        g.type.changeItemText(4, "Rand");   // 固定疑似乱数分散
+    }
     else if (modelIdx == 22)
     {
         // Modal Resonator: 混合モードとして Type0〜3 で表示
@@ -360,7 +379,19 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
             p->setValueNotifyingHost(p->convertTo0to1((float)(fallback - 1)));
     }
 
-    if (modelIdx == 4)
+    if (modelIdx == 8)
+    {
+        // Phaser: Cutoff = AP ノッチ中心周波数 → "Freq", Res = フィードバック量 → "Depth"
+        g.cutoffLabel.setText("Freq",     juce::dontSendNotification);
+        g.resLabel.setText("Depth",       juce::dontSendNotification);
+    }
+    else if (modelIdx == 11)
+    {
+        // Phase Shift: Cutoff = 段スプレッド中心周波数 → "Center", Res = スプレッド幅 → "Spread"
+        g.cutoffLabel.setText("Center",   juce::dontSendNotification);
+        g.resLabel.setText("Spread",      juce::dontSendNotification);
+    }
+    else if (modelIdx == 4)
     {
         // Bitcrush/SRR: Cutoff = SRR 周波数 → "Rate", Res = SVF 色味 → "Color"
         g.cutoffLabel.setText("Rate",     juce::dontSendNotification);
@@ -442,9 +473,9 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g,
     // モデル名: 括弧を削除しコンパクト化（全28モデル、ID=1〜28に対応）
     g.model.addItemList({
         "Clean SVF",    "Moog Ladder",  "TB-303",       "Oberheim SEM", "Bitcrush",
-        "Vowel Filter", "Comb Filter",  "MS-20",        "AP Phaser",    "Wavefolder",
-        "FDN Reverb",   "Kilo AP",
-        "CEM3320",      "SSM2040",      "CS-80",        "Roland Jupiter","EDP Wasp",
+        "Vowel Filter", "Comb Filter",  "MS-20",        "Phaser",       "Wavefolder",
+        "FDN Reverb",   "Phase Shift",
+        "CEM3320",      "SSM2040",      "CS-80",        "Roland Jupiter", "EDP Wasp",
         "Butterworth",  "Chebyshev",    "Bessel",       "Elliptic",
         "Vactrol LPG",  "Modal Res",    "Waveguide",    "Bode Shifter",
         "Z-Plane",      "Phased Array", "Nyquist AA"

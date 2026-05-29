@@ -42,6 +42,9 @@ static inline std::tuple<int, bool, bool, bool, bool> getModelCaps(int m)
     case 23: return { 3, true,  true,  false, false }; // Waveguide: Type0=Wet, Type1=Mix
     case 26: return { 3, true,  false, true,  false }; // Phased Array: LP/HP
 
+           // ===== Phaser =====
+    case 8:  return { 3, true,  true,  false, false }; // Phaser: +FB(LP) / -FB(BP) の2択のみ
+
            // ===== デフォルト: 全オプション有効 =====
     default: return { 3, true,  true,  true,  true };
     }

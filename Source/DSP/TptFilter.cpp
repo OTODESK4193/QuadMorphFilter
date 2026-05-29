@@ -158,7 +158,15 @@ void TptFilter::setResonance(float newResonance)
     resonance.setTargetValue(juce::jmax(0.1f, newResonance));
 }
 
-void TptFilter::setType(int newType) { state.filterType = newType; }
+void TptFilter::setType(int newType)
+{
+    state.filterType = newType;
+    // Model 11 (Phase Shift): filterType がスプレッドパターンを決定するため、
+    // Type 変更時に updateCoefficients の早期 return を無効化して
+    // updateCoeffs (kilo_g/R/h の再計算) を強制する。
+    if (state.filterModel == 11)
+        lastCutoff = -1.0f;
+}
 
 void TptFilter::setSlope(int index)
 {
@@ -558,12 +566,32 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         return mag_total;
     }
     else if (m == 11) {
+        // Phase Shift: updateCoeffs と同一の4パターン (Type 0-3)
+        static constexpr float randOffsets[16] = {
+             0.000f,  0.618f, -0.382f,  0.854f,
+            -0.146f,  0.472f, -0.764f,  0.236f,
+             0.944f, -0.528f,  0.090f, -0.910f,
+             0.708f, -0.292f,  0.562f, -0.438f
+        };
+        const float spread  = juce::jmap(res, 0.1f, 10.0f, 0.0f, 2.5f);
+        const float q       = 0.5f + (spread * 2.0f);
+        const float d       = 1.0f / q;
+        const float maxSafe = (float)state.sampleRate * 0.45f;
         float mag_total = 1.0f;
-        float spread = juce::jmap(res, 0.1f, 10.0f, 0.0f, 2.5f);
         for (int k = 0; k < state.currentStages; ++k) {
-            float offset = (state.currentStages > 1) ? ((float)k / (state.currentStages - 1)) * 2.0f - 1.0f : 0.0f;
-            float st_fc = std::clamp(fc * std::pow(2.0f, offset * spread), 20.0f, (float)state.sampleRate * 0.45f);
-            float sw = frequency / st_fc; float sw2 = sw * sw; float q = 0.5f + (spread * 2.0f); float d = 1.0f / q;
+            float st_fc = fc;
+            switch (state.filterType) {
+                case 0: { const float off = (state.currentStages > 1) ? ((float)k / (state.currentStages - 1)) * 2.0f - 1.0f : 0.0f;
+                          st_fc = fc + off * fc * spread * 0.5f; break; }
+                case 1: { const float off = (state.currentStages > 1) ? ((float)k / (state.currentStages - 1)) * 2.0f - 1.0f : 0.0f;
+                          st_fc = fc * std::pow(2.0f, off * spread); break; }
+                case 2: { const float sign = (k % 2 == 0) ? 1.0f : -1.0f;
+                          const float magK = (state.currentStages > 1) ? (float)((k/2)+1)/(float)((state.currentStages+1)/2) : 0.0f;
+                          st_fc = fc * std::pow(2.0f, sign * magK * spread); break; }
+                default:{ st_fc = fc * std::pow(2.0f, randOffsets[k % 16] * spread); break; }
+            }
+            st_fc = std::clamp(st_fc, 20.0f, maxSafe);
+            float sw = frequency / st_fc; float sw2 = sw * sw;
             float den = std::sqrt(std::pow(1.0f - sw2, 2.0f) + std::pow(sw * d, 2.0f));
             float bp = (1.0f / den) * sw;
             mag_total *= (1.0f + std::pow(bp, 1.2f) * res * 0.1f);

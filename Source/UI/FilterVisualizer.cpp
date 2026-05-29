@@ -338,10 +338,12 @@ void FilterVisualizer::paint(juce::Graphics& g)
                 }
                 else if (modelIdx == 8)
                 {
+                    // Phaser: +FB (Type 0) / -FB (Type 1)
+                    // fb 上限を DSP と一致させる: 0.95 (旧値 0.8 は過少評価だった)
                     int stages = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
                     float phi = -2.0f * std::atan(freq / freqLimit);
-                    float fb = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 0.8f);
-                    if (t == 1 || t == 3) fb = -fb;
+                    float fb = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 0.95f);
+                    if (t == 1 || t == 3) fb = -fb;  // Type 1 (-FB): t==3 は無効化済みだが念のため
                     float c_ap = std::cos(stages * phi); float s_ap = std::sin(stages * phi);
                     float den2 = (1.0f - fb * c_ap) * (1.0f - fb * c_ap) + (fb * s_ap) * (fb * s_ap);
                     float rya = (c_ap - fb) / den2; float iya = s_ap / den2;
@@ -361,11 +363,51 @@ void FilterVisualizer::paint(juce::Graphics& g)
                 }
                 else if (modelIdx == 11)
                 {
-                    int stages = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
-                    float d = 1.0f / juce::jlimit(0.1f, 10.0f, res);
-                    float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w_norm * d, 2.0f));
-                    float bp = (1.0f / den) * w_norm;
-                    mag = 1.0f + std::pow(bp, 1.2f) * res * ((float)stages * 0.1f);
+                    // Phase Shift: Type 0-3 の各スプレッドパターンで位相ノッチ位置を計算
+                    // DSP の updateCoeffs と同一ロジックで各段の中心周波数を決定する。
+                    // オールパスは振幅応答フラット (|H|=1) だが、群遅延のピーク位置を
+                    // BP 応答で近似表示することで「どの周波数帯に効いているか」を可視化。
+                    static constexpr float randOffsets[16] = {
+                         0.000f,  0.618f, -0.382f,  0.854f,
+                        -0.146f,  0.472f, -0.764f,  0.236f,
+                         0.944f, -0.528f,  0.090f, -0.910f,
+                         0.708f, -0.292f,  0.562f, -0.438f
+                    };
+                    const int   stages = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
+                    const float spread = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 2.5f);
+                    const float q      = 0.5f + (spread * 2.0f);
+                    const float d_ap   = 1.0f / q;
+                    float mag_total    = 1.0f;
+                    for (int k = 0; k < stages; ++k)
+                    {
+                        float st_fc = freqLimit;
+                        switch (t)
+                        {
+                            case 0: { // 線形 (Lin)
+                                const float off = (stages > 1) ? ((float)k / (stages - 1)) * 2.0f - 1.0f : 0.0f;
+                                st_fc = freqLimit + off * freqLimit * spread * 0.5f; break;
+                            }
+                            case 1: { // 対数 (Log) - 旧実装
+                                const float off = (stages > 1) ? ((float)k / (stages - 1)) * 2.0f - 1.0f : 0.0f;
+                                st_fc = freqLimit * std::pow(2.0f, off * spread); break;
+                            }
+                            case 2: { // 鏡像 (Mirror)
+                                const float sign = (k % 2 == 0) ? 1.0f : -1.0f;
+                                const float magK = (stages > 1) ? (float)((k/2)+1)/(float)((stages+1)/2) : 0.0f;
+                                st_fc = freqLimit * std::pow(2.0f, sign * magK * spread); break;
+                            }
+                            default: { // 固定疑似乱数 (Rand)
+                                st_fc = freqLimit * std::pow(2.0f, randOffsets[k % 16] * spread); break;
+                            }
+                        }
+                        st_fc = juce::jlimit(20.0f, 20000.0f, st_fc);
+                        const float sw    = freq / st_fc;
+                        const float sw2_k = sw * sw;
+                        const float den_k = std::sqrt(std::pow(1.0f - sw2_k, 2.0f) + std::pow(sw * d_ap, 2.0f));
+                        const float bp_k  = (1.0f / den_k) * sw;
+                        mag_total *= (1.0f + std::pow(bp_k, 1.2f) * res * 0.1f);
+                    }
+                    mag = mag_total;
                 }
                 else if (modelIdx >= 17 && modelIdx <= 20)
                 {

@@ -14,21 +14,71 @@ namespace TptFilter_Spectral
         const float fc = st.smoothedDigitalCutoff;
         const float res = st.currentResVal;
 
-        // ----- Model 11: Kilo All-Pass -----
+        // ----- Model 11: Phase Shift (旧 Kilo All-Pass) -----
+        // 2次 ZDF オールパス × N 段カスケード。段間周波数を Type で選択したパターンで分散。
+        //
+        // Type 0: 線形分散 (Lin)  — fc ± spread×0.5×fc の等 Hz 間隔
+        // Type 1: 対数分散 (Log)  — fc × 2^(±spread) のオクターブ単位（旧実装を維持）
+        // Type 2: 鏡像分散 (Mirror)— 偶数段=+方向、奇数段=-方向に交互に展開
+        // Type 3: 固定疑似乱数 (Rand) — 黄金比シーケンスで各段を決定論的に分散
+        //
+        // Q は Spread と連動: q = 0.5 + spread×2.0
+        //   広いスプレッド → 高 Q → 鋭い位相ノッチ（パターンが際立つ）
         if (st.filterModel == 11)
         {
-            float maxSafeFreq = (float)st.sampleRate * 0.45f;
-            float spread = juce::jmap(res, 0.1f, 10.0f, 0.0f, 2.5f);
+            const float maxSafeFreq = (float)st.sampleRate * 0.45f;
+            const float spread      = juce::jmap(res, 0.1f, 10.0f, 0.0f, 2.5f);
+            const float q           = 0.5f + (spread * 2.0f);
+
+            // Type 3 (Rand) 用: 黄金比シーケンス（決定論的疑似乱数、ランタイム乱数なし）
+            static constexpr float randOffsets[16] = {
+                 0.000f,  0.618f, -0.382f,  0.854f,
+                -0.146f,  0.472f, -0.764f,  0.236f,
+                 0.944f, -0.528f,  0.090f, -0.910f,
+                 0.708f, -0.292f,  0.562f, -0.438f
+            };
+
             for (int k = 0; k < st.currentStages; ++k)
             {
-                float offset = (st.currentStages > 1)
-                    ? ((float)k / (st.currentStages - 1)) * 2.0f - 1.0f
-                    : 0.0f;
-                float st_fc = std::clamp(fc * std::pow(2.0f, offset * spread),
-                    20.0f, maxSafeFreq);
-                float wd = juce::MathConstants<float>::pi * st_fc / (float)st.sampleRate;
+                float st_fc = fc;
+
+                switch (st.filterType)
+                {
+                    case 0: // 線形分散 (Lin): fc 周辺を等 Hz 間隔で配置
+                    {
+                        const float offset_lin = (st.currentStages > 1)
+                            ? ((float)k / (st.currentStages - 1)) * 2.0f - 1.0f
+                            : 0.0f;
+                        st_fc = fc + offset_lin * fc * spread * 0.5f;
+                        break;
+                    }
+                    case 1: // 対数分散 (Log): オクターブ単位 (旧実装を維持)
+                    {
+                        const float offset = (st.currentStages > 1)
+                            ? ((float)k / (st.currentStages - 1)) * 2.0f - 1.0f
+                            : 0.0f;
+                        st_fc = fc * std::pow(2.0f, offset * spread);
+                        break;
+                    }
+                    case 2: // 鏡像分散 (Mirror): 偶数段=+、奇数段=- に交互展開
+                    {
+                        const float sign  = (k % 2 == 0) ? 1.0f : -1.0f;
+                        const float magK  = (st.currentStages > 1)
+                            ? (float)((k / 2) + 1) / (float)((st.currentStages + 1) / 2)
+                            : 0.0f;
+                        st_fc = fc * std::pow(2.0f, sign * magK * spread);
+                        break;
+                    }
+                    default: // case 3: 固定疑似乱数 (Rand): 黄金比シーケンス
+                    {
+                        st_fc = fc * std::pow(2.0f, randOffsets[k % 16] * spread);
+                        break;
+                    }
+                }
+
+                st_fc = std::clamp(st_fc, 20.0f, maxSafeFreq);
+                const float wd = juce::MathConstants<float>::pi * st_fc / (float)st.sampleRate;
                 st.kilo_g[k] = std::tan(wd);
-                float q = 0.5f + (spread * 2.0f);
                 st.kilo_R[k] = 1.0f / (2.0f * q);
                 st.kilo_h[k] = 1.0f / (1.0f + 2.0f * st.kilo_R[k] * st.kilo_g[k]
                     + st.kilo_g[k] * st.kilo_g[k]);
