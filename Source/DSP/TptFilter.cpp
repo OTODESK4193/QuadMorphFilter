@@ -112,6 +112,15 @@ void TptFilter::reset()
         // ===== 既存コード（続き）=====
     }  // for (int ch...)
 
+    // ===== Wavefolder ADAA (Model 9) =====
+    // wf_F_z1 の正しい初期値は -cos(0) = -1.0。
+    // ゼロ初期化（= {}）では誤りで、最初のサンプルで差分商が誤った値になりクリックが発生する。
+    for (int s = 0; s < 8; ++s)
+        for (int c = 0; c < 2; ++c) {
+            state.wf_x_z1[s][c] = 0.0;
+            state.wf_F_z1[s][c] = -1.0;  // -cos(0) = -1.0
+        }
+
     // lastCutoff = -1.0f は「強制再計算」のセンチネルとして安全に使える。
     // しかし lastRes = -1.0f はスムージング計算に直接使われるため危険:
     //   currentRes = lastRes + coef*(target - lastRes) → 初回に負値になる

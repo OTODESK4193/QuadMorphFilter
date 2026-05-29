@@ -130,6 +130,56 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
                 p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
         };
     }
+    else if (modelIdx == 4)
+    {
+        // ── Bitcrush/SRR: Slope → フィルターステージ数 (Stages) ──
+        // 数値の意味は通常 SVF と同じ（1/2/4/8段）だが、
+        // Bitcrush 文脈では "Stages" と呼ぶ方が直感的。
+        g.slAtt.reset();
+
+        g.slope.clear(juce::dontSendNotification);
+        g.slope.addItem("1 Stage",  1);
+        g.slope.addItem("2 Stages", 2);
+        g.slope.addItem("4 Stages", 3);
+        g.slope.addItem("8 Stages", 4);
+
+        const int curStages = juce::roundToInt(
+            audioProcessor.apvts.getRawParameterValue("slope" + suffix)->load());
+        g.slope.setSelectedId(juce::jlimit(1, 4, curStages + 1),
+                              juce::dontSendNotification);
+
+        g.slope.onChange = [this, &g, sfx = suffix]()
+        {
+            const int idx = g.slope.getSelectedItemIndex();
+            if (auto* p = audioProcessor.apvts.getParameter("slope" + sfx))
+                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
+        };
+    }
+    else if (modelIdx == 6)
+    {
+        // ── Comb Filter: Slope → カスケード段数 (Cascade) ──
+        // 多段カスケードでコームの密度が上がり、フィジカルモデリング的な
+        // 複雑なエコーパターンになる。"Cascade" の方が意味が伝わりやすい。
+        g.slAtt.reset();
+
+        g.slope.clear(juce::dontSendNotification);
+        g.slope.addItem("1x", 1);
+        g.slope.addItem("2x", 2);
+        g.slope.addItem("4x", 3);
+        g.slope.addItem("8x", 4);
+
+        const int curCascade = juce::roundToInt(
+            audioProcessor.apvts.getRawParameterValue("slope" + suffix)->load());
+        g.slope.setSelectedId(juce::jlimit(1, 4, curCascade + 1),
+                              juce::dontSendNotification);
+
+        g.slope.onChange = [this, &g, sfx = suffix]()
+        {
+            const int idx = g.slope.getSelectedItemIndex();
+            if (auto* p = audioProcessor.apvts.getParameter("slope" + sfx))
+                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
+        };
+    }
     else if (modelIdx == 9)
     {
         // ── Wavefolder: Slope → カスケード段数 (1x / 2x / 4x / 8x) ──
@@ -228,10 +278,32 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
     // アイテム ID（1〜4）は APVTS マッピングに使用するため変えない。
     if (modelIdx == 22)
     {
+        // Modal Resonator: 混合モードとして Type0〜3 で表示
         g.type.changeItemText(1, "Type0");
         g.type.changeItemText(2, "Type1");
         g.type.changeItemText(3, "Type2");
         g.type.changeItemText(4, "Type3");
+    }
+    else if (modelIdx == 4)
+    {
+        // Bitcrush/SRR: SVF はトーン整形フィルターとして機能するため
+        // LP/HP/BP/Notch ではなくキャラクター名で表示する
+        g.type.changeItemText(1, "Warm");    // LP  = 低域を保護した温かいクラッシュ
+        g.type.changeItemText(2, "Focus");   // BP  = 帯域を絞ったクラッシュ
+        g.type.changeItemText(3, "Bright");  // HP  = 高域成分を際立たせるクラッシュ
+        g.type.changeItemText(4, "Hollow");  // Notch = ノッチ周波数を除いてクラッシュ
+    }
+    else if (modelIdx == 6)
+    {
+        // Comb Filter: LP/HP/BP/Notch は動作と一致しないため専用ラベルに変更
+        // Type 0 = フィードバック正帰還 (Warm)
+        // Type 1 = フィードバック負帰還 (Metal/フランジャー)
+        // Type 2 = フィードフォワード正帰還 (Comb ノッチ)
+        // Type 3 = フィードフォワード負帰還 (Phase/反転コーム)
+        g.type.changeItemText(1, "Warm");
+        g.type.changeItemText(2, "Metal");
+        g.type.changeItemText(3, "Comb");
+        g.type.changeItemText(4, "Phase");
     }
     else
     {
@@ -257,8 +329,21 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
 
     if (modelIdx == 4)
     {
-        g.cutoffLabel.setText("SRR",      juce::dontSendNotification);
-        g.resLabel.setText("Bits",        juce::dontSendNotification);
+        // Bitcrush/SRR: Cutoff = SRR 周波数 → "Rate", Res = SVF 色味 → "Color"
+        g.cutoffLabel.setText("Rate",     juce::dontSendNotification);
+        g.resLabel.setText("Color",       juce::dontSendNotification);
+    }
+    else if (modelIdx == 6)
+    {
+        // Comb Filter: Cutoff = 基音周波数 → "Freq", Res = フィードバック係数 → "Feedback"
+        g.cutoffLabel.setText("Freq",     juce::dontSendNotification);
+        g.resLabel.setText("Feedback",    juce::dontSendNotification);
+    }
+    else if (modelIdx == 7)
+    {
+        // MS-20: Cutoff はそのまま, Res = 実機パネル刻印 "Peak" に合わせる
+        g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
+        g.resLabel.setText("Peak",        juce::dontSendNotification);
     }
     else if (modelIdx == 9)
     {

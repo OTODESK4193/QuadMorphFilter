@@ -146,11 +146,22 @@ namespace TptFilter_SVF
         // 特異点回避: |dx| < 1e-5 のとき Taylor 展開でフォールバック
         //   Taylor: sin(x_z1) + 0.5 * cos(x_z1) * dx
         // 全演算を double 精度で実行 → float では差分商の情報落ちが可聴ノイズになる
+        //
+        // 【カスケードゲイン正規化】
+        //   fold_gain を各段にそのまま掛けると、段をまたぐ x 空間が指数的に拡大し
+        //   1サンプル間で sin() が多周期にわたってしまう → ADAA 平均値が擬似乱数 = ノイズ。
+        //   解決策: 全体 fold_gain を N 段で等分割 → per_stage_gain = fold_gain^(1/N)
+        //   これで各段の x_n 変動幅が一定に保たれ、ADAA が正しく機能する。
         else if (m == 9)
         {
             constexpr double ADAA_THRESHOLD = 1e-5;
             const double fold_gain = static_cast<double>(
                 juce::jmap(st.currentResVal, 0.1f, 10.0f, 1.0f, 10.0f));
+
+            // N 段カスケード用の per-stage ゲイン（fold_gain の N 乗根）
+            // N=1 のときは fold_gain そのまま（pow(..., 1.0) = 無変化）
+            const double per_stage_gain = std::pow(fold_gain,
+                1.0 / static_cast<double>(st.currentStages));
 
             for (int stage = 0; stage < st.currentStages; ++stage)
             {
@@ -169,7 +180,8 @@ namespace TptFilter_SVF
                 else                         svf_out = lp + hp;
 
                 // ── 1次 ADAA sin() wavefold ──
-                const double x_n  = static_cast<double>(svf_out) * fold_gain;
+                // per_stage_gain を使用: 各段の x 空間を一定幅に制限してノイズを防ぐ
+                const double x_n  = static_cast<double>(svf_out) * per_stage_gain;
                 const double x_z1 = st.wf_x_z1[stage][ch];
                 const double F_n  = -std::cos(x_n);          // F1(x_n) = -cos(x_n)
                 const double F_z1 = st.wf_F_z1[stage][ch];   // F1(x_z1)
