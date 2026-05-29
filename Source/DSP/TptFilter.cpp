@@ -53,6 +53,7 @@ void TptFilter::reset()
         for (int ch = 0; ch < 2; ++ch) {
             state.s1[stage][ch] = 0.0f; state.s2[stage][ch] = 0.0f;
             state.sk_s1[stage][ch] = 0.0f; state.sk_s2[stage][ch] = 0.0f;
+            state.ms20_dc_x1[stage][ch] = 0.0f; state.ms20_dc_y1[stage][ch] = 0.0f;
             state.dp_s1[stage][ch] = 0.0f; state.dp_s2[stage][ch] = 0.0f;
             for (int pole = 0; pole < 4; ++pole) state.zdfState[stage][ch][pole] = 0.0f;
             state.combWriteIdx[stage][ch] = 0; state.comb_ap_state[stage][ch] = 0.0f;
@@ -321,6 +322,15 @@ void TptFilter::updateCoefficients()
             state.R = 1.0f / (2.0f * adjRes);
             state.h = 1.0f / (1.0f + 2.0f * state.R * state.g + state.g * state.g);
         }
+
+        // Model 4 Bitcrush: ビット深度から量子化ステップ数を事前計算してキャッシュ。
+        // processSample() 内で std::pow を呼ぶとリアルタイム安全性が損なわれるため、
+        // updateCoefficients()（係数変化時のみ呼ばれる）でここで一度だけ計算する。
+        if (m == 4)
+        {
+            float bits = juce::jmap(currentRes, 0.1f, 10.0f, 16.0f, 2.0f);
+            state.srrBitSteps = std::pow(2.0f, bits);
+        }
         else if (m == 1 || m == 12 || m == 13 || m == 15)
         {
             // 【修正】r_scale: Moog=4.5 に引き上げ（発振閾値確保）
@@ -368,9 +378,8 @@ float TptFilter::processSample(int ch, float x)
         if (state.srrPhase[ch] >= 1.0f)
         {
             state.srrPhase[ch] -= std::floor(state.srrPhase[ch]);
-            float bits = juce::jmap(state.currentResVal, 0.1f, 10.0f, 16.0f, 2.0f);
-            float steps = std::pow(2.0f, bits);
-            state.srrHeld[ch] = std::round(x * steps) / steps;
+            // srrBitSteps は updateCoefficients() で事前計算済み（std::pow をここで呼ばない）
+            state.srrHeld[ch] = std::round(x * state.srrBitSteps) / state.srrBitSteps;
         }
         x = state.srrHeld[ch];
     }

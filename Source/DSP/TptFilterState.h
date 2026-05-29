@@ -54,6 +54,9 @@ struct TptFilterState
     // ===== Bitcrush / SRR =====
     float srrPhase[2] = {};
     float srrHeld[2] = {};
+    // srrBitSteps: std::pow(2, bits) を updateCoefficients() で事前計算してキャッシュ。
+    // processSample() 内で std::pow を呼ばないためのリアルタイム安全対策。
+    float srrBitSteps = 65536.0f;  // デフォルト = 2^16 (16bit)
 
     // ===== Formant (Vowel) =====
     float form_g[3] = {};
@@ -70,6 +73,10 @@ struct TptFilterState
     // ===== MS-20 SK Filter =====
     float sk_s1[8][2] = {};
     float sk_s2[8][2] = {};
+    // MS-20 DCブロッカー: 実機のフィードバック経路コンデンサを模倣。
+    // 非対称 tanh が生む DC 成分を各段で遮断し、動作点のドリフトを防ぐ。
+    float ms20_dc_x1[8][2] = {};  // 1サンプル前のフィードバック入力
+    float ms20_dc_y1[8][2] = {};  // 1サンプル前の DC ブロッカー出力
 
     // ===== All-Pass Phaser =====
     float ap_s[16][2] = {};

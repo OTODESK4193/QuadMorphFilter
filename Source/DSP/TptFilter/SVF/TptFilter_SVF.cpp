@@ -85,24 +85,28 @@ namespace TptFilter_SVF
             }
         }
         // ----- Model 6: Comb Filter -----
+        // 遅延時間は smoothedDigitalCutoff を使用してジッパーノイズを防ぐ（Model 23 と同一方針）。
+        // currentCutoffVal（スムージングなし）を使うとカットオフ自動化時にグリッチが発生する。
+        // ループ不変量（delaySamples / dInt / dFrac / eta / fb）はループ外で一度だけ計算する。
         else if (m == 6)
         {
+            const float delaySamples = (float)st.sampleRate
+                / juce::jlimit(20.0f, 20000.0f, st.smoothedDigitalCutoff);
+            const int   dInt  = (int)delaySamples;
+            const float dFrac = delaySamples - (float)dInt;
+            const float eta   = (1.0f - dFrac) / (1.0f + dFrac);
+
+            float fb = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 0.95f);
+            if (st.filterType == 1 || st.filterType == 3) fb = -fb;
+
             for (int stage = 0; stage < st.currentStages; ++stage)
             {
-                float delaySamples = (float)st.sampleRate
-                    / juce::jlimit(20.0f, 20000.0f, st.currentCutoffVal);
-                int   dInt = (int)delaySamples;
-                float dFrac = delaySamples - dInt;
-                int readIdx1 = (st.combWriteIdx[stage][ch] - dInt) & 16383;
-                int readIdx2 = (readIdx1 - 1) & 16383;
-                float eta = (1.0f - dFrac) / (1.0f + dFrac);
-                float delayed = st.combBuffer[stage][ch][readIdx2]
+                const int readIdx1 = (st.combWriteIdx[stage][ch] - dInt) & 16383;
+                const int readIdx2 = (readIdx1 - 1) & 16383;
+                const float delayed = st.combBuffer[stage][ch][readIdx2]
                     + eta * (st.combBuffer[stage][ch][readIdx1]
                         - st.comb_ap_state[stage][ch]);
                 st.comb_ap_state[stage][ch] = delayed;
-
-                float fb = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 0.95f);
-                if (st.filterType == 1 || st.filterType == 3) fb = -fb;
 
                 float combOut = 0.0f;
                 if (st.filterType == 0 || st.filterType == 1) {
@@ -119,13 +123,26 @@ namespace TptFilter_SVF
             }
         }
         // ----- Model 7: MS-20 Screaming -----
+        // DC ブロッカー: 実機 MS-20 フィードバック経路のコンデンサを模倣。
+        // 非対称 tanh（正側1.5×、負側0.8×）が生む DC 成分を各段で遮断し、
+        // 高 Peak 値でも動作点のドリフトが起きないようにする。
+        // α = 0.9995 ≈ 3.5Hz カットオフ（44100Hz 時）
         else if (m == 7)
         {
+            constexpr float DC_ALPHA = 0.9995f;
             float ms_k = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 2.5f);
             for (int stage = 0; stage < st.currentStages; ++stage)
             {
-                float fb = st.sk_s2[stage][ch] * ms_k;
-                fb = (fb > 0.0f) ? std::tanh(fb * 1.5f) : std::tanh(fb * 0.8f);
+                // フィードバック信号の DC 成分を除去してから非対称 tanh を適用
+                const float fb_raw = st.sk_s2[stage][ch] * ms_k;
+                const float fb_blocked = fb_raw
+                    - st.ms20_dc_x1[stage][ch]
+                    + DC_ALPHA * st.ms20_dc_y1[stage][ch];
+                st.ms20_dc_x1[stage][ch] = fb_raw;
+                st.ms20_dc_y1[stage][ch] = fb_blocked;
+
+                float fb = (fb_blocked > 0.0f) ? std::tanh(fb_blocked * 1.5f)
+                                               : std::tanh(fb_blocked * 0.8f);
                 float v1 = (out - fb - st.sk_s1[stage][ch]) * st.g / (1.0f + st.g);
                 float y1 = v1 + st.sk_s1[stage][ch];
                 st.sk_s1[stage][ch] = y1 + v1;
