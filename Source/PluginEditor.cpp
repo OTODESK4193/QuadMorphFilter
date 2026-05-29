@@ -205,6 +205,30 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
                 p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
         };
     }
+    else if (modelIdx == 23)
+    {
+        // ── Waveguide: Slope → 反射段数 (1x / 2x / 4x / 8x) ──
+        // 多段反射でリバーブ的な音場密度が増す。combBuffer を流用（Model 6 と排他使用）。
+        g.slAtt.reset();
+
+        g.slope.clear(juce::dontSendNotification);
+        g.slope.addItem("1x", 1);
+        g.slope.addItem("2x", 2);
+        g.slope.addItem("4x", 3);
+        g.slope.addItem("8x", 4);
+
+        const int curRefl = juce::roundToInt(
+            audioProcessor.apvts.getRawParameterValue("slope" + suffix)->load());
+        g.slope.setSelectedId(juce::jlimit(1, 4, curRefl + 1),
+                              juce::dontSendNotification);
+
+        g.slope.onChange = [this, &g, sfx = suffix]()
+        {
+            const int idx = g.slope.getSelectedItemIndex();
+            if (auto* p = audioProcessor.apvts.getParameter("slope" + sfx))
+                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
+        };
+    }
     else if (modelIdx == 21)
     {
         // ── Vactrol LPG: Slope → アタック時間 (At_Lo=1ms / At_Mid=5ms / At_Hi=20ms) ──
@@ -276,7 +300,16 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
     // Model 22 (Modal Resonator): 音楽的な LP/BP/HP/Notch 分類ではなく
     // 「どう混ぜるか」の操作モードなので Type0〜3 と表示する。
     // アイテム ID（1〜4）は APVTS マッピングに使用するため変えない。
-    if (modelIdx == 22)
+    if (modelIdx == 23)
+    {
+        // Waveguide: Type0=Wet (共鳴音のみ), Type1=Mix (励振+共鳴ブレンド)
+        // HP/Notch は ModelCapabilities で無効化済み → デフォルトテキストに戻しておく
+        g.type.changeItemText(1, "Wet");
+        g.type.changeItemText(2, "Mix");
+        g.type.changeItemText(3, "HP");
+        g.type.changeItemText(4, "Notch");
+    }
+    else if (modelIdx == 22)
     {
         // Modal Resonator: 混合モードとして Type0〜3 で表示
         g.type.changeItemText(1, "Type0");
@@ -380,6 +413,13 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
         // Vactrol LPG: Cutoff=開口量, Res=リリース時間
         g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
         g.resLabel.setText("Rel",         juce::dontSendNotification);
+    }
+    else if (modelIdx == 23)
+    {
+        // Waveguide: Cutoff = 共鳴ピッチ（遅延長）→ "Tune"
+        //            Res    = フィードバック量 = 音の持続時間 → "Decay"
+        g.cutoffLabel.setText("Tune",     juce::dontSendNotification);
+        g.resLabel.setText("Decay",       juce::dontSendNotification);
     }
     else
     {

@@ -67,21 +67,31 @@ namespace TptFilter_SVF
                 else                         out = lp + hp; // = in - 2R·bp_sat
             }
         }
-        // ----- Model 14: CS-80 (Yamaha) - 線形 SVF -----
+        // ----- Model 14: CS-80 (Yamaha) - 入力飽和付き SVF -----
+        // 実機解析:
+        //   Yamaha CS-80 VCF は 2極 SVF (LP / HP のみ)。
+        //   トランジスタ入力段・OTA の軽い飽和が独特の "温かみ" と倍音を生む。
+        //   Res が上がると飽和深度も増え、Clean SVF との差異が際立つ。
+        //
+        // 数学モデル:
+        //   sat = tanh(in × Drive)   Drive = 1.0 + Res × 0.2
+        //   SVF は線形 (Clean SVF と同一トポロジー)
+        //   Slope = maxSlope=0 (ModelCapabilities) → 2極固定 → currentStages は常に 1
         else if (m == 14)
         {
+            const float cs80Drive = 1.0f + st.currentResVal * 0.2f;
             for (int stage = 0; stage < st.currentStages; ++stage)
             {
-                float hp = (out - (2.0f * st.R + st.g) * st.s1[stage][ch]
+                const float sat = std::tanh(out * cs80Drive);
+                float hp = (sat - (2.0f * st.R + st.g) * st.s1[stage][ch]
                     - st.s2[stage][ch]) * st.h;
                 float bp = st.g * hp + st.s1[stage][ch];
                 float lp = st.g * bp + st.s2[stage][ch];
                 st.s1[stage][ch] = st.g * hp + bp;
                 st.s2[stage][ch] = st.g * bp + lp;
-                if (st.filterType == 0) out = lp;
-                else if (st.filterType == 1) out = bp;
+                if (st.filterType == 0)      out = lp;
                 else if (st.filterType == 2) out = hp;
-                else                         out = lp + hp;
+                else                         out = lp + hp;  // Notch も HP 扱い（LP/HP のみ有効）
             }
         }
         // ----- Model 6: Comb Filter -----
@@ -220,9 +230,28 @@ namespace TptFilter_SVF
             }
         }
         // ----- Model 16: EDP Wasp CMOS -----
+        // 実機解析:
+        //   EDP Wasp は CD4007 CMOS ロジックを VCF に使用（非常に異例）。
+        //   CMOS の pull-up（PMOS）は pull-down（NMOS）より駆動力が弱いため
+        //   正側が早くクリップし、負側はやや余裕がある → 非対称クリッピング。
+        //   この非対称性が偶数次高調波（2次歪み）を生み、Wasp 固有の "ギザギザ" 感を作る。
+        //
+        // 非対称 waspClip:
+        //   正側: v / (1 + v * 3.0)   → 飽和限界 ≈ +0.33  (強くクリップ)
+        //   負側: v / (1 - v * 1.5)   → 飽和限界 ≈ -0.67  (弱めにクリップ)
+        //   小信号ゲイン (v→0) は両側とも 1.0 で連続
+        //
+        // ゲイン正規化:
+        //   旧実装の `out * 1.5f + clamp` は常時 +3.5dB のゲインオフセットをもたらし
+        //   モーフィング時に音量が突然変化する原因となっていた。
+        //   削除して AGC（processSample 末尾）に委ねる。
         else if (m == 16)
         {
-            auto waspClip = [](float v) { return v / (1.0f + std::abs(v * 2.5f)); };
+            auto waspClip = [](float v) -> float {
+                return (v >= 0.0f)
+                    ? v / (1.0f + v * 3.0f)    // PMOS pull-up 制限: 強めクリップ
+                    : v / (1.0f - v * 1.5f);   // NMOS pull-down: 弱めクリップ (v<0 なので分母>1)
+            };
             for (int stage = 0; stage < st.currentStages; ++stage)
             {
                 float hp = (out - (2.0f * st.R + st.g) * st.s1[stage][ch]
@@ -231,40 +260,65 @@ namespace TptFilter_SVF
                 float lp = st.g * bp + st.s2[stage][ch];
                 st.s1[stage][ch] = waspClip(st.g * hp + bp);
                 st.s2[stage][ch] = waspClip(st.g * bp + lp);
-                if (st.filterType == 0) out = lp;
+                if (st.filterType == 0)      out = lp;
                 else if (st.filterType == 1) out = bp;
                 else if (st.filterType == 2) out = hp;
                 else                         out = lp + hp;
             }
-            out = std::clamp(out * 1.5f, -1.0f, 1.0f);
+            // ゲイン補正なし: AGC が RMS ベースで自動補正する
         }
-        // ----- Model 23: Waveguide Mesh -----
+        // ----- Model 23: Waveguide Mesh (多段反射) -----
+        // アーキテクチャ: 反射ループ × N 段カスケード (N = currentStages = 1/2/4/8)
+        //   各段が独立した遅延ライン + SVF スキャッタリング + tanh 励振を持ち、
+        //   前段出力が次段の励振として使われる。
+        //
+        // 遅延バッファ: combBuffer[stage][ch] を流用
+        //   (Model 6 Comb Filter と Model 23 は排他使用のため安全)
+        //   同様に combWriteIdx / comb_ap_state も流用。
+        //
+        // Type 選択:
+        //   Type 0 (Wet):  scattered のみ (waveguide 共鳴音だけ取り出す)
+        //   Type 1 (Mix):  dry 50% + scattered 50% (励振音と共鳴音のブレンド)
+        //
+        // Cutoff → 遅延長 = SR / Cutoff → 共鳴ピッチ ("Tune")
+        // Res    → フィードバック係数 → 音の持続時間 ("Decay")
         else if (m == 23)
         {
-            float delaySamples = (float)st.sampleRate
+            const float delaySamples = (float)st.sampleRate
                 / juce::jlimit(20.0f, 20000.0f, st.smoothedDigitalCutoff);
-            int   dInt = (int)delaySamples;
-            float dFrac = delaySamples - dInt;
-            int r1 = (st.wgWriteIdx[ch] - dInt) & 16383;
-            int r2 = (r1 - 1) & 16383;
-            float eta = (1.0f - dFrac) / (1.0f + dFrac);
-            float wgDelayed = st.wgBuffer[ch][r2]
-                + eta * (st.wgBuffer[ch][r1] - st.wg_ap_state[ch]);
-            st.wg_ap_state[ch] = wgDelayed;
+            const int   dInt  = (int)delaySamples;
+            const float dFrac = delaySamples - (float)dInt;
+            const float eta   = (1.0f - dFrac) / (1.0f + dFrac);
+            const float fb    = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 0.99f);
 
-            float hp = (wgDelayed - (2.0f * st.R + st.g) * st.s1[0][ch]
-                - st.s2[0][ch]) * st.h;
-            float bp = st.g * hp + st.s1[0][ch];
-            float wgScattered = st.g * bp + st.s2[0][ch];
-            st.s1[0][ch] = st.g * hp + bp;
-            st.s2[0][ch] = st.g * bp + wgScattered;
+            for (int stage = 0; stage < st.currentStages; ++stage)
+            {
+                // ── 遅延ライン読み出し（1次 allpass 補間）──
+                const int r1 = (st.combWriteIdx[stage][ch] - dInt) & 16383;
+                const int r2 = (r1 - 1) & 16383;
+                float wgDelayed = st.combBuffer[stage][ch][r2]
+                    + eta * (st.combBuffer[stage][ch][r1] - st.comb_ap_state[stage][ch]);
+                st.comb_ap_state[stage][ch] = wgDelayed;
 
-            float fb = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 0.99f);
-            float excitation = out + wgScattered * fb;
-            st.wgBuffer[ch][st.wgWriteIdx[ch]] = std::tanh(excitation);
-            st.wgWriteIdx[ch] = (st.wgWriteIdx[ch] + 1) & 16383;
+                // ── SVF スキャッタリング (波の反射シミュレーション) ──
+                float hp = (wgDelayed - (2.0f * st.R + st.g) * st.s1[stage][ch]
+                    - st.s2[stage][ch]) * st.h;
+                float bp = st.g * hp + st.s1[stage][ch];
+                float scattered = st.g * bp + st.s2[stage][ch];
+                st.s1[stage][ch] = st.g * hp + bp;
+                st.s2[stage][ch] = st.g * bp + scattered;
 
-            out = (st.filterType == 0) ? wgScattered : (out * 0.5f + wgScattered * 0.5f);
+                // ── 励振 + tanh 非線形サチュレーション → 遅延ラインへ書き込み ──
+                const float excitation = out + scattered * fb;
+                st.combBuffer[stage][ch][st.combWriteIdx[stage][ch]] = std::tanh(excitation);
+                st.combWriteIdx[stage][ch] = (st.combWriteIdx[stage][ch] + 1) & 16383;
+
+                // ── Type 選択 ──
+                if (st.filterType == 0)
+                    out = scattered;                        // Wet: 共鳴音のみ
+                else
+                    out = out * 0.5f + scattered * 0.5f;   // Mix: 励振+共鳴ブレンド
+            }
         }
 
         return out;

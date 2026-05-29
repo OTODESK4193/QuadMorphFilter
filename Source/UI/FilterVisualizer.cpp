@@ -153,7 +153,7 @@ void FilterVisualizer::paint(juce::Graphics& g)
                 float w2 = w_norm * w_norm;
                 float mag = 1.0f;
                 if (modelIdx == 0 || modelIdx == 3 || modelIdx == 4 || modelIdx == 9
-                    || modelIdx == 14 || modelIdx == 16 || modelIdx == 23)
+                    || modelIdx == 14 || modelIdx == 16)
                 {
                     int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
                     float adjustedRes = res;
@@ -164,10 +164,24 @@ void FilterVisualizer::paint(juce::Graphics& g)
                     float m = 1.0f / den;
                     if (t == 1) m *= w_norm; else if (t == 2) m *= w2; else if (t == 3) m *= std::abs(1.0f - w2);
                     mag = std::pow(m, stages);
-                    if (modelIdx == 0 || modelIdx == 4 || modelIdx == 16 || modelIdx == 23)
+                    if (modelIdx == 0 || modelIdx == 4 || modelIdx == 16)
                         mag *= (1.0f + res * 0.1f);
                     if (modelIdx == 9)
                         mag *= juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 1.0f, 5.0f);
+                }
+                else if (modelIdx == 23)
+                {
+                    // Waveguide: コム状共鳴スペクトル (Model 6 と同一公式, fb レンジのみ異なる)
+                    // DSP の smoothedDigitalCutoff ≈ fc と近似 (ビジュアライザーは静的評価)
+                    int stages = (slopeIdx == 0) ? 1 : (slopeIdx == 1) ? 2 : (slopeIdx == 2) ? 4 : 8;
+                    float delaySamples = 44100.0f / juce::jlimit(20.0f, 20000.0f, fc);
+                    float fb = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 0.99f);
+                    float wD = 2.0f * juce::MathConstants<float>::pi * freq
+                               * (delaySamples / 44100.0f);
+                    float comb_mag = 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD));
+                    // Type 0 (Wet) = コムのみ, Type 1 (Mix) = ドライ50%+コム50%
+                    float mm = (t == 0) ? comb_mag : (0.5f + 0.5f * comb_mag);
+                    mag = std::pow(mm, stages);
                 }
                 else if (modelIdx == 1 || modelIdx == 12 || modelIdx == 13 || modelIdx == 15) {
                     // r_scale を DSP と一致させる (Moog=4.5, SSM2040=5.0)

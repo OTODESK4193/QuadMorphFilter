@@ -38,8 +38,8 @@ static inline std::tuple<int, bool, bool, bool, bool> getModelCaps(int m)
                                                         //   Cutoff=カットオフ / Res=Q(段のキャラクター)
 
            // ===== 特殊 =====
-    case 14: return { 3, true,  false, true,  false }; // CS-80: LP/HPのみ
-    case 23: return { 3, true,  false, true,  false }; // Waveguide: LP/HP
+    case 14: return { 0, true,  false, true,  false }; // CS-80: LP/HPのみ, 2極固定 (maxSlope=0)
+    case 23: return { 3, true,  true,  false, false }; // Waveguide: Type0=Wet, Type1=Mix
     case 26: return { 3, true,  false, true,  false }; // Phased Array: LP/HP
 
            // ===== デフォルト: 全オプション有効 =====

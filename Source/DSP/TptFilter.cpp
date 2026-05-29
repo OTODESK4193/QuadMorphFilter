@@ -209,8 +209,31 @@ void TptFilter::setSlope(int index)
         state.filterOrder = (index == 0) ? 2 : (index == 1) ? 4 : (index == 2) ? 8 : 16;
         state.currentStages = state.filterOrder / 2;
     }
+    else if (m == 23)
+    {
+        // Waveguide: Slope → 反射段数 (1x/2x/4x/8x)
+        // 段数変化時は combBuffer (遅延ライン) をクリアして過去の残響をフラッシュ。
+        // Model 6 (Comb) と combBuffer を共用するため、同様のクリア処理が必要。
+        // ※ setSlope() は毎ブロック呼ばれるが newStages != state.currentStages は
+        //   ユーザー操作時のみ真となるため、高頻度クリアは発生しない。
+        const int newStages = (index == 0) ? 1 : (index == 1) ? 2 : (index == 2) ? 4 : 8;
+        if (newStages != state.currentStages)
+        {
+            state.currentStages = newStages;
+            for (int s = 0; s < 8; ++s)
+                for (int ch = 0; ch < 2; ++ch) {
+                    state.combWriteIdx[s][ch] = 0;
+                    state.comb_ap_state[s][ch] = 0.0f;
+                    std::fill(std::begin(state.combBuffer[s][ch]),
+                              std::end  (state.combBuffer[s][ch]), 0.0f);
+                    state.s1[s][ch] = 0.0f;
+                    state.s2[s][ch] = 0.0f;
+                }
+        }
+        state.filterOrder = state.currentStages * 2;
+    }
     else if (m == 0 || m == 3 || m == 4 || m == 6 || m == 7 || m == 9 ||
-        m == 14 || m == 16 || m == 23)
+        m == 14 || m == 16)
     {
         state.currentStages = (index == 0) ? 1 : (index == 1) ? 2 : (index == 2) ? 4 : 8;
         state.filterOrder = state.currentStages * 2;
@@ -664,6 +687,18 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         float rya = (c_ap - fb) / den2;
         float iya = s_ap / den2;
         return std::sqrt(rya * rya + iya * iya);
+    }
+    else if (m == 23) {
+        // Waveguide: コム状共鳴スペクトル（遅延 = SR/fc サンプル）
+        // fb = jmap(res, 0.1→0.99) で DSP と一致
+        float delaySamples = (float)state.sampleRate / juce::jlimit(20.0f, 20000.0f, fc);
+        float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.99f);
+        float wD = 2.0f * juce::MathConstants<float>::pi * frequency
+                   * (delaySamples / (float)state.sampleRate);
+        float comb_mag = 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD));
+        // Type 0 (Wet) = コムのみ、Type 1 (Mix) = ドライ50%+コム50%
+        float mm = (state.filterType == 0) ? comb_mag : (0.5f + 0.5f * comb_mag);
+        return std::pow(mm, state.currentStages);
     }
     else if (m == 27) {
         float d = 1.0f / 1.5f;
