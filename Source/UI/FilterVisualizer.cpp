@@ -13,7 +13,9 @@ void FilterVisualizer::paint(juce::Graphics& g)
     g.fillAll(juce::Colour(0xff1E272E));
     auto w = (float)getWidth();
     auto h = (float)getHeight();
-    const float dbTop = 60.0f;
+    // dbTop = 80dB: Reso=10 / 高スロープ時の共鳴ピークが +60dB を超えるモデルがあるため
+    // +80dB まで表示範囲を拡張する（SVF 8段≈62dB, Wavefolder 8x≈76dB, MS-20 8段≈68dB など）
+    const float dbTop = 80.0f;
     const float dbBottom = -120.0f;
     // ----- 0dB ライン -----
     float y0dB = juce::jmap(0.0f, dbTop, dbBottom, 0.0f, h);
@@ -510,6 +512,11 @@ void FilterVisualizer::paint(juce::Graphics& g)
                     float den = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w_norm * aa_d, 2.0f));
                     mag = std::pow(1.0f / den, static_cast<float>(aa_stages));
                 }
+                // 全モデル共通の上限クランプ:
+                // dbTop=80dB に対応する mag = 10^(80/20) = 10000。
+                // Comb Filter 8x (fb=0.95) や CS-80 多段など理論上天文学的な値になる
+                // モデルがキャンバス外に飛び出さないよう、ここで統一的にキャップする。
+                mag = std::min(mag, 10000.0f);
                 return static_cast<float>(mag);
             };
         rawMag[px] = calc("A", 0) * wA

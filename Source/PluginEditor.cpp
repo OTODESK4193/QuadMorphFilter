@@ -14,10 +14,10 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
     addAndMakeVisible(visualizer);
     addAndMakeVisible(xyPad);
 
-    setupFilterGroup(groupA, "A", "Filter A");
-    setupFilterGroup(groupB, "B", "Filter B");
-    setupFilterGroup(groupC, "C", "Filter C");
-    setupFilterGroup(groupD, "D", "Filter D");
+    setupFilterGroup(groupA, "A", "A");
+    setupFilterGroup(groupB, "B", "B");
+    setupFilterGroup(groupC, "C", "C");
+    setupFilterGroup(groupD, "D", "D");
 
     setupLfoGroup(lfos[0], 1, "LFO 1 (Morph)");
     setupLfoGroup(lfos[1], 2, "LFO 2 (Cutoff)");
@@ -569,32 +569,42 @@ void QuadMorphFilterAudioProcessorEditor::resized()
         }
     }
 
-    const int sliderW = 155;
+    // ── フィルター行レイアウト定数 ──
+    // enableButton を "A/B/C/D"（1文字）に短縮したぶんを model コンボに配分。
+    // cutoffLabel / resLabel は表示される最長文字列（"Rate"/"Feedback"）に合わせて拡張。
+    //
+    //   enable  28px  ("A" 1文字)
+    //   model  145px  (短いモデル名でも省略されにくくなる)
+    //   type    55px  ("Notch" 5文字)
+    //   slope   80px  ("8 Stages" 8文字)
+    //   sliderW 150px = cutoffLabel(32) + cutoff スライダー(118)
+    //   gap      6px
+    //   resArea = visW - 10 - (28+145+55+80+150+6)
+    //           = visW - 474
+    //   resLabel 65px  ("Feedback" 8文字)
+    //   res スライダー = resArea - 65
+    const int sliderW = 150;
     for (auto* g : { &groupA, &groupB, &groupC, &groupD })
     {
         auto r = b.removeFromTop(28).reduced(5, 2);
 
-        g->enableButton.setBounds(r.removeFromLeft(60).reduced(0, 2));
-        g->model.setBounds(r.removeFromLeft(115).reduced(2, 2));
-        g->type.setBounds(r.removeFromLeft(60).reduced(2, 2));
-        g->slope.setBounds(r.removeFromLeft(85).reduced(2, 2));
+        g->enableButton.setBounds(r.removeFromLeft(28).reduced(0, 2));
+        g->model.setBounds(r.removeFromLeft(145).reduced(2, 2));
+        g->type.setBounds(r.removeFromLeft(55).reduced(2, 2));
+        g->slope.setBounds(r.removeFromLeft(80).reduced(2, 2));
 
         auto cutArea = r.removeFromLeft(sliderW).reduced(2, 0);
-        g->cutoffLabel.setBounds(cutArea.removeFromLeft(28));
+        g->cutoffLabel.setBounds(cutArea.removeFromLeft(32));
         g->cutoff.setBounds(cutArea);
 
         r.removeFromLeft(6);
 
-        // Res スライダーの右端をフィルターカーブ描画エリア（FilterVisualizer）の
-        // 右端に揃える。
-        //   visW         = int(totalW * 0.7)  ← FilterVisualizer の幅
-        //   visInnerRight = visW - 10          ← reduced(5) の両側分を引いた内側幅
-        //   consumed      = enable(60) + model(115) + type(60) + slope(85)
-        //                   + sliderW(155) + gap(6) = 481px  (row 先頭からの消費)
-        //   resAreaW      = visInnerRight - consumed
-        const int resAreaW = visW - 10 - (60 + 115 + 60 + 85 + sliderW + 6);
+        // Res スライダーの右端を FilterVisualizer の右端に揃える。
+        //   consumed = 28 + 145 + 55 + 80 + sliderW(150) + gap(6) = 464px
+        //   resAreaW = (visW - 10) - 464 = visW - 474
+        const int resAreaW = visW - 10 - (28 + 145 + 55 + 80 + sliderW + 6);
         auto resArea = r.removeFromLeft(resAreaW).reduced(2, 0);
-        g->resLabel.setBounds(resArea.removeFromLeft(55));
+        g->resLabel.setBounds(resArea.removeFromLeft(65));
         g->res.setBounds(resArea);
     }
     b.removeFromTop(6);
