@@ -112,9 +112,9 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
         g.slAtt.reset();
 
         g.slope.clear(juce::dontSendNotification);
-        g.slope.addItem("Accent: Off", 1);   // position 0 → slopeIdx 0
-        g.slope.addItem("Accent: Low", 2);   // position 1 → slopeIdx 1
-        g.slope.addItem("Accent: High", 3);  // position 2 → slopeIdx 2
+        g.slope.addItem("Off",  1);   // position 0 → slopeIdx 0 (Accent: Off)
+        g.slope.addItem("Low",  2);   // position 1 → slopeIdx 1 (Accent: Low)
+        g.slope.addItem("High", 3);   // position 2 → slopeIdx 2 (Accent: High)
 
         // 現在の APVTS 値を読んでコンボに反映（選択をリセットしない）
         const int curAccent = juce::roundToInt(
@@ -138,10 +138,10 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
         g.slAtt.reset();
 
         g.slope.clear(juce::dontSendNotification);
-        g.slope.addItem("1 Stage",  1);
-        g.slope.addItem("2 Stages", 2);
-        g.slope.addItem("4 Stages", 3);
-        g.slope.addItem("8 Stages", 4);
+        g.slope.addItem("1x", 1);
+        g.slope.addItem("2x", 2);
+        g.slope.addItem("4x", 3);
+        g.slope.addItem("8x", 4);
 
         const int curStages = juce::roundToInt(
             audioProcessor.apvts.getRawParameterValue("slope" + suffix)->load());
@@ -337,7 +337,7 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
     {
         // Comb Filter: Cutoff = 基音周波数 → "Freq", Res = フィードバック係数 → "Feedback"
         g.cutoffLabel.setText("Freq",     juce::dontSendNotification);
-        g.resLabel.setText("Feedback",    juce::dontSendNotification);
+        g.resLabel.setText("FB",           juce::dontSendNotification);
     }
     else if (modelIdx == 7)
     {
@@ -373,7 +373,7 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
     {
         // Elliptic: Reso = ストップバンドノッチ位置（低=Wide, 高=Steep）
         g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
-        g.resLabel.setText("Stopband",    juce::dontSendNotification);
+        g.resLabel.setText("Stop",        juce::dontSendNotification);
     }
     else if (modelIdx == 21)
     {
@@ -399,14 +399,15 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g,
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         audioProcessor.apvts, "enable" + s, g.enableButton);
 
+    // モデル名: 括弧を削除しコンパクト化（全28モデル、ID=1〜28に対応）
     g.model.addItemList({
-        "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR",
-        "Formant (Vowel)", "Comb Filter", "MS-20 (Screaming)", "All-Pass Phaser", "Wavefolder",
-        "Reverb (Metallic)", "Kilo All-Pass",
-        "CEM3320", "SSM 2040", "CS-80 (Yamaha)", "Jupiter (Roland)", "EDP Wasp (CMOS)",
-        "Butterworth (Flat)", "Chebyshev (Ripple)", "Bessel (Phase)", "Elliptic (Notch)",
-        "Vactrol LPG", "Modal Resonator", "Waveguide Mesh", "Bode Freq Shifter",
-        "Z-Plane (2D Morph)", "Phased Array", "Nyquist Anti-alias"
+        "Clean SVF",    "Moog Ladder",  "TB-303",       "Oberheim SEM", "Bitcrush",
+        "Vowel Filter", "Comb Filter",  "MS-20",        "AP Phaser",    "Wavefolder",
+        "FDN Reverb",   "Kilo AP",
+        "CEM3320",      "SSM2040",      "CS-80",        "Roland Jupiter","EDP Wasp",
+        "Butterworth",  "Chebyshev",    "Bessel",       "Elliptic",
+        "Vactrol LPG",  "Modal Res",    "Waveguide",    "Bode Shifter",
+        "Z-Plane",      "Phased Array", "Nyquist AA"
         }, 1);
     addAndMakeVisible(g.model);
     g.mAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
@@ -428,7 +429,7 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g,
             l.setText(txt, juce::dontSendNotification);
             addAndMakeVisible(l);
             sl.setSliderStyle(juce::Slider::LinearHorizontal);
-            sl.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 55, 18);
+            sl.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 50, 18);
             sl.setColour(juce::Slider::thumbColourId, juce::Colour(0xff00ACC1));
             addAndMakeVisible(sl);
             att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
@@ -569,42 +570,42 @@ void QuadMorphFilterAudioProcessorEditor::resized()
         }
     }
 
-    // ── フィルター行レイアウト定数 ──
-    // enableButton を "A/B/C/D"（1文字）に短縮したぶんを model コンボに配分。
-    // cutoffLabel / resLabel は表示される最長文字列（"Rate"/"Feedback"）に合わせて拡張。
+    // ── フィルター行レイアウト（等幅スライダー設計）──
     //
-    //   enable  28px  ("A" 1文字)
-    //   model  145px  (短いモデル名でも省略されにくくなる)
-    //   type    55px  ("Notch" 5文字)
-    //   slope   80px  ("8 Stages" 8文字)
-    //   sliderW 150px = cutoffLabel(32) + cutoff スライダー(118)
-    //   gap      6px
-    //   resArea = visW - 10 - (28+145+55+80+150+6)
-    //           = visW - 474
-    //   resLabel 65px  ("Feedback" 8文字)
-    //   res スライダー = resArea - 65
-    const int sliderW = 150;
+    // Cutoff・Reso スライダーを等幅にするため、固定消費を除いた残り幅を 2 等分する。
+    //
+    //   固定消費: enable(28) + model(145) + type(68) + slope(80)
+    //             + cutoffLabel(34) + gap(4) + resLabel(55)  = 414px
+    //
+    //   type  68px: "Hollow"/"Bright" (6文字) まで表示可能
+    //   cutoffLabel 34px: "Rate"/"Freq" (4文字) が余裕で表示可能
+    //   resLabel 55px: 最長 "Ripple" (6文字) まで — "Feedback"→"FB"、"Stopband"→"Stop" に省略
+    //
+    //   sliderAreaW = (visW - 10 - 414) / 2
+    //   行全体 = 414 + 2*sliderAreaW = visW - 10 → FilterVisualizer 右端に揃う
+
+    const int fixedConsumed = 28 + 145 + 68 + 80 + 34 + 4 + 55;   // = 414
+    const int sliderAreaW   = std::max(80, (visW - 10 - fixedConsumed) / 2);
+
     for (auto* g : { &groupA, &groupB, &groupC, &groupD })
     {
         auto r = b.removeFromTop(28).reduced(5, 2);
 
         g->enableButton.setBounds(r.removeFromLeft(28).reduced(0, 2));
         g->model.setBounds(r.removeFromLeft(145).reduced(2, 2));
-        g->type.setBounds(r.removeFromLeft(55).reduced(2, 2));
+        g->type.setBounds(r.removeFromLeft(68).reduced(2, 2));   // 55→68: "Hollow"対応
         g->slope.setBounds(r.removeFromLeft(80).reduced(2, 2));
 
-        auto cutArea = r.removeFromLeft(sliderW).reduced(2, 0);
-        g->cutoffLabel.setBounds(cutArea.removeFromLeft(32));
+        // Cutoff: label(34) + slider(sliderAreaW)
+        auto cutArea = r.removeFromLeft(34 + sliderAreaW).reduced(2, 0);
+        g->cutoffLabel.setBounds(cutArea.removeFromLeft(34));
         g->cutoff.setBounds(cutArea);
 
-        r.removeFromLeft(6);
+        r.removeFromLeft(4);
 
-        // Res スライダーの右端を FilterVisualizer の右端に揃える。
-        //   consumed = 28 + 145 + 55 + 80 + sliderW(150) + gap(6) = 464px
-        //   resAreaW = (visW - 10) - 464 = visW - 474
-        const int resAreaW = visW - 10 - (28 + 145 + 55 + 80 + sliderW + 6);
-        auto resArea = r.removeFromLeft(resAreaW).reduced(2, 0);
-        g->resLabel.setBounds(resArea.removeFromLeft(65));
+        // Reso: label(55) + slider(sliderAreaW) — Cutoff と同じ幅
+        auto resArea = r.removeFromLeft(55 + sliderAreaW).reduced(2, 0);
+        g->resLabel.setBounds(resArea.removeFromLeft(55));
         g->res.setBounds(resArea);
     }
     b.removeFromTop(6);
