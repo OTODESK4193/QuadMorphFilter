@@ -52,7 +52,13 @@ void LfoEngine::processSingleLfo(int i,
     float minVal = apvts.getRawParameterValue(id + "min")->load();
     float maxVal = apvts.getRawParameterValue(id + "max")->load();
     int   boundMode = (int)apvts.getRawParameterValue(id + "bound")->load();
-    float spread = maxVal - minVal;
+
+    // ===== 自動正規化: Min > Max でも自動修正 =====
+    // ユーザーが Min=100% Max=0% と逆に設定しても正しく動作する。
+    // これにより直感的で誤操作に強いUIを実現
+    float actualMin = std::min(minVal, maxVal);
+    float actualMax = std::max(minVal, maxVal);
+    float spread = actualMax - actualMin;
 
     bool isWait = rec.isWaiting[i].load(std::memory_order_acquire);
     bool isDrag = rec.isDragging[i].load(std::memory_order_acquire);
@@ -264,15 +270,20 @@ void LfoEngine::processSingleLfo(int i,
                 + (states[i].nextRand1[f] - states[i].currentRand1[f]) * t;
             float w = raw * 2.0f - 1.0f;
             if (step) w = std::round(w * 4.0f) / 4.0f;
-            mod4[i][f] = applyBound(baseX + w * spread, boundMode);
+            // actualMin + w * spread で [actualMin, actualMax] 範囲内で変動
+            mod4[i][f] = applyBound(actualMin + (w + 1.0f) / 2.0f * spread, boundMode);
         }
         positions[i].x = mod4[i][0];
         positions[i].y = mod4[i][1];
     }
     else
     {
-        positions[i].x = applyBound(baseX + W_x * spread, boundMode);
-        positions[i].y = applyBound(baseY + W_y * spread, boundMode);
+        // W_x, W_y は [-1, 1] の範囲。これを [actualMin, actualMax] に変換
+        // W = -1 → actualMin (0%)
+        // W = +1 → actualMax (100%)
+        // W = 0  → (actualMin + actualMax) / 2 (50%)
+        positions[i].x = applyBound(actualMin + (W_x + 1.0f) / 2.0f * spread, boundMode);
+        positions[i].y = applyBound(actualMin + (W_y + 1.0f) / 2.0f * spread, boundMode);
         for (int f = 0; f < 4; ++f)
             mod4[i][f] = positions[i].x;
     }
