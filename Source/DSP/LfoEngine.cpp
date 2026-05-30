@@ -144,6 +144,7 @@ void LfoEngine::processSingleLfo(int i,
 
     case 6: // Recording
         if (isWait) {
+            // Recording 待機中: 現在のマウス位置またはラスト位置を表示
             if (isDrag) {
                 W_x = rec.currentX[i].load() * 2.f - 1.f;
                 W_y = rec.currentY[i].load() * 2.f - 1.f;
@@ -157,16 +158,41 @@ void LfoEngine::processSingleLfo(int i,
             }
         }
         else {
-            int len = rec.lengths[i].load();
+            // Recording 再生中
+            // LfoEngine 内部の recordingData を使用（XYGridComponent から setRecordingData() で設定）
+            int len = recordingLength[i];
             if (len > 0) {
                 float exactIdx = t * len;
-                int   idx1 = (int)exactIdx % len;
-                int   idx2 = (idx1 + 1) % len;
-                float frac = exactIdx - std::floor(exactIdx);
-                W_x = (rec.buffers[i][idx1].x
-                    + (rec.buffers[i][idx2].x - rec.buffers[i][idx1].x) * frac) * 2.f - 1.f;
-                W_y = (rec.buffers[i][idx1].y
-                    + (rec.buffers[i][idx2].y - rec.buffers[i][idx1].y) * frac) * 2.f - 1.f;
+                int idx1 = (int)exactIdx % len;
+
+                if (step) {
+                    // Step モード: ピクセルそのまま（量子化）
+                    W_x = recordingData[i][idx1].x * 2.f - 1.f;
+                    W_y = recordingData[i][idx1].y * 2.f - 1.f;
+                }
+                else {
+                    // Smooth モード: Hermite 補間
+                    int idx0 = (idx1 - 1 + len) % len;
+                    int idx2 = (idx1 + 1) % len;
+                    int idx3 = (idx2 + 1) % len;
+                    float frac = exactIdx - std::floor(exactIdx);
+
+                    float interp_x = hermite(
+                        recordingData[i][idx0].x,
+                        recordingData[i][idx1].x,
+                        recordingData[i][idx2].x,
+                        recordingData[i][idx3].x,
+                        frac);
+                    float interp_y = hermite(
+                        recordingData[i][idx0].y,
+                        recordingData[i][idx1].y,
+                        recordingData[i][idx2].y,
+                        recordingData[i][idx3].y,
+                        frac);
+
+                    W_x = interp_x * 2.f - 1.f;
+                    W_y = interp_y * 2.f - 1.f;
+                }
             }
         }
         break;
@@ -302,6 +328,29 @@ std::array<float, 4> LfoEngine::getMod4(int index) const
 {
     jassert(index >= 0 && index < 3);
     return mod4[index];
+}
+
+// ==========================================
+// ヘルパー: Hermite 補間（3次スプライン）
+// ==========================================
+static inline float hermite(float p0, float p1, float p2, float p3, float t)
+{
+    // 3次 Hermite 補間
+    // t: [0, 1]
+    // p0, p1, p2, p3: 4つのコントロールポイント
+    float t2 = t * t;
+    float t3 = t2 * t;
+    float mt = 1.0f - t;
+    float mt2 = mt * mt;
+    float mt3 = mt2 * mt;
+
+    // Catmull-Rom 係数
+    float a0 = -0.5f * mt3 + mt2 - 0.5f * mt;
+    float a1 = 1.5f * t3 - 2.5f * t2 + 1.0f;
+    float a2 = -1.5f * t3 + 2.0f * t2 + 0.5f * t;
+    float a3 = 0.5f * t3 - 0.5f * t2;
+
+    return a0 * p0 + a1 * p1 + a2 * p2 + a3 * p3;
 }
 
 // ==========================================

@@ -47,6 +47,15 @@ public:
     juce::Point<float>   getPosition(int index) const;
     std::array<float, 4> getMod4(int index) const;
 
+    // ===== Recording データセッター =====
+    // XYGridComponent から呼び出される
+    void setRecordingData(int index, const std::array<juce::Point<float>, 2048>& buffer, int len)
+    {
+        if (index < 0 || index >= 3) return;
+        recordingData[index] = buffer;
+        recordingLength[index] = len;
+    }
+
 private:
     // ===== LFO内部状態 =====
     struct LfoState
@@ -71,6 +80,10 @@ private:
     LfoState             states[3];
     juce::Point<float>   positions[3];
     std::array<float, 4> mod4[3];
+
+    // ===== Recording バッファ =====
+    std::array<juce::Point<float>, 2048> recordingData[3];
+    int recordingLength[3] = { 0, 0, 0 };
 
     // ===== ヘルパー =====
     static float getSyncTime(int selection, double bpm);

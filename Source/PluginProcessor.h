@@ -41,6 +41,12 @@ public:
     juce::Point<float>   getLfoPos(int index)  const { return lfoEngine.getPosition(index); }
     std::array<float, 4> getLfoMod4(int index) const { return lfoEngine.getMod4(index); }
 
+    // ===== Recording データセッター =====
+    void setLfoRecordingData(int index, const std::array<juce::Point<float>, 2048>& buffer, int len)
+    {
+        lfoEngine.setRecordingData(index, buffer, len);
+    }
+
     juce::AudioProcessorValueTreeState apvts;
 
     std::array<juce::Point<float>, 2048> recBuffer[3];

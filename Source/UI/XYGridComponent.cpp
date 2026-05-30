@@ -102,8 +102,16 @@ void XYGridComponent::mouseUp(const juce::MouseEvent& e)
 {
     recording = false;
 
-    // 記録データを LfoEngine へ反映（別途処理）
-    // → processBlock で getRecordingData() を呼び出す
+    // 記録データを取得
+    std::array<juce::Point<float>, 2048> buffer;
+    int len = 0;
+    getRecordingData(buffer, len);
+
+    // PluginProcessor 経由で LfoEngine に反映
+    // ※ 注意: XYGridComponent を複数の LFO に対応させる場合は、
+    //    lfoIndex を引数で受け取る必要があります。
+    //    現在は固定で LFO 1 (Morph) に対応。
+    processor.setLfoRecordingData(0, buffer, len);  // LFO 1 (Morph)
 
     repaint();
 }
