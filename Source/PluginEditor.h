@@ -60,6 +60,15 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> osModeAtt;
 
 
+    // ===== Morph ブレンド / Cutoff アルゴリズム 選択コンボ =====
+    juce::Label    morphBlendLabel;
+    juce::ComboBox morphBlendCombo;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> morphBlendAtt;
+
+    juce::Label    cutoffAlgoLabel;
+    juce::ComboBox cutoffAlgoCombo;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> cutoffAlgoAtt;
+
     // ===== 【新規】LFO Cut per-filter スイッチ (A/B/C/D) =====
     juce::Label      lfoCutLabel;
     juce::TextButton lfoCutBtn[4];

@@ -19,6 +19,11 @@ public:
     void mouseDown(const juce::MouseEvent& e) override;
     void mouseDrag(const juce::MouseEvent& e) override;
     void mouseUp(const juce::MouseEvent& e) override;
+    void mouseDoubleClick(const juce::MouseEvent& e) override;
+
+    // 角丸矩形の内側のみをヒット判定エリアとする
+    // → 描画枠外（コーナーの円弧外）でのクリックを無効化
+    bool hitTest(int x, int y) override;
 
 private:
     void updatePosition(const juce::MouseEvent& e);

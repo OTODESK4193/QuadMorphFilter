@@ -82,6 +82,16 @@
             juce::ParameterID{ "osMode", 1 }, "OS Quality",
             juce::StringArray{ "Off", "Auto", "2x", "4x" }, 0));
 
+        // Morph ブレンドアルゴリズム (Morph モード時に使用)
+        layout.add(std::make_unique<juce::AudioParameterChoice>(
+            juce::ParameterID{ "morphBlend", 1 }, "Morph Blend",
+            juce::StringArray{ "EqPwr", "Linear", "Smooth", "Radial" }, 0));
+
+        // Cutoff モード アルゴリズム (Cutoff モード時に使用)
+        layout.add(std::make_unique<juce::AudioParameterChoice>(
+            juce::ParameterID{ "cutoffAlgo", 1 }, "Cutoff Algo",
+            juce::StringArray{ "Abs", "Rel", "Zone" }, 0));
+
         for (const auto& s : suffixes)
         {
             layout.add(std::make_unique<juce::AudioParameterBool>(
@@ -164,11 +174,41 @@
         float posX = lfoEngine.getPosition(0).x;
         float posY = lfoEngine.getPosition(0).y;
 
-        // ===== XY → Cutoff/Reso 変換 =====
-        // X: 20Hz〜20kHz（対数スケール）
-        // Y: 上=大(Reso)、下=小 → (1-posY) で反転
-        float xyCutoff = 20.0f * std::pow(1000.0f, posX);
-        float xyRes = juce::jlimit(0.1f, 10.0f, 0.1f + (1.0f - posY) * 9.9f);
+        // ===== XY → Cutoff/Reso 変換 (cutoffAlgo で方式を選択) =====
+        const int cutoffAlgo = (int)apvts.getRawParameterValue("cutoffAlgo")->load();
+        float xyCutoff, xyRes;
+
+        if (cutoffAlgo == 1)
+        {
+            // 案II: 相対モード — 中央 (0.5, 0.5) = 632Hz・Res 1.0 をゼロ点とし
+            //   X 軸: ±4 オクターブ (左=低、右=高)
+            //   Y 軸: ±2 オクターブ (上=高、下=低)
+            const float devX =  (posX - 0.5f) * 2.0f;    // -1 to +1
+            const float devY =  (0.5f - posY) * 2.0f;    // +1=上(高), -1=下(低)
+            xyCutoff = 632.0f * std::pow(2.0f, devX * 4.0f);
+            xyRes    = 1.0f   * std::pow(2.0f, devY * 2.0f);
+        }
+        else if (cutoffAlgo == 2)
+        {
+            // 案III: ゾーン非対称 — 正方向がより広いレンジ
+            //   X 右: +5oct、X 左: -3oct
+            //   Y 上: +3oct(Res)、Y 下: -2oct(Res)
+            const float devX = (posX - 0.5f) * 2.0f;
+            const float devY = (0.5f - posY) * 2.0f;
+            const float octX = (devX >= 0.0f) ? devX * 5.0f : devX * 3.0f;
+            const float octY = (devY >= 0.0f) ? devY * 3.0f : devY * 2.0f;
+            xyCutoff = 632.0f * std::pow(2.0f, octX);
+            xyRes    = 1.0f   * std::pow(2.0f, octY);
+        }
+        else
+        {
+            // 案I: 絶対モード (従来通り)
+            // X: 20Hz〜20kHz（対数スケール）、Y: 上=大(Reso)
+            xyCutoff = 20.0f * std::pow(1000.0f, posX);
+            xyRes    = 0.1f + (1.0f - posY) * 9.9f;
+        }
+        xyCutoff = juce::jlimit(20.0f, 20000.0f, xyCutoff);
+        xyRes    = juce::jlimit(0.1f,  10.0f,    xyRes);
 
         // ===== LFO2/3 モジュレーション量 =====
         bool lfo1_isRand1 = ((int)apvts.getRawParameterValue("lfo2wave")->load() == 3)
@@ -270,13 +310,25 @@
         }
         else
         {
-            // Morphモード: 等パワークロスフェード
+            // Morphモード: morphBlend パラメータでブレンドアルゴリズムを切替
             bool lfo0_isRand1 = ((int)apvts.getRawParameterValue("lfo1wave")->load() == 3)
                 && (apvts.getRawParameterValue("lfo1en")->load() > 0.5f);
 
-            wMix = lfo0_isRand1
-                ? lfoEngine.getMod4(0)
-                : MorphEngine::computeEqualPowerWMix(posX, posY);
+            if (lfo0_isRand1)
+            {
+                wMix = lfoEngine.getMod4(0);
+            }
+            else
+            {
+                const int morphBlend = (int)apvts.getRawParameterValue("morphBlend")->load();
+                switch (morphBlend)
+                {
+                    case 1:  wMix = MorphEngine::computeLinearWMix    (posX, posY); break;
+                    case 2:  wMix = MorphEngine::computeSmoothstepWMix(posX, posY); break;
+                    case 3:  wMix = MorphEngine::computeRadialWMix    (posX, posY); break;
+                    default: wMix = MorphEngine::computeEqualPowerWMix(posX, posY); break;
+                }
+            }
 
             // 有効フィルターのみで正規化
             float sumSq = 0.0f;

@@ -19,17 +19,40 @@ void XYPadComponent::timerCallback()
         trailIdx[i] = (trailIdx[i] + 1) % 30;
     }
 
-    // ===== Cutoffモード: XY位置をスライダーに書き戻し =====
+    // ===== Cutoffモード: XY位置をスライダーに書き戻し (UI同期) =====
     // lfoCutOn=true のフィルターのカットオフスライダーを
     // XY位置由来の値に追従させる（表示の同期）
     int xyMode = (int)processor.apvts.getRawParameterValue("xyMode")->load();
     if (xyMode == 1)
     {
         auto mPos = processor.getLfoPos(0);
+        const int cutoffAlgo = (int)processor.apvts.getRawParameterValue("cutoffAlgo")->load();
 
-        // X: 20Hz〜20kHz（対数）, Y: 上=大（反転）
-        float xyCutoff = 20.0f * std::pow(1000.0f, mPos.x);
-        float xyRes = juce::jlimit(0.1f, 10.0f, 0.1f + (1.0f - mPos.y) * 9.9f);
+        float xyCutoff, xyRes;
+        if (cutoffAlgo == 1)
+        {
+            // 案II: 相対モード (processBlock と同一計算)
+            const float devX = (mPos.x - 0.5f) * 2.0f;
+            const float devY = (0.5f - mPos.y) * 2.0f;
+            xyCutoff = 632.0f * std::pow(2.0f, devX * 4.0f);
+            xyRes    = 1.0f   * std::pow(2.0f, devY * 2.0f);
+        }
+        else if (cutoffAlgo == 2)
+        {
+            // 案III: ゾーン非対称
+            const float devX = (mPos.x - 0.5f) * 2.0f;
+            const float devY = (0.5f - mPos.y) * 2.0f;
+            xyCutoff = 632.0f * std::pow(2.0f, (devX >= 0.0f ? devX * 5.0f : devX * 3.0f));
+            xyRes    = 1.0f   * std::pow(2.0f, (devY >= 0.0f ? devY * 3.0f : devY * 2.0f));
+        }
+        else
+        {
+            // 案I: 絶対モード
+            xyCutoff = 20.0f * std::pow(1000.0f, mPos.x);
+            xyRes    = 0.1f + (1.0f - mPos.y) * 9.9f;
+        }
+        xyCutoff = juce::jlimit(20.0f, 20000.0f, xyCutoff);
+        xyRes    = juce::jlimit(0.1f,  10.0f,    xyRes);
 
         const juce::String suffixes[4] = { "A", "B", "C", "D" };
         for (const auto& s : suffixes)
@@ -210,8 +233,26 @@ void XYPadComponent::mouseUp(const juce::MouseEvent&)
     }
 }
 
+void XYPadComponent::mouseDoubleClick(const juce::MouseEvent&)
+{
+    // ダブルクリックで XY パッドを中央 (0.5, 0.5) にリセット
+    processor.apvts.getParameter("posX")->setValueNotifyingHost(0.5f);
+    processor.apvts.getParameter("posY")->setValueNotifyingHost(0.5f);
+}
+
+bool XYPadComponent::hitTest(int x, int y)
+{
+    // 角丸矩形 (radius=8) の内側のみをヒット判定エリアとする
+    // → 描画枠の角丸外側でのクリックを受け付けない
+    juce::Path p;
+    p.addRoundedRectangle(getLocalBounds().toFloat(), 8.0f);
+    return p.contains((float)x, (float)y);
+}
+
 void XYPadComponent::updatePosition(const juce::MouseEvent& e)
 {
+    // jlimit により枠外ドラッグは枠端に吸着する
+    // （マウスが枠外に出てもドットは枠の辺上に留まる）
     float x = juce::jlimit(0.0f, 1.0f, (float)e.x / getWidth());
     float y = juce::jlimit(0.0f, 1.0f, (float)e.y / getHeight());
     processor.apvts.getParameter("posX")->setValueNotifyingHost(x);

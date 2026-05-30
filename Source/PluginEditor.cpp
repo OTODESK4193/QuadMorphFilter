@@ -57,6 +57,24 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
     osModeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         audioProcessor.apvts, "osMode", osModeCombo);
 
+    // ── Morph ブレンドモード コンボ ──
+    morphBlendLabel.setText("Blend", juce::dontSendNotification);
+    morphBlendLabel.setJustificationType(juce::Justification::centredRight);
+    addAndMakeVisible(morphBlendLabel);
+    morphBlendCombo.addItemList({ "EqPwr", "Linear", "Smooth", "Radial" }, 1);
+    addAndMakeVisible(morphBlendCombo);
+    morphBlendAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.apvts, "morphBlend", morphBlendCombo);
+
+    // ── Cutoff アルゴリズム コンボ ──
+    cutoffAlgoLabel.setText("Algo", juce::dontSendNotification);
+    cutoffAlgoLabel.setJustificationType(juce::Justification::centredRight);
+    addAndMakeVisible(cutoffAlgoLabel);
+    cutoffAlgoCombo.addItemList({ "Abs", "Rel", "Zone" }, 1);
+    addAndMakeVisible(cutoffAlgoCombo);
+    cutoffAlgoAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.apvts, "cutoffAlgo", cutoffAlgoCombo);
+
     lfoCutLabel.setText("LFO Cut", juce::dontSendNotification);
     lfoCutLabel.setJustificationType(juce::Justification::centredRight);
     addAndMakeVisible(lfoCutLabel);
@@ -716,6 +734,19 @@ void QuadMorphFilterAudioProcessorEditor::resized()
             int bw = area.getWidth() / 4;
             for (int i = 0; i < 4; ++i)
                 lfoResBtn[i].setBounds(area.removeFromLeft(bw).reduced(2, 1));
+            ctrlY += rowH + gap;
+        }
+
+        {
+            // ── Row 4: Blend (Morph) + Algo (Cutoff) ──
+            // Mode/OS と同レイアウト: 左半分 = Blend、右半分 = Algo
+            auto area = juce::Rectangle<int>(rightX, ctrlY, rightW, rowH).reduced(4, 1);
+            auto leftHalf = area.removeFromLeft(area.getWidth() / 2 - 4);
+            morphBlendLabel.setBounds(leftHalf.removeFromLeft(42).reduced(0, 1));
+            morphBlendCombo.setBounds(leftHalf);
+            area.removeFromLeft(8);
+            cutoffAlgoLabel.setBounds(area.removeFromLeft(30).reduced(0, 1));
+            cutoffAlgoCombo.setBounds(area);
         }
     }
 
