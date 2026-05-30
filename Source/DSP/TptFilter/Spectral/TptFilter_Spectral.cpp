@@ -166,9 +166,29 @@ namespace TptFilter_Spectral
             }
         }
         // ----- Model 24: Bode Frequency Shifter -----
+        // アーキテクチャ: 4段 IIR APF ヒルベルト変換ペア + 正弦波乗算器 + フィードバックループ
+        //
+        // 真のフィードバック:
+        //   入力 = ドライ + FB × 前サンプル出力
+        //   → FB を増やすと出力が入力に戻り続け、シフトが累積
+        //   → Shepard Tone 的な金属質・無限ループ感 (Bode 周波数シフターの真骨頂)
+        //
+        // Shift マッピング（対数中心対称）:
+        //   Cutoff = sqrt(20 × 20000) ≈ 632Hz → 0Hz シフト (中立点)
+        //   Cutoff = 20Hz    → −1000Hz シフト
+        //   Cutoff = 20000Hz → +1000Hz シフト
+        //   ノブを中央に置いたとき「ほぼシフトなし」になる直感的なマッピング
+        //
+        // Type 0 (Up):   上側帯域 (A·cos − B·sin) = 入力スペクトル全体を +shiftHz 上方移動
+        // Type 1 (Down): 下側帯域 (A·cos + B·sin) = 入力スペクトル全体を −shiftHz 下方移動
         else if (m == 24)
         {
-            float in_A = out, in_B = out;
+            // ── フィードバック入力（tanh で安定化）──
+            const float fb  = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 0.95f);
+            const float fb_in = std::tanh(out + fb * st.bodeOutPrev[ch]);
+
+            // ── ヒルベルト変換: 2系列 4段 IIR APF ──
+            float in_A = fb_in, in_B = fb_in;
             for (int i = 0; i < 4; ++i)
             {
                 float vA = (in_A - st.hilbertStateA[i][ch]) * st.hilbertCoeffsA[i];
@@ -181,41 +201,112 @@ namespace TptFilter_Spectral
                 st.hilbertStateB[i][ch] = outB + vB;
                 in_B = 2.0f * outB - in_B;
             }
-            float shiftHz = juce::jmap(st.smoothedDigitalCutoff, 20.0f, 20000.0f, -1000.0f, 1000.0f);
-            float phaseInc = juce::MathConstants<float>::twoPi * shiftHz / (float)st.sampleRate;
+
+            // ── 対数中心対称 Shift マッピング ──
+            const float logMin    = std::log10(20.0f);
+            const float logMax    = std::log10(20000.0f);
+            const float logCenter = (logMin + logMax) * 0.5f;   // ≈ log10(632)
+            const float logCutoff = std::log10(
+                juce::jlimit(20.0f, 20000.0f, st.smoothedDigitalCutoff));
+            const float normalized = (logCutoff < logCenter)
+                ? (logCutoff - logCenter) / (logCenter - logMin)   // -1 to 0
+                : (logCutoff - logCenter) / (logMax - logCenter);  //  0 to +1
+            const float shiftHz = normalized * 1000.0f;
+
+            // ── 位相発振器 ──
+            const float phaseInc = juce::MathConstants<float>::twoPi
+                                   * shiftHz / (float)st.sampleRate;
             st.bodePhase[ch] += phaseInc;
             if (st.bodePhase[ch] > juce::MathConstants<float>::twoPi)
                 st.bodePhase[ch] -= juce::MathConstants<float>::twoPi;
             if (st.bodePhase[ch] < 0.0f)
                 st.bodePhase[ch] += juce::MathConstants<float>::twoPi;
 
-            float oscCos = std::cos(st.bodePhase[ch]);
-            float oscSin = std::sin(st.bodePhase[ch]);
-            float fb = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 0.95f);
-            float shifted = (st.filterType == 0 || st.filterType == 2)
-                ? (in_A * oscCos - in_B * oscSin)
-                : (in_A * oscCos + in_B * oscSin);
-            out = std::tanh(shifted * (1.0f + fb));
+            const float oscCos = std::cos(st.bodePhase[ch]);
+            const float oscSin = std::sin(st.bodePhase[ch]);
+
+            // ── 帯域選択 + フィードバック状態更新 ──
+            const float shifted = (st.filterType == 0 || st.filterType == 2)
+                ? (in_A * oscCos - in_B * oscSin)   // Up: 上側帯域
+                : (in_A * oscCos + in_B * oscSin);  // Down: 下側帯域
+
+            st.bodeOutPrev[ch] = shifted;  // 次サンプルのフィードバック用に保存
+            out = shifted;                  // AGC がレベルを正規化
         }
-        // ----- Model 25: Z-Plane 2D Morph -----
+        // ----- Model 25: 2D Morph (旧 Z-Plane) -----
+        // Cutoff (X軸) × Res (Y軸) の 2次元空間で 4コーナープリセット間を双線形補間し、
+        // 7段の SVF を駆動するモーフィングEQ。
+        //
+        // Type 別処理モード:
+        //   LP (Type 0): 7段 LP 直列カスケード → 多バンド LP 傾斜 EQ
+        //   BP (Type 1): 7段 BP 並列合計 / 7 → フォルマント共鳴バンク（リゾネーター）
+        //   HP (Type 2): 7段 HP 直列カスケード → 多バンド HP 傾斜 EQ
+        //   Notch (Type 3): 7段 Notch(LP+HP) 並列合計 / 7 → ハーモニックノッチバンク
+        //
+        // 並列合成モード (BP/Notch): 各段が元の信号を独立処理し出力を合計。
+        //   → 「7バンドグラフィックEQ」的な効果（各段が異なる fc で特定帯域を処理）
         else if (m == 25)
         {
-            for (int stage = 0; stage < 7; ++stage)
+            if (st.filterType == 1)
             {
-                if (stage >= (int)st.zplaneCoeffs.size()) break;
-                float cur_g = st.zplaneCoeffs[stage].g;
-                float cur_R = st.zplaneCoeffs[stage].R;
-                float cur_h = st.zplaneCoeffs[stage].h;
-                float hp = (out - (2.0f * cur_R + cur_g) * st.zplane_s1[stage][ch]
-                    - st.zplane_s2[stage][ch]) * cur_h;
-                float bp = cur_g * hp + st.zplane_s1[stage][ch];
-                float lp = cur_g * bp + st.zplane_s2[stage][ch];
-                st.zplane_s1[stage][ch] = cur_g * hp + bp;
-                st.zplane_s2[stage][ch] = cur_g * bp + lp;
-                if (st.filterType == 0) out = lp;
-                else if (st.filterType == 1) out = bp;
-                else if (st.filterType == 2) out = hp;
-                else                         out = lp + hp;
+                // BP 並列合成: 7バンドリゾネーター
+                const float original = out;
+                float sum_bp = 0.0f;
+                for (int stage = 0; stage < 7; ++stage)
+                {
+                    if (stage >= (int)st.zplaneCoeffs.size()) break;
+                    const float cur_g = st.zplaneCoeffs[stage].g;
+                    const float cur_R = st.zplaneCoeffs[stage].R;
+                    const float cur_h = st.zplaneCoeffs[stage].h;
+                    float hp = (original - (2.0f * cur_R + cur_g) * st.zplane_s1[stage][ch]
+                        - st.zplane_s2[stage][ch]) * cur_h;
+                    float bp = cur_g * hp + st.zplane_s1[stage][ch];
+                    float lp = cur_g * bp + st.zplane_s2[stage][ch];
+                    st.zplane_s1[stage][ch] = cur_g * hp + bp;
+                    st.zplane_s2[stage][ch] = cur_g * bp + lp;
+                    sum_bp += bp;
+                }
+                out = sum_bp / 7.0f;
+            }
+            else if (st.filterType == 3)
+            {
+                // Notch 並列合成: 7点ハーモニックノッチバンク
+                const float original = out;
+                float sum_notch = 0.0f;
+                for (int stage = 0; stage < 7; ++stage)
+                {
+                    if (stage >= (int)st.zplaneCoeffs.size()) break;
+                    const float cur_g = st.zplaneCoeffs[stage].g;
+                    const float cur_R = st.zplaneCoeffs[stage].R;
+                    const float cur_h = st.zplaneCoeffs[stage].h;
+                    float hp = (original - (2.0f * cur_R + cur_g) * st.zplane_s1[stage][ch]
+                        - st.zplane_s2[stage][ch]) * cur_h;
+                    float bp = cur_g * hp + st.zplane_s1[stage][ch];
+                    float lp = cur_g * bp + st.zplane_s2[stage][ch];
+                    st.zplane_s1[stage][ch] = cur_g * hp + bp;
+                    st.zplane_s2[stage][ch] = cur_g * bp + lp;
+                    sum_notch += (lp + hp);  // Notch = LP + HP
+                }
+                out = sum_notch / 7.0f;
+            }
+            else
+            {
+                // LP (Type 0) / HP (Type 2): 直列カスケード
+                for (int stage = 0; stage < 7; ++stage)
+                {
+                    if (stage >= (int)st.zplaneCoeffs.size()) break;
+                    const float cur_g = st.zplaneCoeffs[stage].g;
+                    const float cur_R = st.zplaneCoeffs[stage].R;
+                    const float cur_h = st.zplaneCoeffs[stage].h;
+                    float hp = (out - (2.0f * cur_R + cur_g) * st.zplane_s1[stage][ch]
+                        - st.zplane_s2[stage][ch]) * cur_h;
+                    float bp = cur_g * hp + st.zplane_s1[stage][ch];
+                    float lp = cur_g * bp + st.zplane_s2[stage][ch];
+                    st.zplane_s1[stage][ch] = cur_g * hp + bp;
+                    st.zplane_s2[stage][ch] = cur_g * bp + lp;
+                    if (st.filterType == 0) out = lp;
+                    else                    out = hp;  // Type 2 = HP
+                }
             }
         }
         // ----- Model 26: Phased Array -----
@@ -243,8 +334,14 @@ namespace TptFilter_Spectral
                 mixedPhase += stage_out * ((float)(stage + 1) / (float)st.currentStages);
                 in_ap = std::tanh(stage_out * 1.1f);
             }
-            // AGC が出力 RMS を正規化するため ×0.3f は不要
-            out = (st.filterType == 0) ? (out + mixedPhase) : mixedPhase;
+            // Blend (Type 0): (ドライ + ウェット) × 0.5 → 穏やかな位相干渉（構成的）
+            // Wet   (Type 2): ドライ − ウェット → 逆相ミックス → 位相キャンセルでコムノッチ発生
+            //   APF は振幅フラット（|H|=1）なのでドライ+ウェットは差が少ないが、
+            //   ドライ−ウェットは位相差分が振幅差として現れ明確なノッチが発生する
+            if (st.filterType == 0)
+                out = (out + mixedPhase) * 0.5f;
+            else
+                out = out - mixedPhase;
         }
 
         return out;

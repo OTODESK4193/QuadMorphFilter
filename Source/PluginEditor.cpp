@@ -517,7 +517,7 @@ void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g,
         "CEM3320",      "SSM2040",      "CS-80",        "Roland Jupiter", "EDP Wasp",
         "Butterworth",  "Chebyshev",    "Bessel",       "Elliptic",
         "Vactrol LPG",  "Modal Res",    "Waveguide",    "Bode Shifter",
-        "Z-Plane",      "Phased Array", "Nyquist AA"
+        "2D Morph",     "Phased Array", "Nyquist AA"
         }, 1);
     addAndMakeVisible(g.model);
     g.mAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(

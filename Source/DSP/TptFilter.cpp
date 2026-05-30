@@ -96,6 +96,7 @@ void TptFilter::reset()
         state.srrPhase[ch] = 0.0f; state.srrHeld[ch] = 0.0f;
         state.ap_out_prev[ch] = 0.0f;
         state.lpgEnv[ch] = 0.0f; state.bodePhase[ch] = 0.0f;
+        state.bodeOutPrev[ch] = 0.0f;
         state.wgWriteIdx[ch] = 0; state.wg_ap_state[ch] = 0.0f;
         for (int i = 0; i < 16384; ++i) state.wgBuffer[ch][i] = 0.0f;
         for (int f = 0; f < 3; ++f) { state.form_s1[f][ch] = 0.0f; state.form_s2[f][ch] = 0.0f; }
@@ -697,31 +698,47 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         return mag_sum;
     }
     else if (m == 24) {
-        float shiftHz = juce::jmap(fc, 20.0f, 20000.0f, -1000.0f, 1000.0f);
-        return (std::abs(frequency - (1000.0f + shiftHz)) < 100.0f) ? 5.0f : 1.0f;
+        // 対数中心対称 Shift マッピング (DSP と一致)
+        const float logMin_g = std::log10(20.0f);
+        const float logMax_g = std::log10(20000.0f);
+        const float logCtr_g = (logMin_g + logMax_g) * 0.5f;
+        const float logFc_g  = std::log10(juce::jlimit(20.0f, 20000.0f, fc));
+        const float norm_g   = (logFc_g < logCtr_g)
+            ? (logFc_g - logCtr_g) / (logCtr_g - logMin_g)
+            : (logFc_g - logCtr_g) / (logMax_g - logCtr_g);
+        const float shiftHz  = norm_g * 1000.0f;
+        return (std::abs(frequency - (1000.0f + shiftHz)) < 80.0f) ? 6.0f : 1.0f;
     }
     else if (m == 25) {
-        float mag_total = 1.0f;
+        // 2D Morph: Type 別 (LP/HP=cascade、BP/Notch=parallel sum)
+        float mag_accum = (state.filterType == 0 || state.filterType == 2) ? 1.0f : 0.0f;
         for (int k = 0; k < 7; ++k) {
             if (k >= (int)state.zplaneCoeffs.size()) break;
-            float cur_g = state.zplaneCoeffs[k].g;
-            float cur_R = state.zplaneCoeffs[k].R;
-            float sfc = std::atan(cur_g) * (float)state.sampleRate / juce::MathConstants<float>::pi;
-            float sw = frequency / juce::jlimit(20.0f, 20000.0f, sfc);
-            float den = std::sqrt(std::pow(1.0f - sw * sw, 2.0f) + std::pow(sw * 2.0f * cur_R, 2.0f));
-            mag_total *= (1.0f / den);
+            const float cur_g = state.zplaneCoeffs[k].g;
+            const float cur_R = state.zplaneCoeffs[k].R;
+            const float sfc   = std::atan(cur_g) * (float)state.sampleRate
+                                / juce::MathConstants<float>::pi;
+            const float sw    = frequency / juce::jlimit(20.0f, 20000.0f, sfc);
+            const float sw2   = sw * sw;
+            const float d     = 2.0f * cur_R;  // d = 1/Q in this form
+            const float den   = std::sqrt(std::pow(1.0f - sw2, 2.0f) + std::pow(sw * d, 2.0f));
+            if      (state.filterType == 0) mag_accum *= (1.0f / den);
+            else if (state.filterType == 1) mag_accum += (sw * d) / den;   // BP parallel
+            else if (state.filterType == 2) mag_accum *= (sw2 / den);
+            else                            mag_accum += std::abs(1.0f - sw2) / den; // Notch parallel
         }
-        return mag_total;
+        if (state.filterType == 1 || state.filterType == 3) mag_accum /= 7.0f;
+        return mag_accum;
     }
     else if (m == 26) {
-        float phi = -2.0f * std::atan(w);
-        float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.8f);
-        float c_ap = std::cos(state.currentStages * phi);
-        float s_ap = std::sin(state.currentStages * phi);
-        float den2 = (1.0f - fb * c_ap) * (1.0f - fb * c_ap) + (fb * s_ap) * (fb * s_ap);
-        float rya = (c_ap - fb) / den2;
-        float iya = s_ap / den2;
-        return std::sqrt(rya * rya + iya * iya);
+        // Phased Array: Blend/Wet の位相キャンセル応答近似
+        const float phi_g       = -2.0f * std::atan(w);
+        const float totalPhase  = (float)state.currentStages * phi_g;
+        const float depth       = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.8f);
+        if (state.filterType == 0)  // Blend
+            return (1.0f + depth) * std::abs(std::cos(totalPhase * 0.5f));
+        else                        // Wet (subtractive)
+            return 2.0f * std::abs(std::sin(totalPhase * 0.5f)) * (1.0f + depth);
     }
     else if (m == 23) {
         // Waveguide: コム状共鳴スペクトル（遅延 = SR/fc サンプル）

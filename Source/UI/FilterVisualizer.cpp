@@ -526,36 +526,67 @@ void FilterVisualizer::paint(juce::Graphics& g)
                 }
                 else if (modelIdx == 24)
                 {
-                    float shiftHz = juce::jmap(fc, 20.0f, 20000.0f, -1000.0f, 1000.0f);
-                    mag = (std::abs(freq - (1000.0f + shiftHz)) < 100.0f) ? 5.0f : 1.0f;
+                    // Bode Shift: 対数中心対称マッピング (DSP と一致)
+                    // Cutoff = 632Hz → 0Hz シフト、20Hz → -1000Hz、20000Hz → +1000Hz
+                    const float logMin_bode = std::log10(20.0f);
+                    const float logMax_bode = std::log10(20000.0f);
+                    const float logCenter_bode = (logMin_bode + logMax_bode) * 0.5f;
+                    const float logFc_bode = std::log10(juce::jlimit(20.0f, 20000.0f, fc));
+                    const float norm_bode = (logFc_bode < logCenter_bode)
+                        ? (logFc_bode - logCenter_bode) / (logCenter_bode - logMin_bode)
+                        : (logFc_bode - logCenter_bode) / (logMax_bode - logCenter_bode);
+                    const float shiftHz = norm_bode * 1000.0f;
+                    // 参照周波数 1kHz のシフト後位置を示す（静的ビジュアライザーの限界）
+                    mag = (std::abs(freq - (1000.0f + shiftHz)) < 80.0f) ? 6.0f : 1.0f;
                 }
                 else if (modelIdx == 25)
                 {
-                    float x_zp = juce::jlimit(0.0f, 1.0f, juce::jmap(std::log10(fc), std::log10(20.0f), std::log10(20000.0f), 0.0f, 1.0f));
-                    float y_zp = juce::jlimit(0.0f, 1.0f, juce::jmap(res, 0.1f, 10.0f, 0.0f, 1.0f));
-                    const float fA[7] = { 730,1090,2440,4000,6000,8000,10000 }; const float qA[7] = { 4,4,3,1,1,1,1 };
-                    const float fB[7] = { 200,500,1200,2800,5000,8500,12000 }; const float qB[7] = { .5f,.5f,.5f,.5f,.5f,.5f,.5f };
-                    const float fC[7] = { 300,870,2240,4000,6000,8000,10000 }; const float qC[7] = { 5,4,2,1,1,1,1 };
-                    const float fD[7] = { 80,120,200,4000,8000,12000,16000 };  const float qD[7] = { 3,2,1,1,2,3,4 };
-                    float mag_total = 1.0f;
+                    // 2D Morph: Type 別処理モードを可視化
+                    // LP/HP = 直列カスケード、BP = 並列BP合成(リゾネーター)、Notch = 並列Notch合成
+                    const float x_zp = juce::jlimit(0.0f, 1.0f, juce::jmap(std::log10(fc), std::log10(20.0f), std::log10(20000.0f), 0.0f, 1.0f));
+                    const float y_zp = juce::jlimit(0.0f, 1.0f, juce::jmap(res, 0.1f, 10.0f, 0.0f, 1.0f));
+                    const float fA[7] = { 730,1090,2440,4000,6000, 8000,10000 };
+                    const float qA[7] = { 4,4,3,1,1,1,1 };
+                    const float fB[7] = { 200, 500,1200,2800,5000, 8500,12000 };
+                    const float qB[7] = { .5f,.5f,.5f,.5f,.5f,.5f,.5f };
+                    const float fC[7] = { 300, 870,2240,4000,6000, 8000,10000 };
+                    const float qC[7] = { 5,4,2,1,1,1,1 };
+                    const float fD[7] = { 80, 120, 200,4000,8000,12000,16000 };
+                    const float qD[7] = { 3,2,1,1,2,3,4 };
+
+                    float mag_accum = (t == 0 || t == 2) ? 1.0f : 0.0f;  // cascade=product, parallel=sum
                     for (int k = 0; k < 7; ++k) {
-                        float sfc = fA[k] * (1 - x_zp) * (1 - y_zp) + fB[k] * x_zp * (1 - y_zp) + fC[k] * (1 - x_zp) * y_zp + fD[k] * x_zp * y_zp;
-                        float sq = std::max(0.5f, qA[k] * (1 - x_zp) * (1 - y_zp) + qB[k] * x_zp * (1 - y_zp) + qC[k] * (1 - x_zp) * y_zp + qD[k] * x_zp * y_zp);
-                        float sw = freq / juce::jlimit(20.0f, 20000.0f, sfc);
-                        float den = std::sqrt(std::pow(1.0f - sw * sw, 2.0f) + std::pow(sw * (1.0f / sq), 2.0f));
-                        mag_total *= (1.0f / den);
+                        float sfc = fA[k]*(1-x_zp)*(1-y_zp) + fB[k]*x_zp*(1-y_zp)
+                                  + fC[k]*(1-x_zp)*y_zp     + fD[k]*x_zp*y_zp;
+                        float sq  = std::max(0.5f,
+                                    qA[k]*(1-x_zp)*(1-y_zp) + qB[k]*x_zp*(1-y_zp)
+                                  + qC[k]*(1-x_zp)*y_zp     + qD[k]*x_zp*y_zp);
+                        const float sw   = freq / juce::jlimit(20.0f, 20000.0f, sfc);
+                        const float sw2  = sw * sw;
+                        const float d    = 1.0f / sq;  // d = 1/Q
+                        const float den  = std::sqrt(std::pow(1.0f - sw2, 2.0f)
+                                                   + std::pow(sw * d,     2.0f));
+                        if      (t == 0) mag_accum *= (1.0f / den);            // LP cascade
+                        else if (t == 1) mag_accum += (sw * d) / den;          // BP parallel sum
+                        else if (t == 2) mag_accum *= (sw2 / den);             // HP cascade
+                        else             mag_accum += std::abs(1.0f - sw2) / den; // Notch parallel sum
                     }
-                    mag = mag_total;
+                    if (t == 1 || t == 3) mag_accum /= 7.0f;  // 並列合成は平均化
+                    mag = mag_accum;
                 }
                 else if (modelIdx == 26)
                 {
-                    int stages = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
-                    float phi = -2.0f * std::atan(w_norm);
-                    float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.8f);
-                    float c_ap = std::cos(stages * phi); float s_ap = std::sin(stages * phi);
-                    float den2 = (1.0f - fb * c_ap) * (1.0f - fb * c_ap) + (fb * s_ap) * (fb * s_ap);
-                    float rya = (c_ap - fb) / den2; float iya = s_ap / den2;
-                    mag = std::sqrt(rya * rya + iya * iya);
+                    // Phased Array: APF 位相キャンセル応答を近似表示
+                    // Blend (t==0): |cos(N·φ/2)| — 穏やかな山谷パターン
+                    // Wet   (t==2): 2|sin(N·φ/2)| — DC null・高域ブーストのコム的応答
+                    const int stages_pa = (slopeIdx == 0) ? 2 : (slopeIdx == 1) ? 4 : (slopeIdx == 2) ? 8 : 16;
+                    const float phi_pa = -2.0f * std::atan(w_norm);
+                    const float totalPhase = (float)stages_pa * phi_pa;
+                    const float depth = juce::jmap(juce::jlimit(0.1f, 10.0f, res), 0.1f, 10.0f, 0.0f, 0.8f);
+                    if (t == 0)  // Blend: (dry + wet) * 0.5
+                        mag = (1.0f + depth) * std::abs(std::cos(totalPhase * 0.5f));
+                    else         // Wet: dry - wet (subtractive)
+                        mag = 2.0f * std::abs(std::sin(totalPhase * 0.5f)) * (1.0f + depth);
                 }
                 else if (modelIdx == 27)
                 {

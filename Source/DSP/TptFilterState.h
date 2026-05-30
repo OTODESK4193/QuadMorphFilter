@@ -116,6 +116,9 @@ struct TptFilterState
     float hilbertStateA[4][2] = {};
     float hilbertStateB[4][2] = {};
     float bodePhase[2] = {};
+    // 真のフィードバックループ用: 前サンプルのシフト出力を保持
+    // FB増加でシフトが累積し Shepard Tone 的金属質サウンドを生む
+    float bodeOutPrev[2] = {};
 
     // ===== Z-Plane 2D Morph =====
     std::vector<BiquadCoeffs> zplaneCoeffs;

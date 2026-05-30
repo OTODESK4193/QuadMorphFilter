@@ -59,7 +59,7 @@
             "CEM3320", "SSM 2040", "CS-80 (Yamaha)", "Jupiter (Roland)", "EDP Wasp (CMOS)",
             "Butterworth (Flat)", "Chebyshev (Ripple)", "Bessel (Phase)", "Elliptic (Notch)",
             "Vactrol LPG", "Modal Resonator", "Waveguide Mesh", "Bode Freq Shifter",
-            "Z-Plane (2D Morph)", "Phased Array", "Nyquist Anti-alias"
+            "2D Morph", "Phased Array", "Nyquist Anti-alias"
         };
         juce::StringArray slopes = { "12 dB/oct", "24 dB/oct", "48 dB/oct", "96 dB/oct" };
 
