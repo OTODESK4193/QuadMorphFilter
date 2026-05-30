@@ -32,7 +32,7 @@ static inline std::tuple<int, bool, bool, bool, bool> getModelCaps(int m)
                                                         //   Cutoff=CV(開口量) / Res=Decayタイム
     case 22: return { 2, true,  true,  true,  true };  // Modal Resonator: Slope=Q(Low/Mid/High)
                                                         //   Cutoff=基音 / Res=非調波性(Inharmonicity)
-    case 24: return { 0, true,  true,  true,  true };  // Bode: 12dBのみ
+    case 24: return { 0, true,  true,  false, false }; // Bode: Up(LP=上側帯域) / Down(BP=下側帯域) の2択のみ
     case 25: return { 0, true,  true,  true,  true };  // Z-Plane: 12dBのみ
     case 27: return { 3, true,  false, false, false }; // Nyquist Anti-alias: LP, Slope=Stage数(2/4/6/8段)
                                                         //   Cutoff=カットオフ / Res=Q(段のキャラクター)

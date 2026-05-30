@@ -125,7 +125,9 @@ struct TptFilterState
     float zp_q[7] = {};
 
     // ===== Phased Array =====
-    float pa_s[8][2] = {};
+    // Model 26: Slope 最大 16 段 (slopeIdx=3) に対応するため 16 段分確保。
+    // 旧サイズ [8][2] では slopeIdx=3 で stage=8〜15 の範囲外書き込みが発生していた。
+    float pa_s[16][2] = {};
 
     // ===== Nyquist Anti-alias =====
     // Model 27: Slope=0→2段, 1→4段, 2→6段, 3→8段 に対応するため8段分確保

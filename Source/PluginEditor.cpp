@@ -328,6 +328,24 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
         g.type.changeItemText(3, "Mirror"); // 鏡像分散
         g.type.changeItemText(4, "Rand");   // 固定疑似乱数分散
     }
+    else if (modelIdx == 24)
+    {
+        // Bode Freq Shifter: 上側帯域 / 下側帯域 の2択
+        // HP/Notch は ModelCapabilities で無効化済み → デフォルトテキストに戻す
+        g.type.changeItemText(1, "Up");     // LP = 上側帯域 (A*cos - B*sin)
+        g.type.changeItemText(2, "Down");   // BP = 下側帯域 (A*cos + B*sin)
+        g.type.changeItemText(3, "HP");
+        g.type.changeItemText(4, "Notch");
+    }
+    else if (modelIdx == 26)
+    {
+        // Phased Array: 出力ミックスモード
+        // LP/HP が有効 (ModelCapabilities 維持), Blend=LP, Wet=HP
+        g.type.changeItemText(1, "Blend");  // LP = ドライ + mixedPhase
+        g.type.changeItemText(2, "BP");     // BP: 無効 (デフォルト表記に戻す)
+        g.type.changeItemText(3, "Wet");    // HP = mixedPhase のみ
+        g.type.changeItemText(4, "Notch");  // Notch: 無効
+    }
     else if (modelIdx == 22)
     {
         // Modal Resonator: 混合モードとして Type0〜3 で表示
@@ -390,6 +408,27 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
         // Phase Shift: Cutoff = 段スプレッド中心周波数 → "Center", Res = スプレッド幅 → "Spread"
         g.cutoffLabel.setText("Center",   juce::dontSendNotification);
         g.resLabel.setText("Spread",      juce::dontSendNotification);
+    }
+    else if (modelIdx == 24)
+    {
+        // Bode Freq Shifter: Cutoff = 周波数シフト量 (-1000〜+1000Hz) → "Shift"
+        //                    Res    = フィードバック量 → "Fdbk"
+        g.cutoffLabel.setText("Shift",    juce::dontSendNotification);
+        g.resLabel.setText("Fdbk",        juce::dontSendNotification);
+    }
+    else if (modelIdx == 25)
+    {
+        // Z-Plane 2D Morph: Cutoff = 2D 空間 X 軸 → "X"
+        //                   Res    = 2D 空間 Y 軸 → "Y"
+        g.cutoffLabel.setText("X",        juce::dontSendNotification);
+        g.resLabel.setText("Y",           juce::dontSendNotification);
+    }
+    else if (modelIdx == 26)
+    {
+        // Phased Array: Cutoff = AP ノッチ周波数 → "Freq"
+        //               Res    = フィードバック深度 → "Depth"
+        g.cutoffLabel.setText("Freq",     juce::dontSendNotification);
+        g.resLabel.setText("Depth",       juce::dontSendNotification);
     }
     else if (modelIdx == 4)
     {

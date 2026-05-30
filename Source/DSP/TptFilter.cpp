@@ -61,6 +61,13 @@ void TptFilter::reset()
             state.pa_s[stage][ch] = 0.0f;
         }
 
+    // Phased Array 拡張分 (stage 8〜15) のクリア
+    // pa_s を [16][2] に拡張したが上のループは stage<8 まで。
+    // 残り 8 スロットを明示的にゼロ初期化してゴミデータを防ぐ。
+    for (int stage = 8; stage < 16; ++stage)
+        for (int ch = 0; ch < 2; ++ch)
+            state.pa_s[stage][ch] = 0.0f;
+
     // Phaser / Kilo
     for (int stage = 0; stage < 16; ++stage)
         for (int ch = 0; ch < 2; ++ch) {

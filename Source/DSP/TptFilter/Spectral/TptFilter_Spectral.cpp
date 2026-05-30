@@ -219,6 +219,15 @@ namespace TptFilter_Spectral
             }
         }
         // ----- Model 26: Phased Array -----
+        // アーキテクチャ: 1次 APF × N 段を交互フィードバック (偶数段=+fb, 奇数段=-fb) で駆動し、
+        //   各段の出力を後段優先の重み付きで加算する。
+        //   Depth(Res) が増えるほど干渉が強まり複雑なコム状着色が生まれる。
+        //
+        // Type 0 (Blend): ドライ + mixedPhase (自然なブレンド)
+        // Type 2 (Wet):   mixedPhase のみ (完全ウェット)
+        //
+        // 旧実装の出力 ×0.3f は常時 -10dB のオフセットをもたらし、
+        // 他モデルとのモーフィング時に音量段差が生じていた。削除して AGC に委ねる。
         else if (m == 26)
         {
             float mixedPhase = 0.0f;
@@ -234,7 +243,8 @@ namespace TptFilter_Spectral
                 mixedPhase += stage_out * ((float)(stage + 1) / (float)st.currentStages);
                 in_ap = std::tanh(stage_out * 1.1f);
             }
-            out = (st.filterType == 0) ? (out + mixedPhase) * 0.3f : mixedPhase * 0.3f;
+            // AGC が出力 RMS を正規化するため ×0.3f は不要
+            out = (st.filterType == 0) ? (out + mixedPhase) : mixedPhase;
         }
 
         return out;
