@@ -57,6 +57,18 @@ XYPadComponent::XYPadComponent(QuadMorphFilterAudioProcessor& p)
 // ────────────────────────────────────────
 void XYPadComponent::timerCallback()
 {
+    // Recording モード check：wave が 6 でなくなったら recording フラグをリセット
+    if (recording && recordingLfoIndex >= 0)
+    {
+        int wave = (int)processor.apvts.getRawParameterValue(
+            "lfo" + juce::String(recordingLfoIndex + 1) + "wave")->load();
+        if (wave != 6)
+        {
+            recording = false;
+            recordingLfoIndex = -1;
+        }
+    }
+
     for (int i = 0; i < 3; ++i) {
         trails[i][trailIdx[i]] = processor.getLfoPos(i);
         trailIdx[i] = (trailIdx[i] + 1) % 30;
@@ -154,11 +166,11 @@ void XYPadComponent::paint(juce::Graphics& g)
             3, (int)h/2 - 25, 40, 12, juce::Justification::centredLeft);
     }
 
-    // ===== Recording グリッド描画（Recording モード時のみ） =====
-    if (isRecordingMode())
+    // ===== Recording グリッド描画（現在Recording中のLFOのみ） =====
+    if (recordingLfoIndex >= 0 && recording)
     {
         paintRecordingGrid(g);
-        return;  // Recording モード時はグリッド表示のみ、トレイル非表示
+        return;  // Recording 中はグリッド表示のみ、トレイル非表示
     }
 
     // LFO トレイルと現在位置 (toPix で正規化 → ピクセル変換)
@@ -216,83 +228,99 @@ void XYPadComponent::paint(juce::Graphics& g)
 // ────────────────────────────────────────
 void XYPadComponent::mouseDown(const juce::MouseEvent& e)
 {
-    if (isRecordingMode())
-    {
-        startRecording();
-        recordPixel((float)e.x / getWidth(), (float)e.y / getHeight());
+    // Recording 中なら新規 Recording を拒否
+    if (recording && recordingLfoIndex >= 0) {
+        updatePosition(e);
         return;
     }
 
-    if (e.mods.isRightButtonDown())
+    // Recording モード時：グリッド Recording を開始
+    for (int i = 0; i < 3; ++i)
     {
-        for (int i = 0; i < 3; ++i) {
-            if (processor.isWaitingForRecord[i].load()) {
-                processor.isWaitingForRecord[i].store(false);
-                processor.isRecordingDrag[i].store(false);
-                draggingLfoIndex = -1;
-                return;
-            }
-        }
-        const float ww = (float)getWidth();
-        const float hh = (float)getHeight();
-        for (int i = 0; i < 3; ++i) {
-            int wave = (int)processor.apvts.getRawParameterValue(
-                "lfo" + juce::String(i + 1) + "wave")->load();
-            if (wave == 6) {
-                auto  p  = processor.getLfoPos(i);
-                auto  px = toPix(p.x, p.y, ww, hh);
-                if (std::hypot(e.x - px.x, e.y - px.y) < 15.0f) {
-                    processor.recLength[i].store(0);
-                    processor.isWaitingForRecord[i].store(true);
-                    return;
-                }
-            }
+        int wave = (int)processor.apvts.getRawParameterValue(
+            "lfo" + juce::String(i + 1) + "wave")->load();
+        if (wave == 6)  // Recording モード
+        {
+            recordingLfoIndex = i;
+            recording = true;
+            recordingLength = 0;
+            std::fill(pixelMap.begin(), pixelMap.end(), 0);
+
+            // recBuffer もクリア（既存ロジックとの連携用）
+            processor.recLength[i].store(0);
+
+            recordPixel((float)e.x / getWidth(), (float)e.y / getHeight());
+
+            // recBuffer にも記録開始
+            auto n = toNorm((float)e.x, (float)e.y,
+                            (float)getWidth(), (float)getHeight());
+            processor.recBuffer[i][0] = { n.x, n.y };
+            processor.recLength[i].store(1);
+            processor.currentRecX[i].store(n.x);
+            processor.currentRecY[i].store(n.y);
+
+            // 補間用の前回位置を初期化
+            lastRecX = n.x;
+            lastRecY = n.y;
+
+            repaint();
+            return;
         }
     }
-    else
-    {
-        for (int i = 0; i < 3; ++i) {
-            if (processor.isWaitingForRecord[i].load()) {
-                draggingLfoIndex = i;
-                processor.isRecordingDrag[i].store(true);
-                auto n = toNorm((float)e.x, (float)e.y,
-                                (float)getWidth(), (float)getHeight());
-                processor.currentRecX[i].store(n.x);
-                processor.currentRecY[i].store(n.y);
-                return;
-            }
-        }
-    }
+
+    // 通常の XYPad ドラッグ
     updatePosition(e);
 }
 
 void XYPadComponent::mouseDrag(const juce::MouseEvent& e)
 {
-    if (isRecordingMode())
+    if (recordingLfoIndex >= 0 && recording)
     {
+        auto n = toNorm((float)e.x, (float)e.y,
+                        (float)getWidth(), (float)getHeight());
+
         recordPixel((float)e.x / getWidth(), (float)e.y / getHeight());
+
+        // recBuffer に線形補間でポイントを複数記録（滑らかさ向上）
+        int len = processor.recLength[recordingLfoIndex].load();
+        if (len < 2048)
+        {
+            // 前回位置から現在位置への距離を計算
+            float dx = n.x - lastRecX;
+            float dy = n.y - lastRecY;
+            float dist = std::hypot(dx, dy);
+
+            // 距離に応じて補間ポイント数を決定（最大5ポイント）
+            int interpolationSteps = (int)std::min(5.0f, std::max(1.0f, dist * 10.0f));
+
+            for (int step = 1; step <= interpolationSteps && len < 2048; ++step)
+            {
+                float t = (float)step / interpolationSteps;
+                float px = lastRecX + dx * t;
+                float py = lastRecY + dy * t;
+
+                processor.recBuffer[recordingLfoIndex][len] = { px, py };
+                len++;
+            }
+
+            processor.recLength[recordingLfoIndex].store(len);
+            processor.currentRecX[recordingLfoIndex].store(n.x);
+            processor.currentRecY[recordingLfoIndex].store(n.y);
+
+            lastRecX = n.x;
+            lastRecY = n.y;
+        }
+
+        repaint();
         return;
     }
 
-    if (draggingLfoIndex != -1 && processor.isRecordingDrag[draggingLfoIndex].load())
-    {
-        int len = processor.recLength[draggingLfoIndex].load();
-        if (len < 2048) {
-            auto n = toNorm((float)e.x, (float)e.y,
-                            (float)getWidth(), (float)getHeight());
-            processor.recBuffer[draggingLfoIndex][len] = { n.x, n.y };
-            processor.recLength[draggingLfoIndex].store(len + 1);
-            processor.currentRecX[draggingLfoIndex].store(n.x);
-            processor.currentRecY[draggingLfoIndex].store(n.y);
-        }
-        return;
-    }
     updatePosition(e);
 }
 
 void XYPadComponent::mouseUp(const juce::MouseEvent&)
 {
-    if (isRecordingMode())
+    if (recordingLfoIndex >= 0 && recording)
     {
         finishRecording();
         repaint();
@@ -378,7 +406,7 @@ void XYPadComponent::recordPixel(float xNorm, float yNorm)
 
     // グリッドサイズに正規化（0～1 → 0～15）
     int gx = (int)(xNorm * GRID_SIZE);
-    int gy = (int)((1.0f - yNorm) * GRID_SIZE);  // Y軸反転：下から上へ
+    int gy = (int)(yNorm * GRID_SIZE);  // Y軸反転なし（finishRecording で反転）
 
     gx = juce::jlimit(0, GRID_SIZE - 1, gx);
     gy = juce::jlimit(0, GRID_SIZE - 1, gy);
@@ -396,23 +424,16 @@ void XYPadComponent::finishRecording()
 
     recording = false;
 
-    // pixelMap を recordingData に変換（Y軸反転で修正）
+    // recBuffer から recordingData に直接コピー
+    // recBuffer にはマウスドラッグで記録した連続的なポイントが格納されている
     std::array<juce::Point<float>, 2048> buffer;
-    int len = 0;
+    int len = processor.recLength[recordingLfoIndex].load();
 
-    for (int y = 0; y < GRID_SIZE && len < 2048; ++y)
+    if (len > 0 && len <= 2048)
     {
-        for (int x = 0; x < GRID_SIZE && len < 2048; ++x)
-        {
-            if (pixelMap[y * GRID_SIZE + x] > 128)
-            {
-                // Y軸反転：下（y=15）がXYPadの上（1.0）に対応
-                buffer[len++] = {
-                    x / (float)(GRID_SIZE - 1),
-                    (GRID_SIZE - 1 - y) / (float)(GRID_SIZE - 1)
-                };
-            }
-        }
+        std::copy(processor.recBuffer[recordingLfoIndex].begin(),
+                  processor.recBuffer[recordingLfoIndex].begin() + len,
+                  buffer.begin());
     }
 
     recordingLength = len;

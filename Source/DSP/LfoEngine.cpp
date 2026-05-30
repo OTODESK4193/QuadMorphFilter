@@ -101,7 +101,7 @@ void LfoEngine::processSingleLfo(int i,
     }
 
     float p = states[i].phase;
-    float t = step ? 0.0f : (p / juce::MathConstants<float>::twoPi);
+    float t = p / juce::MathConstants<float>::twoPi;  // STEP/Smooth 両モードで t を計算
     float W_x = 0.0f, W_y = 0.0f;
 
     // ===== 波形計算 (19種類) =====

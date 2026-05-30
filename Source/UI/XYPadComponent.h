@@ -47,4 +47,5 @@ private:
     bool recording = false;
     int recordingLength = 0;
     int recordingLfoIndex = -1;  // 現在 Recording 中の LFO インデックス
+    float lastRecX = 0.0f, lastRecY = 0.0f;  // 前回記録位置（補間用）
 };
