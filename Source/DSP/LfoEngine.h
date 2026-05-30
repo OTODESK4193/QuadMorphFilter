@@ -88,6 +88,7 @@ private:
     // ===== ヘルパー =====
     static float getSyncTime(int selection, double bpm);
     static float applyBound(float v, int mode);
+    static float hermite(float p0, float p1, float p2, float p3, float t);
 
     // 1つのLFOを処理する内部メソッド
     void processSingleLfo(int index,

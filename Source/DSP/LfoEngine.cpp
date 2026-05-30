@@ -333,9 +333,9 @@ std::array<float, 4> LfoEngine::getMod4(int index) const
 // ==========================================
 // ヘルパー: Hermite 補間（3次スプライン）
 // ==========================================
-static inline float hermite(float p0, float p1, float p2, float p3, float t)
+float LfoEngine::hermite(float p0, float p1, float p2, float p3, float t)
 {
-    // 3次 Hermite 補間
+    // 3次 Hermite 補間（Catmull-Rom）
     // t: [0, 1]
     // p0, p1, p2, p3: 4つのコントロールポイント
     float t2 = t * t;

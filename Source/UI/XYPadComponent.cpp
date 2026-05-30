@@ -154,6 +154,13 @@ void XYPadComponent::paint(juce::Graphics& g)
             3, (int)h/2 - 25, 40, 12, juce::Justification::centredLeft);
     }
 
+    // ===== Recording グリッド描画（Recording モード時のみ） =====
+    if (isRecordingMode())
+    {
+        paintRecordingGrid(g);
+        return;  // Recording モード時はグリッド表示のみ、トレイル非表示
+    }
+
     // LFO トレイルと現在位置 (toPix で正規化 → ピクセル変換)
     juce::Colour colors[] = {
         juce::Colour(0xff00D2D3),
@@ -209,6 +216,13 @@ void XYPadComponent::paint(juce::Graphics& g)
 // ────────────────────────────────────────
 void XYPadComponent::mouseDown(const juce::MouseEvent& e)
 {
+    if (isRecordingMode())
+    {
+        startRecording();
+        recordPixel((float)e.x / getWidth(), (float)e.y / getHeight());
+        return;
+    }
+
     if (e.mods.isRightButtonDown())
     {
         for (int i = 0; i < 3; ++i) {
@@ -254,6 +268,12 @@ void XYPadComponent::mouseDown(const juce::MouseEvent& e)
 
 void XYPadComponent::mouseDrag(const juce::MouseEvent& e)
 {
+    if (isRecordingMode())
+    {
+        recordPixel((float)e.x / getWidth(), (float)e.y / getHeight());
+        return;
+    }
+
     if (draggingLfoIndex != -1 && processor.isRecordingDrag[draggingLfoIndex].load())
     {
         int len = processor.recLength[draggingLfoIndex].load();
@@ -272,6 +292,13 @@ void XYPadComponent::mouseDrag(const juce::MouseEvent& e)
 
 void XYPadComponent::mouseUp(const juce::MouseEvent&)
 {
+    if (isRecordingMode())
+    {
+        finishRecording();
+        repaint();
+        return;
+    }
+
     if (draggingLfoIndex != -1) {
         processor.isRecordingDrag[draggingLfoIndex].store(false);
         draggingLfoIndex = -1;
@@ -304,4 +331,152 @@ void XYPadComponent::updatePosition(const juce::MouseEvent& e)
                     (float)getWidth(), (float)getHeight());
     processor.apvts.getParameter("posX")->setValueNotifyingHost(n.x);
     processor.apvts.getParameter("posY")->setValueNotifyingHost(n.y);
+}
+
+// ────────────────────────────────────────
+// Recording モード検出
+// ────────────────────────────────────────
+bool XYPadComponent::isRecordingMode() const
+{
+    for (int i = 0; i < 3; ++i)
+    {
+        int wave = (int)processor.apvts.getRawParameterValue(
+            "lfo" + juce::String(i + 1) + "wave")->load();
+        if (wave == 6)  // Custom/Recording モード
+            return true;
+    }
+    return false;
+}
+
+// ────────────────────────────────────────
+// Recording 開始
+// ────────────────────────────────────────
+void XYPadComponent::startRecording()
+{
+    // 現在 Recording モードの LFO を特定
+    for (int i = 0; i < 3; ++i)
+    {
+        int wave = (int)processor.apvts.getRawParameterValue(
+            "lfo" + juce::String(i + 1) + "wave")->load();
+        if (wave == 6)
+        {
+            recordingLfoIndex = i;
+            recording = true;
+            recordingLength = 0;
+            std::fill(pixelMap.begin(), pixelMap.end(), 0);
+            return;
+        }
+    }
+}
+
+// ────────────────────────────────────────
+// ピクセル記録（正規化座標）
+// ────────────────────────────────────────
+void XYPadComponent::recordPixel(float xNorm, float yNorm)
+{
+    if (!recording || recordingLfoIndex < 0) return;
+
+    // グリッドサイズに正規化（0～1 → 0～15）
+    int gx = (int)(xNorm * GRID_SIZE);
+    int gy = (int)((1.0f - yNorm) * GRID_SIZE);  // Y軸反転：下から上へ
+
+    gx = juce::jlimit(0, GRID_SIZE - 1, gx);
+    gy = juce::jlimit(0, GRID_SIZE - 1, gy);
+
+    int idx = gy * GRID_SIZE + gx;
+    pixelMap[idx] = 255;
+}
+
+// ────────────────────────────────────────
+// Recording 完了・データ反映
+// ────────────────────────────────────────
+void XYPadComponent::finishRecording()
+{
+    if (!recording || recordingLfoIndex < 0) return;
+
+    recording = false;
+
+    // pixelMap を recordingData に変換（Y軸反転で修正）
+    std::array<juce::Point<float>, 2048> buffer;
+    int len = 0;
+
+    for (int y = 0; y < GRID_SIZE && len < 2048; ++y)
+    {
+        for (int x = 0; x < GRID_SIZE && len < 2048; ++x)
+        {
+            if (pixelMap[y * GRID_SIZE + x] > 128)
+            {
+                // Y軸反転：下（y=15）がXYPadの上（1.0）に対応
+                buffer[len++] = {
+                    x / (float)(GRID_SIZE - 1),
+                    (GRID_SIZE - 1 - y) / (float)(GRID_SIZE - 1)
+                };
+            }
+        }
+    }
+
+    recordingLength = len;
+
+    // LfoEngine に Recording データを反映
+    processor.setLfoRecordingData(recordingLfoIndex, buffer, len);
+    recordingLfoIndex = -1;
+}
+
+// ────────────────────────────────────────
+// Recording グリッド描画
+// ────────────────────────────────────────
+void XYPadComponent::paintRecordingGrid(juce::Graphics& g)
+{
+    const float w = (float)getWidth();
+    const float h = (float)getHeight();
+
+    // 背景
+    auto b = getLocalBounds().toFloat();
+    g.setColour(juce::Colour(0xff1E272E));
+    g.fillRoundedRectangle(b, 8.0f);
+    g.setColour(juce::Colour(0xffD5DDE5));
+    g.drawRoundedRectangle(b, 8.0f, 1.5f);
+
+    // グリッド配置（XYPad 内に 16×16 グリッド）
+    const float cellW = (w - 40.0f) / GRID_SIZE;
+    const float cellH = (h - 40.0f) / GRID_SIZE;
+    const float gridStartX = 20.0f;
+    const float gridStartY = 20.0f;
+
+    // グリッドセル描画
+    for (int y = 0; y < GRID_SIZE; ++y)
+    {
+        for (int x = 0; x < GRID_SIZE; ++x)
+        {
+            float px = gridStartX + x * cellW;
+            float py = gridStartY + y * cellH;
+
+            // グリッド線
+            g.setColour(juce::Colour(0xff444444));
+            g.drawRect(px, py, cellW, cellH, 0.5f);
+
+            // ピクセル塗りつぶし
+            if (pixelMap[y * GRID_SIZE + x] > 128)
+            {
+                g.setColour(juce::Colour(0xff00FF00).withAlpha(0.8f));
+                g.fillRect(px + 1.0f, py + 1.0f, cellW - 2.0f, cellH - 2.0f);
+            }
+        }
+    }
+
+    // Recording ステータス表示
+    g.setColour(recording ? juce::Colours::red : juce::Colours::grey);
+    g.setFont(14.0f);
+    g.drawText(
+        recording ? "REC (Recording...)" : "Ready to record",
+        10, 5, 200, 20,
+        juce::Justification::centredLeft);
+
+    // フレーム数表示
+    g.setColour(juce::Colours::white.withAlpha(0.6f));
+    g.setFont(12.0f);
+    g.drawText(
+        "Frames: " + juce::String(recordingLength),
+        (int)w - 120, 5, 110, 20,
+        juce::Justification::centredRight);
 }

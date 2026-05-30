@@ -28,9 +28,23 @@ public:
 private:
     void updatePosition(const juce::MouseEvent& e);
 
+    // ===== Recording モード関連 =====
+    bool isRecordingMode() const;
+    void startRecording();
+    void recordPixel(float xNorm, float yNorm);
+    void finishRecording();
+    void paintRecordingGrid(juce::Graphics& g);
+
     QuadMorphFilterAudioProcessor& processor;
     int draggingLfoIndex = -1;
 
     std::array<juce::Point<float>, 30> trails[3];
     int trailIdx[3] = { 0, 0, 0 };
+
+    // ===== Recording グリッド状態 =====
+    static constexpr int GRID_SIZE = 16;
+    std::array<uint8_t, GRID_SIZE * GRID_SIZE> pixelMap{};
+    bool recording = false;
+    int recordingLength = 0;
+    int recordingLfoIndex = -1;  // 現在 Recording 中の LFO インデックス
 };
