@@ -27,7 +27,7 @@ static inline std::tuple<int, bool, bool, bool, bool> getModelCaps(int m)
     case 3:  return { 1, true,  true,  true,  true };  // SEM: 12/24dB (実機は2-pole固定; 24dBはダブルSEM拡張)
     case 5:  return { 0, false, true,  false, false }; // Formant (Vowel): BP固定（フォルマント特徴はBPのみ）
                                                         //   Slope固定12dB / Cutoff=母音位置 / Res=フォルマントQ
-    case 10: return { 0, true,  true,  true,  true };  // Reverb FDN: 12dBのみ
+    case 10: return { 3, true,  true,  true,  true };  // FDN Reverb: Slope=Room/Hall/Cave/Plate, Type=Dark/Mid/Air/Open
     case 21: return { 2, true,  false, false, false }; // Vactrol LPG: LP, Slope=Attackタイム(Fast/Med/Slow)
                                                         //   Cutoff=CV(開口量) / Res=Decayタイム
     case 22: return { 2, true,  true,  true,  true };  // Modal Resonator: Slope=Q(Low/Mid/High)

@@ -144,6 +144,12 @@ struct TptFilterState
     float fdnDelayTimes[4] = { 1.0f, 1.313f, 1.637f, 1.911f };
     // ===== 【既存コード: FDN Reverb ここまで】=====
 
+    // ===== FDN Reverb: Per-delay LP ダンピング =====
+    // 各遅延ライン内の 1極 LP フィルター状態変数。
+    // y[n] = (1-damp_a)*x[n] + damp_a*y[n-1] で高周波を吸収し
+    // 実空間の周波数依存吸収（空気・素材）を模倣する。
+    float fdnLpState[4][2] = {};
+
     // ===== 【新規追加】TB-303 Diode Ladder 専用 =====
     // ↑ fdnDelayTimes の直後、AGC の直前に挿入する
     float diode_g = 0.0f;   // ZDF係数 tan(pi*fc/fs)

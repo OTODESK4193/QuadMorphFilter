@@ -87,6 +87,7 @@ void TptFilter::reset()
     for (int s = 0; s < 4; ++s)
         for (int ch = 0; ch < 2; ++ch) {
             state.fdnWriteIdx[s][ch] = 0; state.fdn_ap_state[s][ch] = 0.0f;
+            state.fdnLpState[s][ch] = 0.0f;
             for (int i = 0; i < 16384; ++i) state.fdnBuffer[s][ch][i] = 0.0f;
         }
 
@@ -301,7 +302,8 @@ int TptFilter::getAutoOsFactor(int m) const
 {
     if (m == 9) return 2;
     if (m == 1 || m == 2 || m == 3 || m == 4 || m == 6 || m == 7 ||
-        m == 12 || m == 13 || m == 14 || m == 15 || m == 16) return 1;
+        m == 10 || m == 12 || m == 13 || m == 14 || m == 15 || m == 16) return 1;
+    // Model 10 (FDN Reverb): SVF プリフィルターの共鳴エイリアシング低減のため 2× OS
     return 0;
 }
 
@@ -359,6 +361,13 @@ void TptFilter::updateCoefficients()
         {
             float adjRes = currentRes * ((m != 7 && m != 14 && m != 21) ? state.scalerSVF : 1.0f);
             state.R = 1.0f / (2.0f * adjRes);
+            state.h = 1.0f / (1.0f + 2.0f * state.R * state.g + state.g * state.g);
+        }
+        else if (m == 10)
+        {
+            // FDN Reverb: SVF プリフィルター用係数（固定 Q=1.2、Cutoff が filter 周波数）
+            // Res は Decay（フィードバック量）として使用するため Q には反映しない
+            state.R = 1.0f / (2.0f * 1.2f);
             state.h = 1.0f / (1.0f + 2.0f * state.R * state.g + state.g * state.g);
         }
 
@@ -607,13 +616,32 @@ float TptFilter::getMagnitudeForFrequency(float frequency) const
         return mag_total;
     }
     else if (m == 10) {
-        float ms = juce::jmap(fc, 20.0f, 20000.0f, 50.0f, 0.5f); float baseD = (ms / 1000.0f);
-        float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.98f); float mag_total = 0.0f;
+        // FDN Reverb: SVF プリフィルター × FDN コム応答 (Visualizer と同一ロジック)
+        static constexpr float base_ms_tab[4] = { 20.0f, 60.0f, 120.0f, 30.0f };
+        const float base_ms_g = base_ms_tab[juce::jlimit(0, 3, state.slopeIdx)];
+
+        // SVF プリフィルター
+        const float d_g   = 1.0f / 1.2f;
+        const float den_g = std::sqrt(std::pow(1.0f - w2, 2.0f) + std::pow(w * d_g, 2.0f));
+        float svf_g;
+        if      (state.filterType == 0) svf_g = 1.0f / den_g;
+        else if (state.filterType == 1) svf_g = (w * d_g) / den_g;
+        else if (state.filterType == 2) svf_g = w2 / den_g;
+        else                            svf_g = 1.0f;   // Open: flat
+
+        // FDN コム応答
+        const float fb_g   = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.98f);
+        const float baseD_g = base_ms_g / 1000.0f;
+        float fdn_total = 0.0f;
         for (int i = 0; i < 4; ++i) {
-            float wD = 2.0f * juce::MathConstants<float>::pi * frequency * (baseD * state.fdnDelayTimes[i]);
-            mag_total += 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD));
+            float wD_g = 2.0f * juce::MathConstants<float>::pi * frequency
+                              * (baseD_g * state.fdnDelayTimes[i]);
+            fdn_total += 1.0f / std::sqrt(juce::jmax(0.001f,
+                1.0f + fb_g*fb_g - 2.0f*fb_g*std::cos(wD_g)));
         }
-        return mag_total * 0.25f;
+        const float fdn_g = fdn_total * 0.25f;
+
+        return svf_g * (0.6f + fdn_g * 0.4f);
     }
 
     // ===== 以下を前回の末尾 "else if (m==5) {" に続けて追加 =====

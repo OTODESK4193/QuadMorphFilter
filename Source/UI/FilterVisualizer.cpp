@@ -352,14 +352,46 @@ void FilterVisualizer::paint(juce::Graphics& g)
                 }
                 else if (modelIdx == 10)
                 {
-                    float ms = juce::jmap(fc, 20.0f, 20000.0f, 50.0f, 0.5f);
-                    float baseD = (ms / 1000.0f);
-                    float wD1 = 2.0f * juce::MathConstants<float>::pi * freq * (baseD * 1.000f);
-                    float wD2 = 2.0f * juce::MathConstants<float>::pi * freq * (baseD * 1.313f);
-                    float fb = juce::jmap(res, 0.1f, 10.0f, 0.0f, 0.95f);
-                    float m1 = 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD1));
-                    float m2 = 1.0f / std::sqrt(1.0f + fb * fb - 2.0f * fb * std::cos(wD2));
-                    mag = (m1 + m2) * 0.5f;
+                    // FDN Reverb: SVF プリフィルター × FDN コム応答の合成描画
+                    //
+                    // SVF pre-filter (Q=1.2固定、Type 別):
+                    //   Dark(LP): lowpass  → Cutoff 以下の帯域が通過
+                    //   Mid (BP): bandpass → Cutoff 周辺の帯域が通過
+                    //   Air (HP): highpass → Cutoff 以上の帯域が通過
+                    //   Open(All): flat    → 全帯域通過
+                    //
+                    // FDN: Room プリセット別の基本遅延 × 2本のコム平均で近似
+                    static constexpr float base_ms_tab[4] = { 20.0f, 60.0f, 120.0f, 30.0f };
+                    const float base_ms_vis = base_ms_tab[juce::jlimit(0, 3, slopeIdx)];
+
+                    // SVF プリフィルター応答
+                    const float d_svf = 1.0f / 1.2f;  // Q=1.2 固定 (DSP と一致)
+                    const float den_svf = std::sqrt(std::pow(1.0f - w2, 2.0f)
+                                                  + std::pow(w_norm * d_svf, 2.0f));
+                    float svf_mag;
+                    if      (t == 0) svf_mag = 1.0f / den_svf;                   // Dark: LP
+                    else if (t == 1) svf_mag = (w_norm * d_svf) / den_svf;       // Mid: BP
+                    else if (t == 2) svf_mag = w2 / den_svf;                     // Air: HP
+                    else             svf_mag = std::abs(1.0f - w2) / den_svf;    // Open: Notch shape
+
+                    // Open (Notch) は全帯域通過なのでフラットにする
+                    if (t == 3) svf_mag = 1.0f;
+
+                    // FDN コム応答近似 (2本の遅延ラインの平均)
+                    const float fb_fdn = juce::jmap(juce::jlimit(0.1f, 10.0f, res),
+                                                    0.1f, 10.0f, 0.0f, 0.98f);
+                    const float baseD = base_ms_vis / 1000.0f;
+                    const float wD1 = 2.0f * juce::MathConstants<float>::pi * freq * baseD;
+                    const float wD2 = 2.0f * juce::MathConstants<float>::pi * freq
+                                           * (baseD * 1.313f);
+                    const float fdn1 = 1.0f / std::sqrt(juce::jmax(0.001f,
+                        1.0f + fb_fdn*fb_fdn - 2.0f*fb_fdn*std::cos(wD1)));
+                    const float fdn2 = 1.0f / std::sqrt(juce::jmax(0.001f,
+                        1.0f + fb_fdn*fb_fdn - 2.0f*fb_fdn*std::cos(wD2)));
+                    const float fdn_mag = (fdn1 + fdn2) * 0.5f;
+
+                    // 合成: プリフィルター × FDN (FDN コムを軽めに反映)
+                    mag = svf_mag * (0.6f + fdn_mag * 0.4f);
                 }
                 else if (modelIdx == 11)
                 {

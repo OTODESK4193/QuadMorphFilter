@@ -229,6 +229,30 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
                 p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
         };
     }
+    else if (modelIdx == 10)
+    {
+        // ── FDN Reverb: Slope → 空間キャラクター (Room/Hall/Cave/Plate) ──
+        // slopeIdx がそのまま DSP の presets[] インデックスに対応。
+        g.slAtt.reset();
+
+        g.slope.clear(juce::dontSendNotification);
+        g.slope.addItem("Room",  1);   // slopeIdx 0: 20ms, 明るい, 軽い拡散
+        g.slope.addItem("Hall",  2);   // slopeIdx 1: 60ms, 中程度
+        g.slope.addItem("Cave",  3);   // slopeIdx 2: 120ms, 暗い, 重い拡散
+        g.slope.addItem("Plate", 4);   // slopeIdx 3: 30ms, 非常に明るい, 最大拡散
+
+        const int curRoom = juce::roundToInt(
+            audioProcessor.apvts.getRawParameterValue("slope" + suffix)->load());
+        g.slope.setSelectedId(juce::jlimit(1, 4, curRoom + 1),
+                              juce::dontSendNotification);
+
+        g.slope.onChange = [this, &g, sfx = suffix]()
+        {
+            const int idx = g.slope.getSelectedItemIndex();
+            if (auto* p = audioProcessor.apvts.getParameter("slope" + sfx))
+                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
+        };
+    }
     else if (modelIdx == 21)
     {
         // ── Vactrol LPG: Slope → アタック時間 (At_Lo=1ms / At_Mid=5ms / At_Hi=20ms) ──
@@ -308,6 +332,14 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
         g.type.changeItemText(2, "Mix");
         g.type.changeItemText(3, "HP");
         g.type.changeItemText(4, "Notch");
+    }
+    else if (modelIdx == 10)
+    {
+        // FDN Reverb: SVF プリフィルターのキャラクター選択
+        g.type.changeItemText(1, "Dark");   // LP → 低域のみ FDN へ → 暖かい残響
+        g.type.changeItemText(2, "Mid");    // BP → 中域のみ FDN へ → ボーカル残響
+        g.type.changeItemText(3, "Air");    // HP → 高域のみ FDN へ → 金属的エアー
+        g.type.changeItemText(4, "Open");   // Notch → 全帯域 FDN へ → 標準リバーブ
     }
     else if (modelIdx == 8)
     {
@@ -397,7 +429,14 @@ void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
             p->setValueNotifyingHost(p->convertTo0to1((float)(fallback - 1)));
     }
 
-    if (modelIdx == 8)
+    if (modelIdx == 10)
+    {
+        // FDN Reverb: Cutoff = プリフィルター周波数 (Dark/Mid/Air/Open の帯域)
+        //             Res    = フィードバック量 = テール長 → "Decay"
+        g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
+        g.resLabel.setText("Decay",       juce::dontSendNotification);
+    }
+    else if (modelIdx == 8)
     {
         // Phaser: Cutoff = AP ノッチ中心周波数 → "Freq", Res = フィードバック量 → "Depth"
         g.cutoffLabel.setText("Freq",     juce::dontSendNotification);
