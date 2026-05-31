@@ -47,6 +47,12 @@ public:
         lfoEngine.setRecordingData(index, buffer, len);
     }
 
+    // ===== Recording 完了後フェーズリセット =====
+    void resetLfoPhase(int index)
+    {
+        lfoEngine.resetPhase(index);
+    }
+
     juce::AudioProcessorValueTreeState apvts;
 
     std::array<juce::Point<float>, 2048> recBuffer[3];

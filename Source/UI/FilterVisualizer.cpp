@@ -74,9 +74,31 @@ void FilterVisualizer::paint(juce::Graphics& g)
     // ----- XYモード情報（ループ外で1回計算）-----
     int   xyMode = (int)processor.apvts.getRawParameterValue("xyMode")->load();
     auto  mPos = processor.getLfoPos(0);
-    // X: 20Hz〜20kHz、Y: 上=大（反転）
-    float xyCutoff = 20.0f * std::pow(1000.0f, mPos.x);
-    float xyRes = juce::jlimit(0.1f, 10.0f, 0.1f + (1.0f - mPos.y) * 9.9f);
+
+    // ===== cutoffAlgo 対応: processBlock / XYPadComponent と同一計算 =====
+    const int cutoffAlgo = (int)processor.apvts.getRawParameterValue("cutoffAlgo")->load();
+    float xyCutoff, xyRes;
+    if (cutoffAlgo == 1)
+    {
+        const float devX = (mPos.x - 0.5f) * 2.0f;
+        const float devY = (0.5f - mPos.y) * 2.0f;
+        xyCutoff = 632.0f * std::pow(2.0f, devX * 4.0f);
+        xyRes    = 1.0f   * std::pow(2.0f, devY * 2.0f);
+    }
+    else if (cutoffAlgo == 2)
+    {
+        const float devX = (mPos.x - 0.5f) * 2.0f;
+        const float devY = (0.5f - mPos.y) * 2.0f;
+        xyCutoff = 632.0f * std::pow(2.0f, (devX >= 0.0f ? devX * 5.0f : devX * 3.0f));
+        xyRes    = 1.0f   * std::pow(2.0f, (devY >= 0.0f ? devY * 3.0f : devY * 2.0f));
+    }
+    else // Abs (従来通り)
+    {
+        xyCutoff = 20.0f * std::pow(1000.0f, mPos.x);
+        xyRes    = 0.1f + (1.0f - mPos.y) * 9.9f;
+    }
+    xyCutoff = juce::jlimit(20.0f, 20000.0f, xyCutoff);
+    xyRes    = juce::jlimit(0.1f,  10.0f,    xyRes);
     // ----- 有効フィルター・wMix（ループ外）-----
     bool visEnA = processor.apvts.getRawParameterValue("enableA")->load() > 0.5f;
     bool visEnB = processor.apvts.getRawParameterValue("enableB")->load() > 0.5f;
@@ -94,12 +116,17 @@ void FilterVisualizer::paint(juce::Graphics& g)
     }
     else
     {
-        float angleX = mPos.x * juce::MathConstants<float>::halfPi;
-        float angleY = mPos.y * juce::MathConstants<float>::halfPi;
-        float cosX = std::cos(angleX), sinX = std::sin(angleX);
-        float cosY = std::cos(angleY), sinY = std::sin(angleY);
-        wA = cosX * cosY;  wB = sinX * cosY;
-        wC = cosX * sinY;  wD = sinX * sinY;
+        // ===== morphBlend 対応: processBlock と同一アルゴリズムを使用 =====
+        const int morphBlend = (int)processor.apvts.getRawParameterValue("morphBlend")->load();
+        std::array<float, 4> wMixArr;
+        switch (morphBlend)
+        {
+            case 1:  wMixArr = MorphEngine::computeLinearWMix    (mPos.x, mPos.y); break;
+            case 2:  wMixArr = MorphEngine::computeSmoothstepWMix(mPos.x, mPos.y); break;
+            case 3:  wMixArr = MorphEngine::computeRadialWMix    (mPos.x, mPos.y); break;
+            default: wMixArr = MorphEngine::computeEqualPowerWMix(mPos.x, mPos.y); break;
+        }
+        wA = wMixArr[0]; wB = wMixArr[1]; wC = wMixArr[2]; wD = wMixArr[3];
         float sumSq = 0.0f;
         if (visEnA) sumSq += wA * wA;
         if (visEnB) sumSq += wB * wB;
@@ -116,16 +143,25 @@ void FilterVisualizer::paint(juce::Graphics& g)
     }
     // ----- 周波数応答の計算 -----
     int wInt = (int)w;
-    std::vector<float> rawMag(wInt + 1, 0.0f);
+    // rawMag はメンバー変数 (paint()内allocを回避)。使用範囲だけゼロクリア。
+    std::fill(rawMag.begin(), rawMag.begin() + juce::jmin(wInt + 2, 1024), 0.0f);
     for (int px = 0; px <= wInt; ++px)
     {
         float freq = 20.0f * std::pow(1000.0f, (float)px / w);
-        auto calc = [&](juce::String s, int idx) -> float
+        auto calc = [&](juce::String s, int /*idx*/) -> float
             {
                 if (processor.apvts.getRawParameterValue("enable" + s)->load() < 0.5f)
                     return 0.0f;
-                bool lfoCutOn = processor.apvts.getRawParameterValue("lfoCut" + s)->load() > 0.5f;
-                bool lfoResOn = processor.apvts.getRawParameterValue("lfoRes" + s)->load() > 0.5f;
+                // AudioParameterChoice 5択: normalized = index / 4.0
+                // 0=Off, 1=+X(cM[0]), 2=+Y(cM[1]), 3=-X(cM[2]), 4=-Y(cM[3])
+                const int cutSrc = juce::roundToInt(
+                    processor.apvts.getRawParameterValue("lfoCutSrc" + s)->load() * 4.0f);
+                const int resSrc = juce::roundToInt(
+                    processor.apvts.getRawParameterValue("lfoResSrc" + s)->load() * 4.0f);
+                const bool lfoCutOn  = cutSrc > 0;
+                const bool lfoResOn  = resSrc > 0;
+                const int  cutModIdx = cutSrc > 0 ? cutSrc - 1 : 0;
+                const int  resModIdx = resSrc > 0 ? resSrc - 1 : 0;
                 float fc, res;
                 if (xyMode == 1)
                 {
@@ -133,15 +169,15 @@ void FilterVisualizer::paint(juce::Graphics& g)
                         : processor.apvts.getRawParameterValue("cutoff" + s)->load();
                     float baseRes = lfoResOn ? xyRes
                         : processor.apvts.getRawParameterValue("res" + s)->load();
-                    fc = lfoCutOn ? baseCutoff * std::pow(2.0f, 4.0f * cM[idx]) : baseCutoff;
-                    res = lfoResOn ? baseRes * std::pow(2.0f, 2.0f * rM[idx]) : baseRes;
+                    fc  = lfoCutOn ? baseCutoff * std::pow(2.0f, 4.0f * cM[cutModIdx]) : baseCutoff;
+                    res = lfoResOn ? baseRes    * std::pow(2.0f, 2.0f * rM[resModIdx]) : baseRes;
                 }
                 else
                 {
                     float baseCutoff = processor.apvts.getRawParameterValue("cutoff" + s)->load();
                     float baseRes = processor.apvts.getRawParameterValue("res" + s)->load();
-                    fc = lfoCutOn ? baseCutoff * std::pow(2.0f, 4.0f * cM[idx]) : baseCutoff;
-                    res = lfoResOn ? baseRes * std::pow(2.0f, 2.0f * rM[idx]) : baseRes;
+                    fc  = lfoCutOn ? baseCutoff * std::pow(2.0f, 4.0f * cM[cutModIdx]) : baseCutoff;
+                    res = lfoResOn ? baseRes    * std::pow(2.0f, 2.0f * rM[resModIdx]) : baseRes;
                 }
                 fc = juce::jlimit(20.0f, 20000.0f, fc);
                 res = juce::jlimit(0.1f, 10.0f, res);

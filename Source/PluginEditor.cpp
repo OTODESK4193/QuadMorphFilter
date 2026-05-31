@@ -83,32 +83,58 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
     lfoResLabel.setJustificationType(juce::Justification::centredRight);
     addAndMakeVisible(lfoResLabel);
 
-    const juce::String filterNames[4] = { "A", "B", "C", "D" };
-    const juce::String cutIds[4] = { "lfoCutA", "lfoCutB", "lfoCutC", "lfoCutD" };
-    const juce::String resIds[4] = { "lfoResA", "lfoResB", "lfoResC", "lfoResD" };
-
-    for (int i = 0; i < 4; ++i)
+    // ===== LFO Cut/Res サイクルボタン =====
+    // クリックのたびに Off→+X→+Y→-X→-Y→Off をサイクル
     {
-        lfoCutBtn[i].setButtonText(filterNames[i]);
-        lfoCutBtn[i].setClickingTogglesState(true);
-        lfoCutBtn[i].setColour(juce::TextButton::textColourOnId, juce::Colour(0xffC2185B));
-        addAndMakeVisible(lfoCutBtn[i]);
-        lfoCutAtt[i] = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-            audioProcessor.apvts, cutIds[i], lfoCutBtn[i]);
+        const juce::String cutParamIds[4] = { "lfoCutSrcA", "lfoCutSrcB", "lfoCutSrcC", "lfoCutSrcD" };
+        const juce::String resParamIds[4] = { "lfoResSrcA", "lfoResSrcB", "lfoResSrcC", "lfoResSrcD" };
 
-        lfoResBtn[i].setButtonText(filterNames[i]);
-        lfoResBtn[i].setClickingTogglesState(true);
-        lfoResBtn[i].setColour(juce::TextButton::textColourOnId, juce::Colour(0xffE65100));
-        addAndMakeVisible(lfoResBtn[i]);
-        lfoResAtt[i] = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-            audioProcessor.apvts, resIds[i], lfoResBtn[i]);
+        for (int i = 0; i < 4; ++i)
+        {
+            // Cut ボタン
+            lfoCutBtn[i].setButtonText("Off");           // 初期テキスト。タイマーで更新
+            lfoCutBtn[i].setClickingTogglesState(false); // 手動でトグル状態を管理
+            lfoCutBtn[i].setColour(juce::TextButton::textColourOnId, juce::Colour(0xffC2185B));
+            addAndMakeVisible(lfoCutBtn[i]);
+
+            lfoCutBtn[i].onClick = [this, paramId = cutParamIds[i]]()
+            {
+                if (auto* p = dynamic_cast<juce::AudioParameterChoice*>(
+                        audioProcessor.apvts.getParameter(paramId)))
+                {
+                    int next = (p->getIndex() + 1) % 5;  // 0→1→2→3→4→0
+                    p->setValueNotifyingHost(p->convertTo0to1((float)next));
+                }
+            };
+
+            // Res ボタン
+            lfoResBtn[i].setButtonText("Off");
+            lfoResBtn[i].setClickingTogglesState(false);
+            lfoResBtn[i].setColour(juce::TextButton::textColourOnId, juce::Colour(0xffE65100));
+            addAndMakeVisible(lfoResBtn[i]);
+
+            lfoResBtn[i].onClick = [this, paramId = resParamIds[i]]()
+            {
+                if (auto* p = dynamic_cast<juce::AudioParameterChoice*>(
+                        audioProcessor.apvts.getParameter(paramId)))
+                {
+                    int next = (p->getIndex() + 1) % 5;
+                    p->setValueNotifyingHost(p->convertTo0to1((float)next));
+                }
+            };
+        }
     }
+
+    // ボタン外観の初期反映 + 30Hz 同期タイマー開始
+    updateLfoCutResButtons();
+    startTimerHz(30);
 
     setSize(1000, 680);
 }
 
 QuadMorphFilterAudioProcessorEditor::~QuadMorphFilterAudioProcessorEditor()
 {
+    stopTimer();  // Timer は必ずデストラクタ最優先で停止
     juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
 }
 
@@ -117,6 +143,38 @@ void QuadMorphFilterAudioProcessorEditor::paint(juce::Graphics& g)
     g.fillAll(juce::Colour(0xffF0F4F8));
 }
 
+// ==========================================
+// LFO Cut/Res ボタン外観の同期
+// ==========================================
+void QuadMorphFilterAudioProcessorEditor::timerCallback()
+{
+    updateLfoCutResButtons();
+}
+
+void QuadMorphFilterAudioProcessorEditor::updateLfoCutResButtons()
+{
+    // 5択ラベル: 0=Off, 1=+X, 2=+Y, 3=-X, 4=-Y
+    static const char* const labels[] = { "Off", "+X", "+Y", "-X", "-Y" };
+    const juce::String filterLetters[] = { "A", "B", "C", "D" };
+
+    for (int i = 0; i < 4; ++i)
+    {
+        // AudioParameterChoice (5択) normalized → index: round(raw * 4)
+        int cutState = juce::jlimit(0, 4, juce::roundToInt(
+            audioProcessor.apvts.getRawParameterValue("lfoCutSrc" + filterLetters[i])->load() * 4.0f));
+        int resState = juce::jlimit(0, 4, juce::roundToInt(
+            audioProcessor.apvts.getRawParameterValue("lfoResSrc" + filterLetters[i])->load() * 4.0f));
+
+        lfoCutBtn[i].setButtonText(labels[cutState]);
+        // setToggleState で ON/OFF の視覚状態を手動制御 (setClickingTogglesState=false のため)
+        lfoCutBtn[i].setToggleState(cutState > 0, juce::dontSendNotification);
+
+        lfoResBtn[i].setButtonText(labels[resState]);
+        lfoResBtn[i].setToggleState(resState > 0, juce::dontSendNotification);
+    }
+}
+
+// ==========================================
 void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
     FilterGroup& g, const juce::String& suffix, int modelIdx)
 {
@@ -681,9 +739,16 @@ void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, ju
             att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
                 audioProcessor.apvts, paramId, sl);
         };
-    setupSlider(g.rateFree, g.rfAtt, id + "rateFree");
-    setupSlider(g.minSlider, g.minAtt, id + "min");
-    setupSlider(g.maxSlider, g.maxAtt, id + "max");
+    setupSlider(g.rateFree,   g.rfAtt,    id + "rateFree");
+    setupSlider(g.minSlider,  g.minAtt,   id + "min");
+    setupSlider(g.maxSlider,  g.maxAtt,   id + "max");
+
+    // ===== 新規: Phase Offset / Fade-in =====
+    g.phaseSlider.setTextValueSuffix(juce::String::fromUTF8("\xc2\xb0"));   // "°"
+    setupSlider(g.phaseSlider, g.phaseAtt, id + "phase");
+
+    g.fadeSlider.setTextValueSuffix("s");
+    setupSlider(g.fadeSlider, g.fadeAtt, id + "fade");
 }
 
 void QuadMorphFilterAudioProcessorEditor::resized()
@@ -800,10 +865,14 @@ void QuadMorphFilterAudioProcessorEditor::resized()
         lfos[i].stepMode.setBounds(r.removeFromLeft(50).reduced(2, 2));
         lfos[i].syncToggle.setBounds(r.removeFromLeft(50).reduced(2, 2));
 
-        auto remainW = r.getWidth();
-        auto rateArea = r.removeFromLeft(remainW / 3);
-        auto minArea = r.removeFromLeft(remainW / 3);
-        auto maxArea = r;
+        // 残り幅を Rate / Min / Max / Phase / Fade の 5 等分
+        auto remainW   = r.getWidth();
+        auto slotW     = remainW / 5;
+        auto rateArea  = r.removeFromLeft(slotW);
+        auto minArea   = r.removeFromLeft(slotW);
+        auto maxArea   = r.removeFromLeft(slotW);
+        auto phaseArea = r.removeFromLeft(slotW);
+        auto fadeArea  = r;
 
         bool isSynced = audioProcessor.apvts.getRawParameterValue(
             "lfo" + juce::String(i + 1) + "sync")->load() > 0.5f;
@@ -820,6 +889,8 @@ void QuadMorphFilterAudioProcessorEditor::resized()
         }
         lfos[i].minSlider.setBounds(minArea.reduced(2, 5));
         lfos[i].maxSlider.setBounds(maxArea.reduced(2, 5));
+        lfos[i].phaseSlider.setBounds(phaseArea.reduced(2, 5));
+        lfos[i].fadeSlider.setBounds(fadeArea.reduced(2, 5));
     }
 
     b.removeFromTop(10);

@@ -9,7 +9,8 @@
 #include "UI/FilterVisualizer.h"
 #include "UI/XYPadComponent.h"
 
-class QuadMorphFilterAudioProcessorEditor : public juce::AudioProcessorEditor
+class QuadMorphFilterAudioProcessorEditor : public juce::AudioProcessorEditor,
+                                             private juce::Timer
 {
 public:
     explicit QuadMorphFilterAudioProcessorEditor(QuadMorphFilterAudioProcessor&);
@@ -39,8 +40,10 @@ private:
         juce::TextButton enableButton, stepMode, syncToggle;
         juce::ComboBox   wave, rateSync, boundCombo;
         juce::Slider     rateFree, minSlider, maxSlider;
+        juce::Slider     phaseSlider, fadeSlider;   // ← 新規
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>   eAtt, sAtt, syAtt;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>   rfAtt, minAtt, maxAtt;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>   phaseAtt, fadeAtt;  // ← 新規
         std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> wAtt, rsAtt, bAtt;
     };
     LfoGroup lfos[3];
@@ -69,23 +72,23 @@ private:
     juce::ComboBox cutoffAlgoCombo;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> cutoffAlgoAtt;
 
-    // ===== 【新規】LFO Cut per-filter スイッチ (A/B/C/D) =====
+    // ===== LFO Cut/Res per-filter サイクルボタン (A/B/C/D) =====
+    // Off → +X → +Y → -X → -Y → Off を押すたびにサイクル
+    // AudioParameterChoice (5択) を使用。ButtonAttachment は使用しない。
     juce::Label      lfoCutLabel;
     juce::TextButton lfoCutBtn[4];
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> lfoCutAtt[4];
 
-    // ===== 【新規】LFO Res per-filter スイッチ (A/B/C/D) =====
     juce::Label      lfoResLabel;
     juce::TextButton lfoResBtn[4];
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> lfoResAtt[4];
 
     // ===== 既存コード: private セクション末尾 =====
     void setupFilterGroup(FilterGroup& g, juce::String s, juce::String name);
     void setupLfoGroup(LfoGroup& g, int index, juce::String name);
-
-    // ===== 【新規追加】=====
-    // モデル変更時にスロープ・タイプを更新
     void refreshFilterGroupControls(FilterGroup& g, const juce::String& suffix, int modelIdx);
+
+    // ===== LFO Cut/Res ボタン外観の定期同期 (30Hz) =====
+    void timerCallback() override;
+    void updateLfoCutResButtons();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(QuadMorphFilterAudioProcessorEditor)
 };

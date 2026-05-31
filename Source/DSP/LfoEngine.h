@@ -48,12 +48,20 @@ public:
     std::array<float, 4> getMod4(int index) const;
 
     // ===== Recording データセッター =====
-    // XYGridComponent から呼び出される
+    // XYPadComponent から呼び出される
     void setRecordingData(int index, const std::array<juce::Point<float>, 2048>& buffer, int len)
     {
         if (index < 0 || index >= 3) return;
         recordingData[index] = buffer;
         recordingLength[index] = len;
+    }
+
+    // ===== フェーズリセット =====
+    // Recording 完了後に呼び出し、次の再生が先頭から始まるようにする
+    void resetPhase(int index)
+    {
+        if (index < 0 || index >= 3) return;
+        states[index].phase = 0.0f;
     }
 
 private:
@@ -73,6 +81,10 @@ private:
 
         float smoothNx = 0.5f, smoothNy = 0.5f;
         float tNextNx = 0.5f, tNextNy = 0.5f;
+
+        // Fade-in エンベロープ [0, 1]
+        // LFO 無効時にリセット → 次に有効化されたとき 0 から立ち上がる
+        float fadeEnv = 0.0f;
     };
 
     double sampleRate = 48000.0;

@@ -53,12 +53,12 @@ void LfoEngine::processSingleLfo(int i,
     float maxVal = apvts.getRawParameterValue(id + "max")->load();
     int   boundMode = (int)apvts.getRawParameterValue(id + "bound")->load();
 
-    // ===== 自動正規化: Min > Max でも自動修正 =====
-    // ユーザーが Min=100% Max=0% と逆に設定しても正しく動作する。
-    // これにより直感的で誤操作に強いUIを実現
-    float actualMin = std::min(minVal, maxVal);
-    float actualMax = std::max(minVal, maxVal);
-    float spread = actualMax - actualMin;
+    // ===== Min > Max のとき逆方向動作 =====
+    // Min=95%, Max=20% → LFO は高い側から低い側へ動く（逆方向）。
+    // spread が負になることで方向情報を保持する。
+    // 旧実装の std::min/max 正規化は廃止。
+    float rangeStart = minVal;
+    float spread     = maxVal - minVal;   // 負 = 逆方向
 
     bool isWait = rec.isWaiting[i].load(std::memory_order_acquire);
     bool isDrag = rec.isDragging[i].load(std::memory_order_acquire);
@@ -66,8 +66,20 @@ void LfoEngine::processSingleLfo(int i,
     if (!enabled)
     {
         positions[i] = { baseX, baseY };
+        states[i].fadeEnv = 0.0f;  // 次に有効化されたときフェードを先頭から再開
         return;
     }
+
+    // ===== Phase Offset + Fade-in パラメータ読み取り =====
+    const float phaseOffsetDeg = apvts.getRawParameterValue(id + "phase")->load();
+    const float fadeTime       = apvts.getRawParameterValue(id + "fade" )->load();
+
+    // ===== Fade-in エンベロープ更新 =====
+    // isWait=true（Recording 録音待機中）はフェードを一時停止
+    if (fadeTime < 0.001f)
+        states[i].fadeEnv = 1.0f;           // フェード無効 → 即時フル
+    else if (!isWait)
+        states[i].fadeEnv = juce::jmin(1.0f, states[i].fadeEnv + dt / fadeTime);
 
     // ===== レート計算 =====
     float rate = sync
@@ -100,8 +112,13 @@ void LfoEngine::processSingleLfo(int i,
         }
     }
 
-    float p = states[i].phase;
-    float t = p / juce::MathConstants<float>::twoPi;  // STEP/Smooth 両モードで t を計算
+    // ===== Phase Offset 適用 =====
+    // 0°=変化なし, 180°=逆位相, 360°=一周（= 0° と同等）
+    // fmod で [0, 2π] に正規化 → sin/cos/Recording/Billiard 以外の全波形に有効
+    const float twoPi = juce::MathConstants<float>::twoPi;
+    float p = std::fmod(states[i].phase + (phaseOffsetDeg / 360.0f) * twoPi, twoPi);
+    if (p < 0.0f) p += twoPi;
+    float t = p / twoPi;  // STEP/Smooth 両モードで t を計算 [0, 1]
     float W_x = 0.0f, W_y = 0.0f;
 
     // ===== 波形計算 (19種類) =====
@@ -159,7 +176,7 @@ void LfoEngine::processSingleLfo(int i,
         }
         else {
             // Recording 再生中
-            // LfoEngine 内部の recordingData を使用（XYGridComponent から setRecordingData() で設定）
+            // LfoEngine 内部の recordingData を使用（XYPadComponent から setRecordingData() で設定）
             int len = recordingLength[i];
             if (len > 0) {
                 float exactIdx = t * len;
@@ -280,6 +297,13 @@ void LfoEngine::processSingleLfo(int i,
     default: break;
     }
 
+    // ===== Fade-in 適用 =====
+    // fadeEnv=0 → W=0（変調量ゼロ = Min/Max の中点で静止）
+    // fadeEnv=1 → フル変調
+    // Recording 再生を含む全波形に一律適用。isWait 中は fadeEnv が増えないため録音中は変調停止。
+    W_x *= states[i].fadeEnv;
+    W_y *= states[i].fadeEnv;
+
     // ===== Step モード =====
     if (step)
     {
@@ -296,20 +320,19 @@ void LfoEngine::processSingleLfo(int i,
                 + (states[i].nextRand1[f] - states[i].currentRand1[f]) * t;
             float w = raw * 2.0f - 1.0f;
             if (step) w = std::round(w * 4.0f) / 4.0f;
-            // actualMin + w * spread で [actualMin, actualMax] 範囲内で変動
-            mod4[i][f] = applyBound(actualMin + (w + 1.0f) / 2.0f * spread, boundMode);
+            w *= states[i].fadeEnv;  // Fade-in 適用
+            mod4[i][f] = applyBound(rangeStart + (w + 1.0f) / 2.0f * spread, boundMode);
         }
         positions[i].x = mod4[i][0];
         positions[i].y = mod4[i][1];
     }
     else
     {
-        // W_x, W_y は [-1, 1] の範囲。これを [actualMin, actualMax] に変換
-        // W = -1 → actualMin (0%)
-        // W = +1 → actualMax (100%)
-        // W = 0  → (actualMin + actualMax) / 2 (50%)
-        positions[i].x = applyBound(actualMin + (W_x + 1.0f) / 2.0f * spread, boundMode);
-        positions[i].y = applyBound(actualMin + (W_y + 1.0f) / 2.0f * spread, boundMode);
+        // W_x, W_y は [-1, 1] (Fade 適用済み)。rangeStart + spread で出力範囲を決定。
+        // spread が負 (Min > Max 設定) のとき LFO は逆方向に動く。
+        // W = -1 → rangeStart    W = 0 → 中点    W = +1 → rangeStart + spread
+        positions[i].x = applyBound(rangeStart + (W_x + 1.0f) / 2.0f * spread, boundMode);
+        positions[i].y = applyBound(rangeStart + (W_y + 1.0f) / 2.0f * spread, boundMode);
         for (int f = 0; f < 4; ++f)
             mod4[i][f] = positions[i].x;
     }

@@ -49,6 +49,13 @@
             layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "min",      1 }, lfoNames[i] + " Min", 0.0f, 1.0f, 0.0f));
             layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "max",      1 }, lfoNames[i] + " Max", 0.0f, 1.0f, 1.0f));
             layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ id + "bound",    1 }, lfoNames[i] + " Boundary", bounds, 0));
+            // ===== 新規追加 =====
+            layout.add(std::make_unique<juce::AudioParameterFloat>(
+                juce::ParameterID{ id + "phase", 1 }, lfoNames[i] + " Phase",
+                juce::NormalisableRange<float>(0.0f, 360.0f, 0.1f), 0.0f));
+            layout.add(std::make_unique<juce::AudioParameterFloat>(
+                juce::ParameterID{ id + "fade", 1 }, lfoNames[i] + " Fade In",
+                juce::NormalisableRange<float>(0.0f, 10.0f, 0.01f, 0.3f), 0.0f));
         }
 
         juce::StringArray suffixes = { "A", "B", "C", "D" };
@@ -92,12 +99,20 @@
             juce::ParameterID{ "cutoffAlgo", 1 }, "Cutoff Algo",
             juce::StringArray{ "Abs", "Rel", "Zone" }, 0));
 
-        for (const auto& s : suffixes)
+        // lfoCutSrc/lfoResSrc: 5択 (0=Off, 1=+X, 2=+Y, 3=-X, 4=-Y)
+        // デフォルト: A=+X(1), B=+Y(2), C=-X(3), D=-Y(4) — 旧実装の動作を維持
         {
-            layout.add(std::make_unique<juce::AudioParameterBool>(
-                juce::ParameterID{ "lfoCut" + s, 1 }, "LFO Cut " + s, true));
-            layout.add(std::make_unique<juce::AudioParameterBool>(
-                juce::ParameterID{ "lfoRes" + s, 1 }, "LFO Res " + s, true));
+            const juce::StringArray modSrcs = { "Off", "+X", "+Y", "-X", "-Y" };
+            const int defaults[4] = { 1, 2, 3, 4 };
+            int fi = 0;
+            for (const auto& s : suffixes)
+            {
+                layout.add(std::make_unique<juce::AudioParameterChoice>(
+                    juce::ParameterID{ "lfoCutSrc" + s, 1 }, "LFO Cut Src " + s, modSrcs, defaults[fi]));
+                layout.add(std::make_unique<juce::AudioParameterChoice>(
+                    juce::ParameterID{ "lfoResSrc" + s, 1 }, "LFO Res Src " + s, modSrcs, defaults[fi]));
+                ++fi;
+            }
         }
 
         return layout;
@@ -241,10 +256,21 @@
         //                 false → スライダーのみ（LFO2無効）
         //
         // lfoResOn も同様
-        auto getFilterParams = [&](const juce::String& s, int idx) -> std::pair<float, float>
+        // AudioParameterChoice (5択) の正規化値 → インデックス変換
+        // 5択なので normalized = index / 4.0f → index = round(raw * 4.0f)
+        auto readModSrc = [&](const juce::String& paramId) -> int {
+            return juce::roundToInt(apvts.getRawParameterValue(paramId)->load() * 4.0f);
+        };
+
+        auto getFilterParams = [&](const juce::String& s, int /*idx*/) -> std::pair<float, float>
             {
-                bool lfoCutOn = apvts.getRawParameterValue("lfoCut" + s)->load() > 0.5f;
-                bool lfoResOn = apvts.getRawParameterValue("lfoRes" + s)->load() > 0.5f;
+                // 0=Off, 1=+X(cM[0]), 2=+Y(cM[1]), 3=-X(cM[2]), 4=-Y(cM[3])
+                const int cutSrc = readModSrc("lfoCutSrc" + s);
+                const int resSrc = readModSrc("lfoResSrc" + s);
+                const bool lfoCutOn = cutSrc > 0;
+                const bool lfoResOn = resSrc > 0;
+                const int  cutModIdx = cutSrc > 0 ? cutSrc - 1 : 0;  // cM の添字
+                const int  resModIdx = resSrc > 0 ? resSrc - 1 : 0;
 
                 float baseCutoff, baseRes;
                 if (xyMode == 1) // Cutoffモード
@@ -260,8 +286,8 @@
                     baseRes = apvts.getRawParameterValue("res" + s)->load();
                 }
 
-                float fc = lfoCutOn ? MorphEngine::applyFrequencyMod(baseCutoff, cM[idx]) : baseCutoff;
-                float res = lfoResOn ? MorphEngine::applyResonanceMod(baseRes, rM[idx]) : baseRes;
+                float fc  = lfoCutOn ? MorphEngine::applyFrequencyMod(baseCutoff, cM[cutModIdx]) : baseCutoff;
+                float res = lfoResOn ? MorphEngine::applyResonanceMod(baseRes,    rM[resModIdx]) : baseRes;
 
                 return { juce::jlimit(20.0f, 20000.0f, fc), juce::jlimit(0.1f, 10.0f, res) };
             };

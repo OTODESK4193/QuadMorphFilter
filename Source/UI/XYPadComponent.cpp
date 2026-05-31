@@ -57,15 +57,19 @@ XYPadComponent::XYPadComponent(QuadMorphFilterAudioProcessor& p)
 // ────────────────────────────────────────
 void XYPadComponent::timerCallback()
 {
-    // Recording モード check：wave が 6 でなくなったら recording フラグをリセット
-    if (recording && recordingLfoIndex >= 0)
+    // 各LFOで wave が 6 でなくなったら recording フラグをリセット（軽量版）
+    // ※ wave チェックは recording[i] が true のときのみ実行
+    for (int i = 0; i < 3; ++i)
     {
+        if (!recording[i]) continue;
+
         int wave = (int)processor.apvts.getRawParameterValue(
-            "lfo" + juce::String(recordingLfoIndex + 1) + "wave")->load();
+            "lfo" + juce::String(i + 1) + "wave")->load();
         if (wave != 6)
         {
-            recording = false;
-            recordingLfoIndex = -1;
+            recording[i] = false;
+            recordingLength[i] = 0;
+            std::fill(pixelMap[i].begin(), pixelMap[i].end(), 0);
         }
     }
 
@@ -166,11 +170,25 @@ void XYPadComponent::paint(juce::Graphics& g)
             3, (int)h/2 - 25, 40, 12, juce::Justification::centredLeft);
     }
 
-    // ===== Recording グリッド描画（現在Recording中のLFOのみ） =====
-    if (recordingLfoIndex >= 0 && recording)
+    // ===== Recording グリッド描画（wave=="6" かつ recording[i]==true のLFOのみ） =====
+    // recording[i]==true は mouseDown で設定され、mouseUp/finishRecording() で false になる
+    // つまり、実際にドラッグ中のLFOだけがグリッド表示される
+    bool anyRecordingActive = false;
+    for (int i = 0; i < 3; ++i)
+    {
+        int wave = (int)processor.apvts.getRawParameterValue(
+            "lfo" + juce::String(i + 1) + "wave")->load();
+        if (wave == 6 && recording[i])  // wave==6 かつ recording[i]==true
+        {
+            anyRecordingActive = true;
+            break;
+        }
+    }
+
+    if (anyRecordingActive)
     {
         paintRecordingGrid(g);
-        return;  // Recording 中はグリッド表示のみ、トレイル非表示
+        return;  // Recording モード時はグリッド表示のみ
     }
 
     // LFO トレイルと現在位置 (toPix で正規化 → ピクセル変換)
@@ -228,66 +246,59 @@ void XYPadComponent::paint(juce::Graphics& g)
 // ────────────────────────────────────────
 void XYPadComponent::mouseDown(const juce::MouseEvent& e)
 {
-    // Recording 中なら新規 Recording を拒否
-    if (recording && recordingLfoIndex >= 0) {
-        updatePosition(e);
-        return;
-    }
-
-    // Recording モード時：グリッド Recording を開始
-    for (int i = 0; i < 3; ++i)
-    {
-        int wave = (int)processor.apvts.getRawParameterValue(
-            "lfo" + juce::String(i + 1) + "wave")->load();
-        if (wave == 6)  // Recording モード
-        {
-            recordingLfoIndex = i;
-            recording = true;
-            recordingLength = 0;
-            std::fill(pixelMap.begin(), pixelMap.end(), 0);
-
-            // recBuffer もクリア（既存ロジックとの連携用）
-            processor.recLength[i].store(0);
-
-            recordPixel((float)e.x / getWidth(), (float)e.y / getHeight());
-
-            // recBuffer にも記録開始
-            auto n = toNorm((float)e.x, (float)e.y,
-                            (float)getWidth(), (float)getHeight());
-            processor.recBuffer[i][0] = { n.x, n.y };
-            processor.recLength[i].store(1);
-            processor.currentRecX[i].store(n.x);
-            processor.currentRecY[i].store(n.y);
-
-            // 補間用の前回位置を初期化
-            lastRecX = n.x;
-            lastRecY = n.y;
-
-            repaint();
-            return;
-        }
-    }
-
     // 通常の XYPad ドラッグ
     updatePosition(e);
+
+    // Recording モード時（wave=="6"）：Recording を開始
+    startRecording();
+
+    // Recording 中のLFOについてのみポイント記録開始
+    for (int i = 0; i < 3; ++i)
+    {
+        if (!recording[i]) continue;
+
+        // recBuffer にも記録開始（ピクセルは mouseDrag で塗りつぶし）
+        auto n = toNorm((float)e.x, (float)e.y,
+                        (float)getWidth(), (float)getHeight());
+        processor.recBuffer[i][0] = { n.x, n.y };
+        processor.recLength[i].store(1);
+        processor.currentRecX[i].store(n.x);
+        processor.currentRecY[i].store(n.y);
+
+        // 補間用の前回位置を初期化
+        lastRecX[i] = n.x;
+        lastRecY[i] = n.y;
+
+        // 【修正】ドラッグ中フラグ → LFO がマウス現在位置をリアルタイム表示
+        processor.isRecordingDrag[i].store(true, std::memory_order_release);
+
+        // ピクセル記録
+        recordPixel((float)e.x / getWidth(), (float)e.y / getHeight());
+    }
+
+    repaint();
 }
 
 void XYPadComponent::mouseDrag(const juce::MouseEvent& e)
 {
-    if (recordingLfoIndex >= 0 && recording)
+    auto n = toNorm((float)e.x, (float)e.y,
+                    (float)getWidth(), (float)getHeight());
+
+    recordPixel((float)e.x / getWidth(), (float)e.y / getHeight());
+
+    // Recording 中の各LFOに線形補間でポイント記録
+    bool isRecording = false;
+    for (int i = 0; i < 3; ++i)
     {
-        auto n = toNorm((float)e.x, (float)e.y,
-                        (float)getWidth(), (float)getHeight());
+        if (!recording[i]) continue;
+        isRecording = true;
 
-        recordPixel((float)e.x / getWidth(), (float)e.y / getHeight());
-
-        // recBuffer に線形補間でポイントを複数記録（滑らかさ向上）
-        int len = processor.recLength[recordingLfoIndex].load();
+        int len = processor.recLength[i].load();
         if (len < 2048)
         {
             // 前回位置から現在位置への距離を計算
-            float dx = n.x - lastRecX;
-            float dy = n.y - lastRecY;
+            float dx = n.x - lastRecX[i];
+            float dy = n.y - lastRecY[i];
             float dist = std::hypot(dx, dy);
 
             // 距離に応じて補間ポイント数を決定（最大5ポイント）
@@ -296,21 +307,24 @@ void XYPadComponent::mouseDrag(const juce::MouseEvent& e)
             for (int step = 1; step <= interpolationSteps && len < 2048; ++step)
             {
                 float t = (float)step / interpolationSteps;
-                float px = lastRecX + dx * t;
-                float py = lastRecY + dy * t;
+                float px = lastRecX[i] + dx * t;
+                float py = lastRecY[i] + dy * t;
 
-                processor.recBuffer[recordingLfoIndex][len] = { px, py };
+                processor.recBuffer[i][len] = { px, py };
                 len++;
             }
 
-            processor.recLength[recordingLfoIndex].store(len);
-            processor.currentRecX[recordingLfoIndex].store(n.x);
-            processor.currentRecY[recordingLfoIndex].store(n.y);
+            processor.recLength[i].store(len);
+            processor.currentRecX[i].store(n.x);
+            processor.currentRecY[i].store(n.y);
 
-            lastRecX = n.x;
-            lastRecY = n.y;
+            lastRecX[i] = n.x;
+            lastRecY[i] = n.y;
         }
+    }
 
+    if (isRecording)
+    {
         repaint();
         return;
     }
@@ -320,7 +334,17 @@ void XYPadComponent::mouseDrag(const juce::MouseEvent& e)
 
 void XYPadComponent::mouseUp(const juce::MouseEvent&)
 {
-    if (recordingLfoIndex >= 0 && recording)
+    bool anyRecording = false;
+    for (int i = 0; i < 3; ++i)
+    {
+        if (recording[i])
+        {
+            anyRecording = true;
+            break;
+        }
+    }
+
+    if (anyRecording)
     {
         finishRecording();
         repaint();
@@ -377,42 +401,63 @@ bool XYPadComponent::isRecordingMode() const
 }
 
 // ────────────────────────────────────────
-// Recording 開始
+// Recording 開始（wave=="6" のLFO）
 // ────────────────────────────────────────
 void XYPadComponent::startRecording()
 {
-    // 現在 Recording モードの LFO を特定
+    // mouseDown で呼ばれる：wave==6 の最初の1つのLFOのみ Recording 開始
+    // 複数の wave==6 LFO がある場合も、一度に1つのLFOのみを Recording する
+
+    // 既に recording 中のLFOがあればスキップ（重複 Recording 防止）
+    for (int i = 0; i < 3; ++i)
+    {
+        if (recording[i]) return;
+    }
+
+    // 最初の wave==6 LFO を recording 開始
     for (int i = 0; i < 3; ++i)
     {
         int wave = (int)processor.apvts.getRawParameterValue(
             "lfo" + juce::String(i + 1) + "wave")->load();
+
         if (wave == 6)
         {
-            recordingLfoIndex = i;
-            recording = true;
-            recordingLength = 0;
-            std::fill(pixelMap.begin(), pixelMap.end(), 0);
-            return;
+            recording[i] = true;
+            recordingLength[i] = 0;
+            std::fill(pixelMap[i].begin(), pixelMap[i].end(), 0);
+            processor.recLength[i].store(0);
+
+            // 【修正】LfoEngine に録音開始を通知
+            // isWaiting=true → processSingleLfo がマウス位置を参照するモードへ切替
+            // isRecordingDrag=false → 最初は「待機パルス」アニメーション表示
+            processor.isWaitingForRecord[i].store(true,  std::memory_order_release);
+            processor.isRecordingDrag[i].store   (false, std::memory_order_release);
+
+            return;  // 1つだけ設定したら終了
         }
     }
 }
 
 // ────────────────────────────────────────
-// ピクセル記録（正規化座標）
+// ピクセル記録（正規化座標）→ 各LFOの pixelMap に記録
 // ────────────────────────────────────────
 void XYPadComponent::recordPixel(float xNorm, float yNorm)
 {
-    if (!recording || recordingLfoIndex < 0) return;
+    // 全 Recording 中のLFOにピクセルを記録
+    for (int i = 0; i < 3; ++i)
+    {
+        if (!recording[i]) continue;
 
-    // グリッドサイズに正規化（0～1 → 0～15）
-    int gx = (int)(xNorm * GRID_SIZE);
-    int gy = (int)(yNorm * GRID_SIZE);  // Y軸反転なし（finishRecording で反転）
+        // グリッドサイズに正規化（0～1 → 0～15）
+        int gx = (int)(xNorm * GRID_SIZE);
+        int gy = (int)(yNorm * GRID_SIZE);
 
-    gx = juce::jlimit(0, GRID_SIZE - 1, gx);
-    gy = juce::jlimit(0, GRID_SIZE - 1, gy);
+        gx = juce::jlimit(0, GRID_SIZE - 1, gx);
+        gy = juce::jlimit(0, GRID_SIZE - 1, gy);
 
-    int idx = gy * GRID_SIZE + gx;
-    pixelMap[idx] = 255;
+        int idx = gy * GRID_SIZE + gx;
+        pixelMap[i][idx] = 255;
+    }
 }
 
 // ────────────────────────────────────────
@@ -420,31 +465,40 @@ void XYPadComponent::recordPixel(float xNorm, float yNorm)
 // ────────────────────────────────────────
 void XYPadComponent::finishRecording()
 {
-    if (!recording || recordingLfoIndex < 0) return;
-
-    recording = false;
-
-    // recBuffer から recordingData に直接コピー
-    // recBuffer にはマウスドラッグで記録した連続的なポイントが格納されている
-    std::array<juce::Point<float>, 2048> buffer;
-    int len = processor.recLength[recordingLfoIndex].load();
-
-    if (len > 0 && len <= 2048)
+    // 各LFOで recording フラグが立っていたら Recording 完了
+    for (int i = 0; i < 3; ++i)
     {
-        std::copy(processor.recBuffer[recordingLfoIndex].begin(),
-                  processor.recBuffer[recordingLfoIndex].begin() + len,
-                  buffer.begin());
+        if (!recording[i]) continue;
+
+        recording[i] = false;
+
+        // recBuffer から recordingData に直接コピー
+        std::array<juce::Point<float>, 2048> buffer;
+        int len = processor.recLength[i].load();
+
+        if (len > 0 && len <= 2048)
+        {
+            std::copy(processor.recBuffer[i].begin(),
+                      processor.recBuffer[i].begin() + len,
+                      buffer.begin());
+        }
+
+        recordingLength[i] = len;
+
+        // LfoEngine に Recording データを反映
+        processor.setLfoRecordingData(i, buffer, len);
+
+        // 【修正①】録音完了 → LfoEngine の isWaiting を解除（再生モードへ）
+        processor.isWaitingForRecord[i].store(false, std::memory_order_release);
+        processor.isRecordingDrag[i].store   (false, std::memory_order_release);
+
+        // 【修正②】フェーズを先頭にリセット → 録音した軌跡が必ず先頭から再生される
+        processor.resetLfoPhase(i);
     }
-
-    recordingLength = len;
-
-    // LfoEngine に Recording データを反映
-    processor.setLfoRecordingData(recordingLfoIndex, buffer, len);
-    recordingLfoIndex = -1;
 }
 
 // ────────────────────────────────────────
-// Recording グリッド描画
+// Recording グリッド描画（各LFO独立）
 // ────────────────────────────────────────
 void XYPadComponent::paintRecordingGrid(juce::Graphics& g)
 {
@@ -464,40 +518,62 @@ void XYPadComponent::paintRecordingGrid(juce::Graphics& g)
     const float gridStartX = 20.0f;
     const float gridStartY = 20.0f;
 
-    // グリッドセル描画
-    for (int y = 0; y < GRID_SIZE; ++y)
+    // wave=="6" のLFOをすべて描画（recording フラグ不問）
+    juce::Colour lfoColors[] = {
+        juce::Colour(0xff00D2D3),  // LFO 1
+        juce::Colour(0xffFF9FF3),  // LFO 2
+        juce::Colour(0xffFEECA1)   // LFO 3
+    };
+
+    int firstRecordingIdx = -1;
+
+    for (int lfo = 0; lfo < 3; ++lfo)
     {
-        for (int x = 0; x < GRID_SIZE; ++x)
+        int wave = (int)processor.apvts.getRawParameterValue(
+            "lfo" + juce::String(lfo + 1) + "wave")->load();
+        if (wave != 6) continue;  // wave=="6" (Recording) のみ
+
+        if (firstRecordingIdx < 0) firstRecordingIdx = lfo;
+
+        // グリッドセル描画
+        for (int y = 0; y < GRID_SIZE; ++y)
         {
-            float px = gridStartX + x * cellW;
-            float py = gridStartY + y * cellH;
-
-            // グリッド線
-            g.setColour(juce::Colour(0xff444444));
-            g.drawRect(px, py, cellW, cellH, 0.5f);
-
-            // ピクセル塗りつぶし
-            if (pixelMap[y * GRID_SIZE + x] > 128)
+            for (int x = 0; x < GRID_SIZE; ++x)
             {
-                g.setColour(juce::Colour(0xff00FF00).withAlpha(0.8f));
-                g.fillRect(px + 1.0f, py + 1.0f, cellW - 2.0f, cellH - 2.0f);
+                float px = gridStartX + x * cellW;
+                float py = gridStartY + y * cellH;
+
+                // グリッド線
+                g.setColour(juce::Colour(0xff444444));
+                g.drawRect(px, py, cellW, cellH, 0.5f);
+
+                // ピクセル塗りつぶし（各LFO別色）
+                if (pixelMap[lfo][y * GRID_SIZE + x] > 128)
+                {
+                    g.setColour(lfoColors[lfo].withAlpha(0.8f));
+                    g.fillRect(px + 1.0f, py + 1.0f, cellW - 2.0f, cellH - 2.0f);
+                }
             }
         }
     }
 
     // Recording ステータス表示
-    g.setColour(recording ? juce::Colours::red : juce::Colours::grey);
-    g.setFont(14.0f);
-    g.drawText(
-        recording ? "REC (Recording...)" : "Ready to record",
-        10, 5, 200, 20,
-        juce::Justification::centredLeft);
+    if (firstRecordingIdx >= 0)
+    {
+        bool isRecording = recording[firstRecordingIdx];
+        g.setColour(isRecording ? juce::Colours::red : juce::Colours::grey);
+        g.setFont(14.0f);
+        g.drawText(
+            (isRecording ? "REC: " : "Ready: ") + juce::String("LFO ") + juce::String(firstRecordingIdx + 1),
+            10, 5, 200, 20,
+            juce::Justification::centredLeft);
 
-    // フレーム数表示
-    g.setColour(juce::Colours::white.withAlpha(0.6f));
-    g.setFont(12.0f);
-    g.drawText(
-        "Frames: " + juce::String(recordingLength),
-        (int)w - 120, 5, 110, 20,
-        juce::Justification::centredRight);
+        // フレーム数表示
+        g.setColour(juce::Colours::white.withAlpha(0.6f));
+        g.setFont(12.0f);
+        g.drawText(
+            "Frames: " + juce::String(recordingLength[firstRecordingIdx]),
+            (int)w - 120, 5, 110, 20,
+            juce::Justification::centredRight);
+    }
 }

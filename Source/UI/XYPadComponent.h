@@ -41,11 +41,11 @@ private:
     std::array<juce::Point<float>, 30> trails[3];
     int trailIdx[3] = { 0, 0, 0 };
 
-    // ===== Recording グリッド状態 =====
+    // ===== Recording グリッド状態（各LFOごと独立） =====
     static constexpr int GRID_SIZE = 16;
-    std::array<uint8_t, GRID_SIZE * GRID_SIZE> pixelMap{};
-    bool recording = false;
-    int recordingLength = 0;
-    int recordingLfoIndex = -1;  // 現在 Recording 中の LFO インデックス
-    float lastRecX = 0.0f, lastRecY = 0.0f;  // 前回記録位置（補間用）
+    std::array<uint8_t, GRID_SIZE * GRID_SIZE> pixelMap[3];  // LFO 1, 2, 3 各々
+    bool recording[3] = { false, false, false };  // 各LFOの Recording 状態
+    int recordingLength[3] = { 0, 0, 0 };  // 各LFOのフレーム数
+    float lastRecX[3] = { 0.0f, 0.0f, 0.0f };  // 補間用
+    float lastRecY[3] = { 0.0f, 0.0f, 0.0f };  // 補間用
 };
