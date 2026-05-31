@@ -136,6 +136,75 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
         addAndMakeVisible(lfoTitleLabels[j]);
     }
 
+    // ===== LFO4 タイトルラベル =====
+    lfo4TitleLabel.setText("LFO4 (Rate Modulator)", juce::dontSendNotification);
+    lfo4TitleLabel.setJustificationType(juce::Justification::centredLeft);
+    lfo4TitleLabel.setFont(juce::Font(11.0f, juce::Font::bold));
+    lfo4TitleLabel.setColour(juce::Label::textColourId, juce::Colour(0xffff9900));
+    addAndMakeVisible(lfo4TitleLabel);
+
+    // ===== LFO4 セットアップ =====
+    lfo4.enableButton.setButtonText("LFO4");
+    lfo4.enableButton.setClickingTogglesState(true);
+    addAndMakeVisible(lfo4.enableButton);
+    lfo4.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        audioProcessor.apvts, "lfo4en", lfo4.enableButton);
+
+    lfo4.wave.addItemList({ "Sine", "Triangle", "Square", "Saw", "Random", "Billiard", "SmoothNoise" }, 1);
+    addAndMakeVisible(lfo4.wave);
+    lfo4.wAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.apvts, "lfo4wave", lfo4.wave);
+
+    lfo4.stepMode.setButtonText("Step");
+    lfo4.stepMode.setClickingTogglesState(true);
+    addAndMakeVisible(lfo4.stepMode);
+    lfo4.sAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        audioProcessor.apvts, "lfo4step", lfo4.stepMode);
+
+    lfo4.syncToggle.setButtonText("Sync");
+    lfo4.syncToggle.setClickingTogglesState(true);
+    addAndMakeVisible(lfo4.syncToggle);
+    lfo4.syAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        audioProcessor.apvts, "lfo4sync", lfo4.syncToggle);
+
+    lfo4.rateSync.addItemList({
+        "8/1", "4/1", "2/1", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64",
+        "1/1D", "1/2D", "1/4D", "1/8D", "1/16D", "1/32D" }, 1);
+    addAndMakeVisible(lfo4.rateSync);
+    lfo4.rsAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.apvts, "lfo4rateSync", lfo4.rateSync);
+
+    lfo4.rateFree.setSliderStyle(juce::Slider::LinearHorizontal);
+    lfo4.rateFree.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
+    addAndMakeVisible(lfo4.rateFree);
+    lfo4.rfAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.apvts, "lfo4rateFree", lfo4.rateFree);
+
+    lfo4.depthSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    lfo4.depthSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
+    lfo4.depthSlider.setColour(juce::Slider::thumbColourId, juce::Colour(0xffff9900));
+    addAndMakeVisible(lfo4.depthSlider);
+    lfo4.depthAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.apvts, "lfo4depth", lfo4.depthSlider);
+
+    lfo4.phaseSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    lfo4.phaseSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
+    addAndMakeVisible(lfo4.phaseSlider);
+    lfo4.phaseAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.apvts, "lfo4phase", lfo4.phaseSlider);
+
+    lfo4.fadeSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    lfo4.fadeSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
+    addAndMakeVisible(lfo4.fadeSlider);
+    lfo4.fadeAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.apvts, "lfo4fade", lfo4.fadeSlider);
+
+    lfo4.spreadSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    lfo4.spreadSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
+    addAndMakeVisible(lfo4.spreadSlider);
+    lfo4.spreadAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.apvts, "lfo4spread", lfo4.spreadSlider);
+
     setSize(1000, 700);   // LFO タイトル行分 (+20px)
 }
 
@@ -915,6 +984,42 @@ void QuadMorphFilterAudioProcessorEditor::resized()
         lfos[i].phaseSlider.setBounds(phaseArea.reduced(2, 5));
         lfos[i].fadeSlider.setBounds(fadeArea.reduced(2, 5));
         lfos[i].spreadSlider.setBounds(spreadArea.reduced(2, 5));
+    }
+
+    // ===== LFO4 セクション タイトル行 =====
+    b.removeFromTop(8);
+    lfo4TitleLabel.setBounds(b.removeFromTop(16).reduced(5, 0));
+
+    // ===== LFO4 レイアウト =====
+    {
+        auto r = b.removeFromTop(28).reduced(5, 2);
+
+        lfo4.enableButton.setBounds(r.removeFromLeft(100).reduced(0, 2));
+        lfo4.wave.setBounds(r.removeFromLeft(120).withSizeKeepingCentre(115, 20));
+        lfo4.stepMode.setBounds(r.removeFromLeft(50).reduced(2, 2));
+        lfo4.syncToggle.setBounds(r.removeFromLeft(50).reduced(2, 2));
+
+        auto rateArea   = r.removeFromLeft(r.getWidth() / 6).reduced(2, 5);
+        auto depthArea  = r.removeFromLeft(r.getWidth() / 5).reduced(2, 5);
+        auto phaseArea  = r.removeFromLeft(r.getWidth() / 4).reduced(2, 5);
+        auto fadeArea   = r.removeFromLeft(r.getWidth() / 3).reduced(2, 5);
+        auto spreadArea = r;
+
+        bool isSynced = audioProcessor.apvts.getRawParameterValue("lfo4sync")->load() > 0.5f;
+        if (isSynced) {
+            lfo4.rateSync.setBounds(rateArea.withSizeKeepingCentre(rateArea.getWidth() - 5, 20));
+            lfo4.rateFree.setVisible(false);
+            lfo4.rateSync.setVisible(true);
+        }
+        else {
+            lfo4.rateFree.setBounds(rateArea);
+            lfo4.rateFree.setVisible(true);
+            lfo4.rateSync.setVisible(false);
+        }
+        lfo4.depthSlider.setBounds(depthArea);
+        lfo4.phaseSlider.setBounds(phaseArea);
+        lfo4.fadeSlider.setBounds(fadeArea);
+        lfo4.spreadSlider.setBounds(spreadArea);
     }
 
     b.removeFromTop(10);

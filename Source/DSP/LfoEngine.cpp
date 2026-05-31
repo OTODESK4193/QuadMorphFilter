@@ -84,9 +84,9 @@ void LfoEngine::processSingleLfo(int i,
         states[i].fadeEnv = juce::jmin(1.0f, states[i].fadeEnv + dt / fadeTime);
 
     // ===== レート計算 =====
-    float rate = sync
+    float rate = (sync
         ? (1.0f / getSyncTime((int)apvts.getRawParameterValue(id + "rateSync")->load(), bpm))
-        : apvts.getRawParameterValue(id + "rateFree")->load();
+        : apvts.getRawParameterValue(id + "rateFree")->load()) * lfo4RateModulation;
 
     float actualDt = rate * dt;
 
