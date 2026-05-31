@@ -57,12 +57,15 @@ public:
     }
 
     // ===== フェーズリセット =====
-    // Recording 完了後に呼び出し、次の再生が先頭から始まるようにする
     void resetPhase(int index)
     {
         if (index < 0 || index >= 3) return;
         states[index].phase = 0.0f;
     }
+
+    // ===== Filter Phase Spread =====
+    // Spread>0 のとき mod4[i][f] がフィルターごとに異なる位相の波形値になる
+    bool isSpreadActive(int idx) const { return idx >= 0 && idx < 3 && spreadActive[idx]; }
 
 private:
     // ===== LFO内部状態 =====
@@ -92,6 +95,7 @@ private:
     LfoState             states[3];
     juce::Point<float>   positions[3];
     std::array<float, 4> mod4[3];
+    bool                 spreadActive[3] = { false, false, false };
 
     // ===== Recording バッファ =====
     std::array<juce::Point<float>, 2048> recordingData[3];
@@ -101,6 +105,10 @@ private:
     static float getSyncTime(int selection, double bpm);
     static float applyBound(float v, int mode);
     static float hermite(float p0, float p1, float p2, float p3, float t);
+
+    // Filter Phase Spread 用: 単一位相でのX軸波形値を返す補助関数
+    // 周期的な数式波形にのみ対応（Billiard/SmoothNoise/Recording等のステートフル波形は非対応）
+    static float evaluateWaveX(int wave, float p, float t);
 
     // 1つのLFOを処理する内部メソッド
     void processSingleLfo(int index,

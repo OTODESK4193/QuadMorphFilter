@@ -4,6 +4,7 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <array>
+#include <vector>
 
 // 前方宣言: .cpp で完全なインクルードを行う
 class QuadMorphFilterAudioProcessor;
@@ -43,9 +44,15 @@ private:
 
     // ===== Recording グリッド状態（各LFOごと独立） =====
     static constexpr int GRID_SIZE = 16;
-    std::array<uint8_t, GRID_SIZE * GRID_SIZE> pixelMap[3];  // LFO 1, 2, 3 各々
-    bool recording[3] = { false, false, false };  // 各LFOの Recording 状態
-    int recordingLength[3] = { 0, 0, 0 };  // 各LFOのフレーム数
-    float lastRecX[3] = { 0.0f, 0.0f, 0.0f };  // 補間用
-    float lastRecY[3] = { 0.0f, 0.0f, 0.0f };  // 補間用
+    std::array<uint8_t, GRID_SIZE * GRID_SIZE> pixelMap[3];
+    bool recording[3] = { false, false, false };
+    int recordingLength[3] = { 0, 0, 0 };
+    float lastRecX[3] = { 0.0f, 0.0f, 0.0f };
+    float lastRecY[3] = { 0.0f, 0.0f, 0.0f };
+
+    // Q2: 通過ピクセルの順序リスト（ピクセル中心軌道用）
+    std::vector<juce::Point<int>> pixelSeq[3];
+
+    // Q1: ラウンドロビン録音ターゲット (0=LFO1, 1=LFO2, 2=LFO3)
+    int nextRecordTarget = 0;
 };

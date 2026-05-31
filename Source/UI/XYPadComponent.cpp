@@ -443,40 +443,27 @@ void XYPadComponent::startRecording()
     // 既に録音中なら何もしない
     if (recording[0] || recording[1] || recording[2]) return;
 
-    // ===== 愚直な方法: LFO1 / LFO2 / LFO3 を個別に処理 =====
-    // wave==6 のLFO は全て同時に録音開始（LFO番号に関わらず同じロジック）
-
-    // LFO 1
-    if (juce::roundToInt(processor.apvts.getRawParameterValue("lfo1wave")->load()) == 6)
+    // ===== ラウンドロビン方式: nextRecordTarget から順に wave==6 のLFOを探す =====
+    // クリックのたびに LFO1→LFO2→LFO3→LFO1... とターゲットが切り替わる。
+    // → LFO1 を再録音したいときはクリックを繰り返すだけでよい。
+    for (int attempt = 0; attempt < 3; ++attempt)
     {
-        recording[0] = true;
-        recordingLength[0] = 0;
-        std::fill(pixelMap[0].begin(), pixelMap[0].end(), 0);
-        processor.recLength[0].store(0);
-        processor.isWaitingForRecord[0].store(true,  std::memory_order_release);
-        processor.isRecordingDrag[0].store   (false, std::memory_order_release);
-    }
+        int idx = (nextRecordTarget + attempt) % 3;
+        int wave = juce::roundToInt(processor.apvts.getRawParameterValue(
+            "lfo" + juce::String(idx + 1) + "wave")->load());
 
-    // LFO 2
-    if (juce::roundToInt(processor.apvts.getRawParameterValue("lfo2wave")->load()) == 6)
-    {
-        recording[1] = true;
-        recordingLength[1] = 0;
-        std::fill(pixelMap[1].begin(), pixelMap[1].end(), 0);
-        processor.recLength[1].store(0);
-        processor.isWaitingForRecord[1].store(true,  std::memory_order_release);
-        processor.isRecordingDrag[1].store   (false, std::memory_order_release);
-    }
-
-    // LFO 3
-    if (juce::roundToInt(processor.apvts.getRawParameterValue("lfo3wave")->load()) == 6)
-    {
-        recording[2] = true;
-        recordingLength[2] = 0;
-        std::fill(pixelMap[2].begin(), pixelMap[2].end(), 0);
-        processor.recLength[2].store(0);
-        processor.isWaitingForRecord[2].store(true,  std::memory_order_release);
-        processor.isRecordingDrag[2].store   (false, std::memory_order_release);
+        if (wave == 6)
+        {
+            recording[idx] = true;
+            recordingLength[idx] = 0;
+            pixelSeq[idx].clear();                              // Q2: ピクセル順序をリセット
+            std::fill(pixelMap[idx].begin(), pixelMap[idx].end(), 0);
+            processor.recLength[idx].store(0);
+            processor.isWaitingForRecord[idx].store(true,  std::memory_order_release);
+            processor.isRecordingDrag[idx].store   (false, std::memory_order_release);
+            nextRecordTarget = (idx + 1) % 3;                  // 次回ターゲットを進める
+            return;  // 1クリック = 1LFOのみ録音
+        }
     }
 }
 
@@ -485,20 +472,23 @@ void XYPadComponent::startRecording()
 // ────────────────────────────────────────
 void XYPadComponent::recordPixel(float xNorm, float yNorm)
 {
-    // 全 Recording 中のLFOにピクセルを記録
     for (int i = 0; i < 3; ++i)
     {
         if (!recording[i]) continue;
 
-        // グリッドサイズに正規化（0～1 → 0～15）
-        int gx = (int)(xNorm * GRID_SIZE);
-        int gy = (int)(yNorm * GRID_SIZE);
+        int gx = juce::jlimit(0, GRID_SIZE - 1, (int)(xNorm * GRID_SIZE));
+        int gy = juce::jlimit(0, GRID_SIZE - 1, (int)(yNorm * GRID_SIZE));
 
-        gx = juce::jlimit(0, GRID_SIZE - 1, gx);
-        gy = juce::jlimit(0, GRID_SIZE - 1, gy);
+        pixelMap[i][gy * GRID_SIZE + gx] = 255;
 
-        int idx = gy * GRID_SIZE + gx;
-        pixelMap[i][idx] = 255;
+        // Q2: 通過ピクセルを順序付きで記録（2048上限）
+        // 同じピクセルを連続で通っても重複を除いてよりコンパクトなシーケンスにする
+        if ((int)pixelSeq[i].size() < 2048)
+        {
+            // 直前と同じセルなら重複追加しない（1ピクセル内でのマウス微振動対策）
+            if (pixelSeq[i].empty() || pixelSeq[i].back() != juce::Point<int>{gx, gy})
+                pixelSeq[i].push_back({gx, gy});
+        }
     }
 }
 
@@ -514,15 +504,21 @@ void XYPadComponent::finishRecording()
 
         recording[i] = false;
 
-        // recBuffer から recordingData に直接コピー
+        // ===== Q2: ピクセル中心座標からバッファを構築 =====
+        // 通過ピクセルの中心を正規化座標 [0,1] に変換してLFOデータとして使用。
+        // これにより、Step OFF = Hermite補間でスムーズ、Step ON = ステップ再生 になる。
         std::array<juce::Point<float>, 2048> buffer;
-        int len = processor.recLength[i].load();
-
-        if (len > 0 && len <= 2048)
+        int len = 0;
         {
-            std::copy(processor.recBuffer[i].begin(),
-                      processor.recBuffer[i].begin() + len,
-                      buffer.begin());
+            const auto& seq = pixelSeq[i];
+            const int seqSize = juce::jmin((int)seq.size(), 2048);
+            for (int k = 0; k < seqSize; ++k)
+            {
+                // ピクセルセル中心 → [0, 1] 正規化
+                float cx = (seq[k].x + 0.5f) / (float)GRID_SIZE;
+                float cy = (seq[k].y + 0.5f) / (float)GRID_SIZE;
+                buffer[len++] = { cx, cy };
+            }
         }
 
         recordingLength[i] = len;

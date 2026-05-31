@@ -40,10 +40,10 @@ private:
         juce::TextButton enableButton, stepMode, syncToggle;
         juce::ComboBox   wave, rateSync, boundCombo;
         juce::Slider     rateFree, minSlider, maxSlider;
-        juce::Slider     phaseSlider, fadeSlider;   // ← 新規
+        juce::Slider     phaseSlider, fadeSlider, spreadSlider;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>   eAtt, sAtt, syAtt;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>   rfAtt, minAtt, maxAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>   phaseAtt, fadeAtt;  // ← 新規
+        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>   phaseAtt, fadeAtt, spreadAtt;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> wAtt, rsAtt, bAtt;
     };
     LfoGroup lfos[3];

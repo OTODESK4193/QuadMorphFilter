@@ -56,6 +56,11 @@
             layout.add(std::make_unique<juce::AudioParameterFloat>(
                 juce::ParameterID{ id + "fade", 1 }, lfoNames[i] + " Fade In",
                 juce::NormalisableRange<float>(0.0f, 10.0f, 0.01f, 0.3f), 0.0f));
+            // Filter Phase Spread: A/B/C/D に位相差を付けてフィルターごとの独立した動きを実現
+            // 0°=全フィルター同位相, 90°=各フィルター90°ずつズレ(Sine時に最大独立)
+            layout.add(std::make_unique<juce::AudioParameterFloat>(
+                juce::ParameterID{ id + "spread", 1 }, lfoNames[i] + " Filter Spread",
+                juce::NormalisableRange<float>(0.0f, 360.0f, 0.1f), 0.0f));
         }
 
         juce::StringArray suffixes = { "A", "B", "C", "D" };
@@ -226,15 +231,18 @@
         xyRes    = juce::jlimit(0.1f,  10.0f,    xyRes);
 
         // ===== LFO2/3 モジュレーション量 =====
-        bool lfo1_isRand1 = ((int)apvts.getRawParameterValue("lfo2wave")->load() == 3)
+        bool lfo1_isRand1   = ((int)apvts.getRawParameterValue("lfo2wave")->load() == 3)
             && (apvts.getRawParameterValue("lfo2en")->load() > 0.5f);
-        bool lfo2_isRand1 = ((int)apvts.getRawParameterValue("lfo3wave")->load() == 3)
+        bool lfo2_isRand1   = ((int)apvts.getRawParameterValue("lfo3wave")->load() == 3)
             && (apvts.getRawParameterValue("lfo3en")->load() > 0.5f);
+        // Spread 有効時は mod4 を直接使用（Random1 と同じパス）
+        bool lfo1_useMod4   = lfo1_isRand1 || lfoEngine.isSpreadActive(1);
+        bool lfo2_useMod4   = lfo2_isRand1 || lfoEngine.isSpreadActive(2);
 
         auto cM = MorphEngine::computeModulation(
-            lfoEngine.getPosition(1), lfoEngine.getMod4(1), lfo1_isRand1);
+            lfoEngine.getPosition(1), lfoEngine.getMod4(1), lfo1_useMod4);
         auto rM = MorphEngine::computeModulation(
-            lfoEngine.getPosition(2), lfoEngine.getMod4(2), lfo2_isRand1);
+            lfoEngine.getPosition(2), lfoEngine.getMod4(2), lfo2_useMod4);
 
         // ===== 【新規追加】ここに挿入 =====
     // OSモードを各フィルターに反映

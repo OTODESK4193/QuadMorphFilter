@@ -311,26 +311,55 @@ void LfoEngine::processSingleLfo(int i,
         W_y = std::round(W_y * 4.0f) / 4.0f;
     }
 
+    // ===== Filter Phase Spread の計算 =====
+    // 周期的な波形に対して、フィルター(A=0,B=1,C=2,D=3)ごとに
+    // spread° ずつ位相をずらした値を mod4[i][f] に格納する。
+    // 例: Spread=90°,Sine → A=sin(p), B=sin(p+90°), C=sin(p+180°), D=sin(p+270°)
+    const float spreadDeg   = apvts.getRawParameterValue(id + "spread")->load();
+    const float spreadRad   = spreadDeg * juce::MathConstants<float>::pi / 180.0f;
+    // Spread が有効な周期波形 (ステートフル波形は除外)
+    const bool  canSpread   = (spreadRad > 0.001f) &&
+                              (wave == 0 || wave == 1 || wave == 2 ||
+                               (wave >= 8 && wave <= 15) || wave == 17 || wave == 18);
+
     // ===== 出力への書き込み =====
     if (wave == 3) // Random 1: フィルターごとに独立したランダム値
     {
+        spreadActive[i] = false;
         for (int f = 0; f < 4; ++f)
         {
             float raw = states[i].currentRand1[f]
                 + (states[i].nextRand1[f] - states[i].currentRand1[f]) * t;
             float w = raw * 2.0f - 1.0f;
             if (step) w = std::round(w * 4.0f) / 4.0f;
-            w *= states[i].fadeEnv;  // Fade-in 適用
+            w *= states[i].fadeEnv;
             mod4[i][f] = applyBound(rangeStart + (w + 1.0f) / 2.0f * spread, boundMode);
         }
         positions[i].x = mod4[i][0];
         positions[i].y = mod4[i][1];
     }
+    else if (canSpread)
+    {
+        // Spread 有効: フィルター f ごとに位相を f*spreadRad ずらして評価
+        spreadActive[i] = true;
+        const float basePhaseFull = states[i].phase + (phaseOffsetDeg / 360.0f) * twoPi;
+        for (int f = 0; f < 4; ++f)
+        {
+            float pf = std::fmod(basePhaseFull + f * spreadRad, twoPi);
+            if (pf < 0.0f) pf += twoPi;
+            float tf = pf / twoPi;
+            float wf = evaluateWaveX(wave, pf, tf);
+            wf *= states[i].fadeEnv;
+            if (step) wf = std::round(wf * 4.0f) / 4.0f;
+            mod4[i][f] = applyBound(rangeStart + (wf + 1.0f) / 2.0f * spread, boundMode);
+        }
+        positions[i].x = mod4[i][0];  // メイン表示は F=0 (phase+0)
+        positions[i].y = mod4[i][1];  // Y 表示は F=1 (phase+spread)
+    }
     else
     {
-        // W_x, W_y は [-1, 1] (Fade 適用済み)。rangeStart + spread で出力範囲を決定。
-        // spread が負 (Min > Max 設定) のとき LFO は逆方向に動く。
-        // W = -1 → rangeStart    W = 0 → 中点    W = +1 → rangeStart + spread
+        // Spread 無効 (通常モード)
+        spreadActive[i] = false;
         positions[i].x = applyBound(rangeStart + (W_x + 1.0f) / 2.0f * spread, boundMode);
         positions[i].y = applyBound(rangeStart + (W_y + 1.0f) / 2.0f * spread, boundMode);
         for (int f = 0; f < 4; ++f)
@@ -351,6 +380,39 @@ std::array<float, 4> LfoEngine::getMod4(int index) const
 {
     jassert(index >= 0 && index < 3);
     return mod4[index];
+}
+
+// ==========================================
+// ヘルパー: Filter Phase Spread 用 波形X軸値評価
+// 周期的な数式波形を任意位相 p で評価して返す。
+// ステートフル波形（Billiard, SmoothNoise, Recording 等）は Sine にフォールバック。
+// ==========================================
+float LfoEngine::evaluateWaveX(int wave, float p, float t)
+{
+    const float pi = juce::MathConstants<float>::pi;
+    switch (wave)
+    {
+    case 0:  return std::sin(p);                                         // Sine
+    case 1:  return 1.0f - (p / pi);                                    // SAW
+    case 2:  return (p < pi) ? 1.0f : -1.0f;                           // Pulse
+    case 8:  return 0.5f * std::cos(p) + 0.5f * std::cos(5.2f * p);   // Spirograph
+    case 9:  return (std::sin(p) + std::sin(1.37f * p)                  // Harmonic Swarm
+                  +  std::sin(2.11f * p)) / 3.0f;
+    case 10: { float r = std::cos(2.0f * p) + 2.0f;                    // Torus Knot
+               return r * std::cos(3.0f * p) / 3.0f; }
+    case 11: return std::sin(p * 3.0f);                                 // Lissajous
+    case 12: return t * std::cos(p * 5.0f);                             // Spiral
+    case 13: return 0.6f * std::cos(p) + 0.4f * std::cos(1.5f * p);   // Star
+    case 14: return std::cos(2.5f * p) * std::cos(p);                  // Rose
+    case 15: { float sc = 2.0f / (3.0f - std::cos(2.0f * p));         // Lemniscate
+               return sc * std::cos(p); }
+    case 17: { float rP = std::cos(pi / 6.0f)                           // Polygon
+                   / std::cos(std::fmod(p, pi / 3.0f) - pi / 6.0f);
+               return rP * std::cos(p); }
+    case 18: { float rO = 0.6f + 0.4f * std::sin(p * 7.0f);           // Attractor Orbit
+               return rO * std::cos(p); }
+    default: return std::sin(p);                                         // フォールバック
+    }
 }
 
 // ==========================================

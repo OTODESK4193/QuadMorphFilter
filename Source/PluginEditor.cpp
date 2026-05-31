@@ -748,11 +748,14 @@ void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, ju
     setupSlider(g.maxSlider,  g.maxAtt,   id + "max");
 
     // ===== 新規: Phase Offset / Fade-in =====
-    g.phaseSlider.setTextValueSuffix(juce::String::fromUTF8("\xc2\xb0"));   // "°"
+    g.phaseSlider.setTextValueSuffix(juce::String::fromUTF8("\xc2\xb0"));
     setupSlider(g.phaseSlider, g.phaseAtt, id + "phase");
 
     g.fadeSlider.setTextValueSuffix("s");
     setupSlider(g.fadeSlider, g.fadeAtt, id + "fade");
+
+    g.spreadSlider.setTextValueSuffix(juce::String::fromUTF8("\xc2\xb0"));
+    setupSlider(g.spreadSlider, g.spreadAtt, id + "spread");
 }
 
 void QuadMorphFilterAudioProcessorEditor::resized()
@@ -869,14 +872,15 @@ void QuadMorphFilterAudioProcessorEditor::resized()
         lfos[i].stepMode.setBounds(r.removeFromLeft(50).reduced(2, 2));
         lfos[i].syncToggle.setBounds(r.removeFromLeft(50).reduced(2, 2));
 
-        // 残り幅を Rate / Min / Max / Phase / Fade の 5 等分
-        auto remainW   = r.getWidth();
-        auto slotW     = remainW / 5;
-        auto rateArea  = r.removeFromLeft(slotW);
-        auto minArea   = r.removeFromLeft(slotW);
-        auto maxArea   = r.removeFromLeft(slotW);
-        auto phaseArea = r.removeFromLeft(slotW);
-        auto fadeArea  = r;
+        // 残り幅を Rate / Min / Max / Phase / Fade / Spread の 6 等分
+        auto remainW    = r.getWidth();
+        auto slotW      = remainW / 6;
+        auto rateArea   = r.removeFromLeft(slotW);
+        auto minArea    = r.removeFromLeft(slotW);
+        auto maxArea    = r.removeFromLeft(slotW);
+        auto phaseArea  = r.removeFromLeft(slotW);
+        auto fadeArea   = r.removeFromLeft(slotW);
+        auto spreadArea = r;
 
         bool isSynced = audioProcessor.apvts.getRawParameterValue(
             "lfo" + juce::String(i + 1) + "sync")->load() > 0.5f;
@@ -895,6 +899,7 @@ void QuadMorphFilterAudioProcessorEditor::resized()
         lfos[i].maxSlider.setBounds(maxArea.reduced(2, 5));
         lfos[i].phaseSlider.setBounds(phaseArea.reduced(2, 5));
         lfos[i].fadeSlider.setBounds(fadeArea.reduced(2, 5));
+        lfos[i].spreadSlider.setBounds(spreadArea.reduced(2, 5));
     }
 
     b.removeFromTop(10);
