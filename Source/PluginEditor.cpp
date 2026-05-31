@@ -169,6 +169,7 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
 
     lfo4.syncToggle.setButtonText("Sync");
     lfo4.syncToggle.setClickingTogglesState(true);
+    lfo4.syncToggle.onClick = [this] { resized(); };
     addAndMakeVisible(lfo4.syncToggle);
     lfo4.syAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         audioProcessor.apvts, "lfo4sync", lfo4.syncToggle);
