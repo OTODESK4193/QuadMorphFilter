@@ -120,6 +120,11 @@ private:
     std::array<float, 4> mod4[3];
     bool                 spreadActive[3] = { false, false, false };
 
+    // ===== LFO4: Rate Modulation 専用 =====
+    // LFO1と同じLfoStateを使用、Recording不要
+    LfoState             lfo4State;
+    float                lfo4RateModulation = 1.0f;  // Rate変調係数 (1.0 = no mod)
+
     // ===== Recording バッファ =====
     std::array<juce::Point<float>, 2048> recordingData[3];     // Step モード用 (生ピクセル中心)
     std::array<juce::Point<float>, 2048> smoothedRecData[3];   // Smooth モード用 (事前平滑化済み)
@@ -127,7 +132,6 @@ private:
 
     // ===== ヘルパー =====
     static float getSyncTime(int selection, double bpm);
-    static float applyBound(float v, int mode);
     static float hermite(float p0, float p1, float p2, float p3, float t);
 
     // Filter Phase Spread 用: 単一位相でのX軸波形値を返す補助関数
@@ -142,4 +146,9 @@ private:
         float baseY,
         juce::AudioProcessorValueTreeState& apvts,
         const RecordingContext& rec);
+
+    // LFO4専用処理（Rate Modulation）
+    void processLFO4(float dt,
+        double bpm,
+        juce::AudioProcessorValueTreeState& apvts);
 };

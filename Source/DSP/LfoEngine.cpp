@@ -30,6 +30,9 @@ void LfoEngine::process(float dt,
 {
     for (int i = 0; i < 3; ++i)
         processSingleLfo(i, dt, bpm, baseX, baseY, apvts, rec);
+
+    // ===== LFO4: Rate Modulation 処理 =====
+    processLFO4(dt, bpm, apvts);
 }
 
 // ==========================================
@@ -51,7 +54,6 @@ void LfoEngine::processSingleLfo(int i,
     bool  sync = apvts.getRawParameterValue(id + "sync")->load() > 0.5f;
     float minVal = apvts.getRawParameterValue(id + "min")->load();
     float maxVal = apvts.getRawParameterValue(id + "max")->load();
-    int   boundMode = (int)apvts.getRawParameterValue(id + "bound")->load();
 
     // ===== Min > Max のとき逆方向動作 =====
     // Min=95%, Max=20% → LFO は高い側から低い側へ動く（逆方向）。
@@ -335,7 +337,7 @@ void LfoEngine::processSingleLfo(int i,
             float w = raw * 2.0f - 1.0f;
             if (step) w = std::round(w * 4.0f) / 4.0f;
             w *= states[i].fadeEnv;
-            mod4[i][f] = applyBound(rangeStart + (w + 1.0f) / 2.0f * spread, boundMode);
+            mod4[i][f] = juce::jlimit(0.0f, 1.0f, rangeStart + (w + 1.0f) / 2.0f * spread);
         }
         positions[i].x = mod4[i][0];
         positions[i].y = mod4[i][1];
@@ -353,7 +355,7 @@ void LfoEngine::processSingleLfo(int i,
             float wf = evaluateWaveX(wave, pf, tf);
             wf *= states[i].fadeEnv;
             if (step) wf = std::round(wf * 4.0f) / 4.0f;
-            mod4[i][f] = applyBound(rangeStart + (wf + 1.0f) / 2.0f * spread, boundMode);
+            mod4[i][f] = juce::jlimit(0.0f, 1.0f, rangeStart + (wf + 1.0f) / 2.0f * spread);
         }
         positions[i].x = mod4[i][0];  // メイン表示は F=0 (phase+0)
         positions[i].y = mod4[i][1];  // Y 表示は F=1 (phase+spread)
@@ -362,8 +364,8 @@ void LfoEngine::processSingleLfo(int i,
     {
         // Spread 無効 (通常モード)
         spreadActive[i] = false;
-        positions[i].x = applyBound(rangeStart + (W_x + 1.0f) / 2.0f * spread, boundMode);
-        positions[i].y = applyBound(rangeStart + (W_y + 1.0f) / 2.0f * spread, boundMode);
+        positions[i].x = juce::jlimit(0.0f, 1.0f, rangeStart + (W_x + 1.0f) / 2.0f * spread);
+        positions[i].y = juce::jlimit(0.0f, 1.0f, rangeStart + (W_y + 1.0f) / 2.0f * spread);
         for (int f = 0; f < 4; ++f)
             mod4[i][f] = positions[i].x;
     }
@@ -453,23 +455,65 @@ float LfoEngine::getSyncTime(int selection, double bpm)
 }
 
 // ==========================================
-// ヘルパー: Boundary処理
+// LFO4 専用処理: Rate Modulation
 // ==========================================
-float LfoEngine::applyBound(float v, int mode)
+void LfoEngine::processLFO4(float dt,
+    double bpm,
+    juce::AudioProcessorValueTreeState& apvts)
 {
-    if (mode == 0) // Clip
-        return juce::jlimit(0.0f, 1.0f, v);
+    // ===== パラメータ読み込み =====
+    bool enabled = apvts.getRawParameterValue("lfo4en")->load() > 0.5f;
 
-    if (mode == 1) // Bounce
+    if (!enabled)
     {
-        v = std::fmod(v, 2.0f);
-        if (v < 0.0f) v += 2.0f;
-        if (v > 1.0f) v = 2.0f - v;
-        return v;
+        lfo4RateModulation = 1.0f;  // 変調なし
+        lfo4State.fadeEnv = 0.0f;
+        return;
     }
 
-    // Wrap
-    v = std::fmod(v, 1.0f);
-    if (v < 0.0f) v += 1.0f;
-    return v;
+    int   wave      = (int)apvts.getRawParameterValue("lfo4wave")->load();
+    bool  step      = apvts.getRawParameterValue("lfo4step")->load() > 0.5f;
+    bool  sync      = apvts.getRawParameterValue("lfo4sync")->load() > 0.5f;
+    int   rateSync  = (int)apvts.getRawParameterValue("lfo4rateSync")->load();
+    float rateFree  = apvts.getRawParameterValue("lfo4rateFree")->load();
+    float depth     = apvts.getRawParameterValue("lfo4depth")->load();
+    float phase     = apvts.getRawParameterValue("lfo4phase")->load();
+    float fade      = apvts.getRawParameterValue("lfo4fade")->load();
+    float spread    = apvts.getRawParameterValue("lfo4spread")->load();  // 将来拡張用
+
+    // ===== Rate計算 =====
+    float rate = sync ? getSyncTime(rateSync, bpm) : rateFree;
+
+    // ===== 位相更新 =====
+    const float twoPi = 6.283185307f;
+    lfo4State.phase += rate * dt;
+    while (lfo4State.phase >= twoPi) lfo4State.phase -= twoPi;
+    if (lfo4State.phase < 0.0f) lfo4State.phase += twoPi;
+
+    // ===== Fade エンベロープ計算 =====
+    float targetFade = 1.0f;
+    float fadeCoeff = fade > 0.01f ? 1.0f - std::exp(-dt / fade) : 1.0f;
+    lfo4State.fadeEnv = lfo4State.fadeEnv * (1.0f - fadeCoeff) + targetFade * fadeCoeff;
+
+    // ===== Wave計算（Rate変調用） =====
+    float phaseVal = phase * twoPi / 360.0f;
+    float pX = lfo4State.phase + phaseVal;
+    float tX = pX / twoPi;
+
+    // ノーマライズ
+    tX = tX - std::floor(tX);
+    if (tX < 0.0f) tX += 1.0f;
+
+    float waveX = evaluateWaveX(wave, pX, tX);
+    waveX *= lfo4State.fadeEnv;
+    if (step) waveX = std::round(waveX * 4.0f) / 4.0f;
+
+    // ===== Rate変調係数の計算 =====
+    // waveX: [-1, 1]
+    // depth: [0, 4] オクターブ
+    // 例: waveX=1.0, depth=2 → lfo4RateModulation = 2^2 = 4倍
+    // 例: waveX=-1.0, depth=2 → lfo4RateModulation = 2^(-2) = 0.25倍
+    float modAmount = waveX * depth;
+    lfo4RateModulation = std::pow(2.0f, modAmount);
 }
+

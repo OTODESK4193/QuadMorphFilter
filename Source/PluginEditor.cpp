@@ -125,9 +125,9 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
 
     // ===== LFO タイトルラベル =====
     static const char* const titleTexts[] = {
-        "LFO", "Wave", "Bound", "Step", "Sync", "Rate", "Min", "Max", "Phase", "Fade", "Spread"
+        "LFO", "Wave", "Step", "Sync", "Rate", "Min", "Max", "Phase", "Fade", "Spread"
     };
-    for (int j = 0; j < 11; ++j)
+    for (int j = 0; j < 10; ++j)
     {
         lfoTitleLabels[j].setText(titleTexts[j], juce::dontSendNotification);
         lfoTitleLabels[j].setJustificationType(juce::Justification::centred);
@@ -708,11 +708,6 @@ void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, ju
     g.wAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         audioProcessor.apvts, id + "wave", g.wave);
 
-    g.boundCombo.addItemList({ "Clip", "Bounce", "Wrap" }, 1);
-    addAndMakeVisible(g.boundCombo);
-    g.bAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, id + "bound", g.boundCombo);
-
     g.stepMode.setButtonText("Step");
     g.stepMode.setClickingTogglesState(true);
     g.stepMode.setColour(juce::TextButton::textColourOnId, lfoCols[idx - 1]);
@@ -870,18 +865,17 @@ void QuadMorphFilterAudioProcessorEditor::resized()
         // LFO コントロール行と同じ幅配分でラベルを配置
         lfoTitleLabels[0].setBounds(tr.removeFromLeft(100));  // LFO
         lfoTitleLabels[1].setBounds(tr.removeFromLeft(120));  // Wave
-        lfoTitleLabels[2].setBounds(tr.removeFromLeft(70));   // Bound
-        lfoTitleLabels[3].setBounds(tr.removeFromLeft(50));   // Step
-        lfoTitleLabels[4].setBounds(tr.removeFromLeft(50));   // Sync
+        lfoTitleLabels[2].setBounds(tr.removeFromLeft(50));   // Step
+        lfoTitleLabels[3].setBounds(tr.removeFromLeft(50));   // Sync
 
         auto tw = tr.getWidth();
         auto ts = tw / 6;
-        lfoTitleLabels[5].setBounds(tr.removeFromLeft(ts));   // Rate
-        lfoTitleLabels[6].setBounds(tr.removeFromLeft(ts));   // Min
-        lfoTitleLabels[7].setBounds(tr.removeFromLeft(ts));   // Max
-        lfoTitleLabels[8].setBounds(tr.removeFromLeft(ts));   // Phase
-        lfoTitleLabels[9].setBounds(tr.removeFromLeft(ts));   // Fade
-        lfoTitleLabels[10].setBounds(tr);                     // Spread
+        lfoTitleLabels[4].setBounds(tr.removeFromLeft(ts));   // Rate
+        lfoTitleLabels[5].setBounds(tr.removeFromLeft(ts));   // Min
+        lfoTitleLabels[6].setBounds(tr.removeFromLeft(ts));   // Max
+        lfoTitleLabels[7].setBounds(tr.removeFromLeft(ts));   // Phase
+        lfoTitleLabels[8].setBounds(tr.removeFromLeft(ts));   // Fade
+        lfoTitleLabels[9].setBounds(tr);                      // Spread
     }
 
     for (int i = 0; i < 3; ++i)
@@ -890,7 +884,6 @@ void QuadMorphFilterAudioProcessorEditor::resized()
 
         lfos[i].enableButton.setBounds(r.removeFromLeft(100).reduced(0, 2));
         lfos[i].wave.setBounds(r.removeFromLeft(120).withSizeKeepingCentre(115, 20));
-        lfos[i].boundCombo.setBounds(r.removeFromLeft(70).withSizeKeepingCentre(65, 20));
         lfos[i].stepMode.setBounds(r.removeFromLeft(50).reduced(2, 2));
         lfos[i].syncToggle.setBounds(r.removeFromLeft(50).reduced(2, 2));
 

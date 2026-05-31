@@ -34,7 +34,6 @@
             "1/1D", "1/2D", "1/4D", "1/8D", "1/16D", "1/32D",
             "1/1T", "1/2T", "1/4T", "1/8T", "1/16T", "1/32T"
         };
-        juce::StringArray bounds = { "Clip", "Bounce", "Wrap" };
         juce::StringArray lfoNames = { "Morph", "Cutoff", "Reso" };
 
         for (int i = 0; i < 3; ++i)
@@ -48,7 +47,6 @@
             layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "rateFree", 1 }, lfoNames[i] + " Rate Free", juce::NormalisableRange<float>(0.01f, 20.0f, 0.001f, 0.2f), 1.0f));
             layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "min",      1 }, lfoNames[i] + " Min", 0.0f, 1.0f, 0.0f));
             layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "max",      1 }, lfoNames[i] + " Max", 0.0f, 1.0f, 1.0f));
-            layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ id + "bound",    1 }, lfoNames[i] + " Boundary", bounds, 0));
             // ===== 新規追加 =====
             layout.add(std::make_unique<juce::AudioParameterFloat>(
                 juce::ParameterID{ id + "phase", 1 }, lfoNames[i] + " Phase",
@@ -61,6 +59,22 @@
             layout.add(std::make_unique<juce::AudioParameterFloat>(
                 juce::ParameterID{ id + "spread", 1 }, lfoNames[i] + " Filter Spread",
                 juce::NormalisableRange<float>(0.0f, 360.0f, 0.1f), 0.0f));
+        }
+
+        // ===== LFO4: Rate Modulation 専用 =====
+        // LFO1と同じアルゴリズムだが、Recording不要
+        {
+            juce::String id = "lfo4";
+            layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "en", 1 }, "LFO4 Enable", false));
+            layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ id + "wave", 1 }, "LFO4 Wave", waveTypes, 0));
+            layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "step", 1 }, "LFO4 Step Mode", false));
+            layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "sync", 1 }, "LFO4 Sync", true));
+            layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ id + "rateSync", 1 }, "LFO4 Rate Sync", syncRates, 5));
+            layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "rateFree", 1 }, "LFO4 Rate Free", juce::NormalisableRange<float>(0.01f, 20.0f, 0.001f, 0.2f), 1.0f));
+            layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "depth", 1 }, "LFO4 Depth", juce::NormalisableRange<float>(0.0f, 4.0f, 0.01f, 0.5f), 0.0f));
+            layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "phase", 1 }, "LFO4 Phase", juce::NormalisableRange<float>(0.0f, 360.0f, 0.1f), 0.0f));
+            layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "fade", 1 }, "LFO4 Fade", juce::NormalisableRange<float>(0.0f, 10.0f, 0.01f, 0.3f), 0.0f));
+            layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "spread", 1 }, "LFO4 Filter Spread", juce::NormalisableRange<float>(0.0f, 360.0f, 0.1f), 0.0f));
         }
 
         juce::StringArray suffixes = { "A", "B", "C", "D" };

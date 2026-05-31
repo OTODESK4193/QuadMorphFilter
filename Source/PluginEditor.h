@@ -38,7 +38,7 @@ private:
 
     struct LfoGroup {
         juce::TextButton enableButton, stepMode, syncToggle;
-        juce::ComboBox   wave, rateSync, boundCombo;
+        juce::ComboBox   wave, rateSync;
         juce::Slider     rateFree, minSlider, maxSlider;
         juce::Slider     phaseSlider, fadeSlider, spreadSlider;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>   eAtt, sAtt, syAtt;
@@ -77,8 +77,8 @@ private:
     juce::TextButton lfoResBtn[4];
 
     // ===== LFO セクションタイトル行 =====
-    // LFO | Wave | Bound | Step | Sync | Rate | Min | Max | Phase | Fade | Spread
-    juce::Label lfoTitleLabels[11];
+    // LFO | Wave | Step | Sync | Rate | Min | Max | Phase | Fade | Spread
+    juce::Label lfoTitleLabels[10];
 
     // ===== 既存コード: private セクション末尾 =====
     void setupFilterGroup(FilterGroup& g, juce::String s, juce::String name);
