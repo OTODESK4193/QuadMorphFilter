@@ -71,8 +71,7 @@ void FilterVisualizer::paint(juce::Graphics& g)
         };
     std::array<float, 4> cM = getM(cPos, lfo1Mod4, lfo1_isRand1);
     std::array<float, 4> rM = getM(rPos, lfo2Mod4, lfo2_isRand1);
-    // ----- XYモード情報（ループ外で1回計算）-----
-    int   xyMode = (int)processor.apvts.getRawParameterValue("xyMode")->load();
+    // ----- Morphモード（LFO1位置）-----
     auto  mPos = processor.getLfoPos(0);
 
     // ===== cutoffAlgo 対応: processBlock / XYPadComponent と同一計算 =====
@@ -104,42 +103,30 @@ void FilterVisualizer::paint(juce::Graphics& g)
     bool visEnB = processor.apvts.getRawParameterValue("enableB")->load() > 0.5f;
     bool visEnC = processor.apvts.getRawParameterValue("enableC")->load() > 0.5f;
     bool visEnD = processor.apvts.getRawParameterValue("enableD")->load() > 0.5f;
+    // ===== morphBlend 対応: processBlock と同一アルゴリズムを使用 =====
     float wA, wB, wC, wD;
-    if (xyMode == 1)
+    const int morphBlend = (int)processor.apvts.getRawParameterValue("morphBlend")->load();
+    std::array<float, 4> wMixArr;
+    switch (morphBlend)
     {
-        int numActive = (visEnA ? 1 : 0) + (visEnB ? 1 : 0) + (visEnC ? 1 : 0) + (visEnD ? 1 : 0);
-        float w = (numActive > 0) ? (1.0f / std::sqrt((float)numActive)) : 0.0f;
-        wA = visEnA ? w : 0.0f;
-        wB = visEnB ? w : 0.0f;
-        wC = visEnC ? w : 0.0f;
-        wD = visEnD ? w : 0.0f;
+        case 1:  wMixArr = MorphEngine::computeLinearWMix    (mPos.x, mPos.y); break;
+        case 2:  wMixArr = MorphEngine::computeSmoothstepWMix(mPos.x, mPos.y); break;
+        case 3:  wMixArr = MorphEngine::computeRadialWMix    (mPos.x, mPos.y); break;
+        default: wMixArr = MorphEngine::computeEqualPowerWMix(mPos.x, mPos.y); break;
     }
-    else
+    wA = wMixArr[0]; wB = wMixArr[1]; wC = wMixArr[2]; wD = wMixArr[3];
+    float sumSq = 0.0f;
+    if (visEnA) sumSq += wA * wA;
+    if (visEnB) sumSq += wB * wB;
+    if (visEnC) sumSq += wC * wC;
+    if (visEnD) sumSq += wD * wD;
+    if (sumSq > 1e-8f)
     {
-        // ===== morphBlend 対応: processBlock と同一アルゴリズムを使用 =====
-        const int morphBlend = (int)processor.apvts.getRawParameterValue("morphBlend")->load();
-        std::array<float, 4> wMixArr;
-        switch (morphBlend)
-        {
-            case 1:  wMixArr = MorphEngine::computeLinearWMix    (mPos.x, mPos.y); break;
-            case 2:  wMixArr = MorphEngine::computeSmoothstepWMix(mPos.x, mPos.y); break;
-            case 3:  wMixArr = MorphEngine::computeRadialWMix    (mPos.x, mPos.y); break;
-            default: wMixArr = MorphEngine::computeEqualPowerWMix(mPos.x, mPos.y); break;
-        }
-        wA = wMixArr[0]; wB = wMixArr[1]; wC = wMixArr[2]; wD = wMixArr[3];
-        float sumSq = 0.0f;
-        if (visEnA) sumSq += wA * wA;
-        if (visEnB) sumSq += wB * wB;
-        if (visEnC) sumSq += wC * wC;
-        if (visEnD) sumSq += wD * wD;
-        if (sumSq > 1e-8f)
-        {
-            float norm = 1.0f / std::sqrt(sumSq);
-            if (visEnA) wA *= norm;
-            if (visEnB) wB *= norm;
-            if (visEnC) wC *= norm;
-            if (visEnD) wD *= norm;
-        }
+        float norm = 1.0f / std::sqrt(sumSq);
+        if (visEnA) wA *= norm;
+        if (visEnB) wB *= norm;
+        if (visEnC) wC *= norm;
+        if (visEnD) wD *= norm;
     }
     // ----- 周波数応答の計算 -----
     int wInt = (int)w;
@@ -163,22 +150,11 @@ void FilterVisualizer::paint(juce::Graphics& g)
                 const int  cutModIdx = cutSrc > 0 ? cutSrc - 1 : 0;
                 const int  resModIdx = resSrc > 0 ? resSrc - 1 : 0;
                 float fc, res;
-                if (xyMode == 1)
-                {
-                    float baseCutoff = lfoCutOn ? xyCutoff
-                        : processor.apvts.getRawParameterValue("cutoff" + s)->load();
-                    float baseRes = lfoResOn ? xyRes
-                        : processor.apvts.getRawParameterValue("res" + s)->load();
-                    fc  = lfoCutOn ? baseCutoff * std::pow(2.0f, 4.0f * cM[cutModIdx]) : baseCutoff;
-                    res = lfoResOn ? baseRes    * std::pow(2.0f, 2.0f * rM[resModIdx]) : baseRes;
-                }
-                else
-                {
-                    float baseCutoff = processor.apvts.getRawParameterValue("cutoff" + s)->load();
-                    float baseRes = processor.apvts.getRawParameterValue("res" + s)->load();
-                    fc  = lfoCutOn ? baseCutoff * std::pow(2.0f, 4.0f * cM[cutModIdx]) : baseCutoff;
-                    res = lfoResOn ? baseRes    * std::pow(2.0f, 2.0f * rM[resModIdx]) : baseRes;
-                }
+                // Morphモード
+                float baseCutoff = processor.apvts.getRawParameterValue("cutoff" + s)->load();
+                float baseRes = processor.apvts.getRawParameterValue("res" + s)->load();
+                fc  = lfoCutOn ? baseCutoff * std::pow(2.0f, 4.0f * cM[cutModIdx]) : baseCutoff;
+                res = lfoResOn ? baseRes    * std::pow(2.0f, 2.0f * rM[resModIdx]) : baseRes;
                 fc = juce::jlimit(20.0f, 20000.0f, fc);
                 res = juce::jlimit(0.1f, 10.0f, res);
                 int modelIdx = juce::roundToInt(processor.apvts.getRawParameterValue("model" + s)->load());

@@ -85,10 +85,6 @@
             layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "res" + s, 1 }, "Res / Ctrl " + s, 0.1f, 10.0f, 0.707f));
         }
 
-        layout.add(std::make_unique<juce::AudioParameterChoice>(
-            juce::ParameterID{ "xyMode", 1 }, "XY Mode",
-            juce::StringArray{ "Morph", "Cutoff" }, 0));
-
         // ===== 【新規追加】ここに挿入 =====
         layout.add(std::make_unique<juce::AudioParameterChoice>(
             juce::ParameterID{ "osMode", 1 }, "OS Quality",
@@ -190,7 +186,6 @@
         };
         lfoEngine.process(dt, bpm, baseX, baseY, apvts, recCtx);
 
-        int   xyMode = (int)apvts.getRawParameterValue("xyMode")->load();
         float posX = lfoEngine.getPosition(0).x;
         float posY = lfoEngine.getPosition(0).y;
 
@@ -283,18 +278,9 @@
                 const int  resModIdx = resSrc > 0 ? resSrc - 1 : 0;
 
                 float baseCutoff, baseRes;
-                if (xyMode == 1) // Cutoffモード
-                {
-                    baseCutoff = lfoCutOn ? xyCutoff
-                        : apvts.getRawParameterValue("cutoff" + s)->load();
-                    baseRes = lfoResOn ? xyRes
-                        : apvts.getRawParameterValue("res" + s)->load();
-                }
-                else // Morphモード
-                {
-                    baseCutoff = apvts.getRawParameterValue("cutoff" + s)->load();
-                    baseRes = apvts.getRawParameterValue("res" + s)->load();
-                }
+                // Morphモード: 個別スライダーから取得
+                baseCutoff = apvts.getRawParameterValue("cutoff" + s)->load();
+                baseRes = apvts.getRawParameterValue("res" + s)->load();
 
                 float fc  = lfoCutOn ? MorphEngine::applyFrequencyMod(baseCutoff, cM[cutModIdx]) : baseCutoff;
                 float res = lfoResOn ? MorphEngine::applyResonanceMod(baseRes,    rM[resModIdx]) : baseRes;
@@ -335,52 +321,41 @@
         bool enD = apvts.getRawParameterValue("enableD")->load() > 0.5f;
 
         // ===== wMix 計算 =====
+        // Morphモード: morphBlend パラメータでブレンドアルゴリズムを切替
         std::array<float, 4> wMix;
+        bool lfo0_isRand1 = ((int)apvts.getRawParameterValue("lfo1wave")->load() == 3)
+            && (apvts.getRawParameterValue("lfo1en")->load() > 0.5f);
 
-        if (xyMode == 1)
+        if (lfo0_isRand1)
         {
-            // Cutoffモード: 有効フィルター全て等パワー（Morphしない）
-            int numActive = (enA ? 1 : 0) + (enB ? 1 : 0) + (enC ? 1 : 0) + (enD ? 1 : 0);
-            float w = (numActive > 0) ? (1.0f / std::sqrt((float)numActive)) : 0.0f;
-            wMix = { enA ? w : 0.0f, enB ? w : 0.0f, enC ? w : 0.0f, enD ? w : 0.0f };
+            wMix = lfoEngine.getMod4(0);
         }
         else
         {
-            // Morphモード: morphBlend パラメータでブレンドアルゴリズムを切替
-            bool lfo0_isRand1 = ((int)apvts.getRawParameterValue("lfo1wave")->load() == 3)
-                && (apvts.getRawParameterValue("lfo1en")->load() > 0.5f);
-
-            if (lfo0_isRand1)
+            const int morphBlend = (int)apvts.getRawParameterValue("morphBlend")->load();
+            switch (morphBlend)
             {
-                wMix = lfoEngine.getMod4(0);
+                case 1:  wMix = MorphEngine::computeLinearWMix    (posX, posY); break;
+                case 2:  wMix = MorphEngine::computeSmoothstepWMix(posX, posY); break;
+                case 3:  wMix = MorphEngine::computeRadialWMix    (posX, posY); break;
+                default: wMix = MorphEngine::computeEqualPowerWMix(posX, posY); break;
             }
-            else
-            {
-                const int morphBlend = (int)apvts.getRawParameterValue("morphBlend")->load();
-                switch (morphBlend)
-                {
-                    case 1:  wMix = MorphEngine::computeLinearWMix    (posX, posY); break;
-                    case 2:  wMix = MorphEngine::computeSmoothstepWMix(posX, posY); break;
-                    case 3:  wMix = MorphEngine::computeRadialWMix    (posX, posY); break;
-                    default: wMix = MorphEngine::computeEqualPowerWMix(posX, posY); break;
-                }
-            }
+        }
 
-            // 有効フィルターのみで正規化
-            float sumSq = 0.0f;
-            if (enA) sumSq += wMix[0] * wMix[0];
-            if (enB) sumSq += wMix[1] * wMix[1];
-            if (enC) sumSq += wMix[2] * wMix[2];
-            if (enD) sumSq += wMix[3] * wMix[3];
+        // 有効フィルターのみで正規化
+        float sumSq = 0.0f;
+        if (enA) sumSq += wMix[0] * wMix[0];
+        if (enB) sumSq += wMix[1] * wMix[1];
+        if (enC) sumSq += wMix[2] * wMix[2];
+        if (enD) sumSq += wMix[3] * wMix[3];
 
-            if (sumSq > 1e-8f)
-            {
-                float norm = 1.0f / std::sqrt(sumSq);
-                if (enA) wMix[0] *= norm;
-                if (enB) wMix[1] *= norm;
-                if (enC) wMix[2] *= norm;
-                if (enD) wMix[3] *= norm;
-            }
+        if (sumSq > 1e-8f)
+        {
+            float norm = 1.0f / std::sqrt(sumSq);
+            if (enA) wMix[0] *= norm;
+            if (enB) wMix[1] *= norm;
+            if (enC) wMix[2] *= norm;
+            if (enD) wMix[3] *= norm;
         }
 
         int modelA = (int)apvts.getRawParameterValue("modelA")->load();

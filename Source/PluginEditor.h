@@ -52,11 +52,6 @@ private:
     juce::Slider masterGainSlider, dryWetSlider, ceilingSlider;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mgAtt, dwAtt, clAtt;
 
-    // ===== 【新規】XY モード選択 =====
-    juce::Label    xyModeLabel;
-    juce::ComboBox xyModeCombo;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> xyModeAtt;
-
     // ===== 【新規追加】ここに挿入 =====
     juce::Label    osModeLabel;
     juce::ComboBox osModeCombo;

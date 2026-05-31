@@ -41,14 +41,6 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
     setupMaster(dryWetLabel, dryWetSlider, "Dry/Wet", "dryWet", dwAtt);
     setupMaster(ceilingLabel, ceilingSlider, "Limit Ceil", "limiterCeiling", clAtt);
 
-    xyModeLabel.setText("Mode", juce::dontSendNotification);
-    xyModeLabel.setJustificationType(juce::Justification::centredRight);
-    addAndMakeVisible(xyModeLabel);
-    xyModeCombo.addItemList({ "Morph", "Cutoff" }, 1);
-    addAndMakeVisible(xyModeCombo);
-    xyModeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "xyMode", xyModeCombo);
-
     osModeLabel.setText("OS", juce::dontSendNotification);
     osModeLabel.setJustificationType(juce::Justification::centredRight);
     addAndMakeVisible(osModeLabel);
@@ -795,12 +787,8 @@ void QuadMorphFilterAudioProcessorEditor::resized()
 
         {
             auto area = juce::Rectangle<int>(rightX, ctrlY, rightW, rowH).reduced(4, 1);
-            auto modeHalf = area.removeFromLeft(area.getWidth() / 2 - 4);
-            xyModeLabel.setBounds(modeHalf.removeFromLeft(42).reduced(0, 1));
-            xyModeCombo.setBounds(modeHalf);
-            area.removeFromLeft(8);
             osModeLabel.setBounds(area.removeFromLeft(24).reduced(0, 1));
-            osModeCombo.setBounds(area);
+            osModeCombo.setBounds(area.removeFromLeft(60));
             ctrlY += rowH + gap;
         }
 

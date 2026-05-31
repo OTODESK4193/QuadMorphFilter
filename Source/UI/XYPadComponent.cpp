@@ -78,94 +78,6 @@ void XYPadComponent::timerCallback()
         trailIdx[i] = (trailIdx[i] + 1) % 30;
     }
 
-    // ===== Cutoffモード: XY位置をスライダーに書き戻し (UI同期) =====
-    int xyMode = (int)processor.apvts.getRawParameterValue("xyMode")->load();
-    if (xyMode == 1)
-    {
-        auto mPos = processor.getLfoPos(0);
-        const int cutoffAlgo = (int)processor.apvts.getRawParameterValue("cutoffAlgo")->load();
-
-        float xyCutoff, xyRes;
-        if (cutoffAlgo == 1)
-        {
-            const float devX = (mPos.x - 0.5f) * 2.0f;
-            const float devY = (0.5f - mPos.y) * 2.0f;
-            xyCutoff = 632.0f * std::pow(2.0f, devX * 4.0f);
-            xyRes    = 1.0f   * std::pow(2.0f, devY * 2.0f);
-        }
-        else if (cutoffAlgo == 2)
-        {
-            const float devX = (mPos.x - 0.5f) * 2.0f;
-            const float devY = (0.5f - mPos.y) * 2.0f;
-            xyCutoff = 632.0f * std::pow(2.0f, (devX >= 0.0f ? devX * 5.0f : devX * 3.0f));
-            xyRes    = 1.0f   * std::pow(2.0f, (devY >= 0.0f ? devY * 3.0f : devY * 2.0f));
-        }
-        else
-        {
-            xyCutoff = 20.0f * std::pow(1000.0f, mPos.x);
-            xyRes    = 0.1f + (1.0f - mPos.y) * 9.9f;
-        }
-        xyCutoff = juce::jlimit(20.0f, 20000.0f, xyCutoff);
-        xyRes    = juce::jlimit(0.1f,  10.0f,    xyRes);
-
-        // ===== LFO2/3 変調値をフィルターごとに計算 =====
-        // LFO2 → Cutoff 変調、LFO3 → Reso 変調
-        // Cutoffモードでは xyCutoff/xyRes を基準に LFO2/3 が ±変調するため、
-        // スライダーにはフィルターごとの実際の変調済み値を表示する。
-        // (A=+X, C=−X に設定していれば A と C で値が異なって見える)
-        auto lfo2Pos     = processor.getLfoPos(1);
-        auto lfo2Mod4    = processor.getLfoMod4(1);
-        bool lfo2En      = processor.apvts.getRawParameterValue("lfo2en")->load() > 0.5f;
-        bool lfo2IsRand1 = (juce::roundToInt(processor.apvts.getRawParameterValue("lfo2wave")->load()) == 3) && lfo2En;
-        auto cM          = MorphEngine::computeModulation(lfo2Pos, lfo2Mod4, lfo2IsRand1);
-
-        auto lfo3Pos     = processor.getLfoPos(2);
-        auto lfo3Mod4    = processor.getLfoMod4(2);
-        bool lfo3En      = processor.apvts.getRawParameterValue("lfo3en")->load() > 0.5f;
-        bool lfo3IsRand1 = (juce::roundToInt(processor.apvts.getRawParameterValue("lfo3wave")->load()) == 3) && lfo3En;
-        auto rM          = MorphEngine::computeModulation(lfo3Pos, lfo3Mod4, lfo3IsRand1);
-
-        const juce::String suffixes[4] = { "A", "B", "C", "D" };
-        for (const auto& s : suffixes)
-        {
-            const int cutSrc = juce::roundToInt(
-                processor.apvts.getRawParameterValue("lfoCutSrc" + s)->load());
-            if (cutSrc > 0)
-            {
-                // フィルターごとの変調ソースで実際のカットオフを計算
-                const int cutModIdx = cutSrc - 1;  // 0=+X,1=+Y,2=-X,3=-Y
-                float actualCutoff  = lfo2En
-                    ? MorphEngine::applyFrequencyMod(xyCutoff, cM[cutModIdx])
-                    : xyCutoff;
-                actualCutoff = juce::jlimit(20.0f, 20000.0f, actualCutoff);
-
-                if (auto* p = dynamic_cast<juce::AudioParameterFloat*>(
-                        processor.apvts.getParameter("cutoff" + s)))
-                {
-                    if (std::abs(p->get() - actualCutoff) > 0.5f)
-                        *p = juce::jlimit(p->range.start, p->range.end, actualCutoff);
-                }
-            }
-
-            const int resSrc = juce::roundToInt(
-                processor.apvts.getRawParameterValue("lfoResSrc" + s)->load());
-            if (resSrc > 0)
-            {
-                const int resModIdx = resSrc - 1;
-                float actualRes     = lfo3En
-                    ? MorphEngine::applyResonanceMod(xyRes, rM[resModIdx])
-                    : xyRes;
-                actualRes = juce::jlimit(0.1f, 10.0f, actualRes);
-
-                if (auto* p = dynamic_cast<juce::AudioParameterFloat*>(
-                        processor.apvts.getParameter("res" + s)))
-                {
-                    if (std::abs(p->get() - actualRes) > 0.01f)
-                        *p = juce::jlimit(p->range.start, p->range.end, actualRes);
-                }
-            }
-        }
-    }
 
     repaint();
 }
@@ -184,26 +96,13 @@ void XYPadComponent::paint(juce::Graphics& g)
     g.setColour(juce::Colour(0xff444444));
     g.drawRoundedRectangle(b, 8.0f, 1.5f);
 
-    int xyMode = (int)processor.apvts.getRawParameterValue("xyMode")->load();
-
     // コーナーラベル (中心がコーナー 100% 点)
-    g.setColour(juce::Colours::white.withAlpha(xyMode == 1 ? 0.1f : 0.3f));
+    g.setColour(juce::Colours::white.withAlpha(0.3f));
     g.setFont(14.0f);
     g.drawText("A", 10,         10,              20, 20, juce::Justification::centred);
     g.drawText("B", (int)w-30,  10,              20, 20, juce::Justification::centred);
     g.drawText("C", 10,         (int)h-30,       20, 20, juce::Justification::centred);
     g.drawText("D", (int)w-30,  (int)h-30,       20, 20, juce::Justification::centred);
-
-    // Cutoffモード: 軸ラベル
-    if (xyMode == 1)
-    {
-        g.setColour(juce::Colours::white.withAlpha(0.6f));
-        g.setFont(10.0f);
-        g.drawText("Cutoff ->",
-            (int)w/2 - 35, (int)h - 15, 70, 12, juce::Justification::centred);
-        g.drawText("^ Reso",
-            3, (int)h/2 - 25, 40, 12, juce::Justification::centredLeft);
-    }
 
     // ===== Recording グリッド描画（wave=="6" かつ recording[i]==true のLFOのみ） =====
     // recording[i]==true は mouseDown で設定され、mouseUp/finishRecording() で false になる
@@ -229,7 +128,7 @@ void XYPadComponent::paint(juce::Graphics& g)
     // LFO トレイルと現在位置 (toPix で正規化 → ピクセル変換)
     juce::Colour colors[] = {
         juce::Colour(0xff00bcd4),
-        juce::Colour(0xff4dd0e1),
+        juce::Colour(0xffff66dd),
         juce::Colour(0xffff9900)
     };
 
