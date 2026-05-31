@@ -95,7 +95,9 @@ private:
     // ===== LFO セクションタイトル行 =====
     // LFO | Wave | Step | Sync | Rate | Min | Max | Phase | Fade | Spread
     juce::Label lfoTitleLabels[10];
-    juce::Label lfo4TitleLabel;  // LFO4 セクションタイトル
+    // ===== LFO4 パラメータラベル =====
+    // LFO4 | Wave | Step | Sync | Rate | Depth | Phase | Fade | Spread
+    juce::Label lfo4ParamLabels[9];
 
     // ===== 既存コード: private セクション末尾 =====
     void setupFilterGroup(FilterGroup& g, juce::String s, juce::String name);

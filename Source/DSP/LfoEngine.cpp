@@ -28,11 +28,23 @@ void LfoEngine::process(float dt,
     juce::AudioProcessorValueTreeState& apvts,
     const RecordingContext& rec)
 {
-    for (int i = 0; i < 3; ++i)
-        processSingleLfo(i, dt, bpm, baseX, baseY, apvts, rec);
-
     // ===== LFO4: Rate Modulation 処理 =====
     processLFO4(dt, bpm, apvts);
+
+    // ===== LFO4 アサイン先チェック =====
+    // アサイン先でない場合は lfo4RateModulation を無視（1.0 として動作）
+    bool assignLFO1 = apvts.getRawParameterValue("lfo4assignA")->load() > 0.5f;
+    bool assignLFO2 = apvts.getRawParameterValue("lfo4assignB")->load() > 0.5f;
+    bool assignLFO3 = apvts.getRawParameterValue("lfo4assignC")->load() > 0.5f;
+
+    for (int i = 0; i < 3; ++i)
+    {
+        // アサイン状態に応じて、処理前に lfo4RateModulation を設定
+        bool isAssigned = (i == 0 && assignLFO1) || (i == 1 && assignLFO2) || (i == 2 && assignLFO3);
+        lfo4RateModulationActive[i] = isAssigned;
+
+        processSingleLfo(i, dt, bpm, baseX, baseY, apvts, rec);
+    }
 }
 
 // ==========================================
@@ -84,9 +96,11 @@ void LfoEngine::processSingleLfo(int i,
         states[i].fadeEnv = juce::jmin(1.0f, states[i].fadeEnv + dt / fadeTime);
 
     // ===== レート計算 =====
+    // LFO4 Rate Modulation をアサイン先フラグに基づいて適用
+    float rateModulation = lfo4RateModulationActive[i] ? lfo4RateModulation : 1.0f;
     float rate = (sync
         ? (1.0f / getSyncTime((int)apvts.getRawParameterValue(id + "rateSync")->load(), bpm))
-        : apvts.getRawParameterValue(id + "rateFree")->load()) * lfo4RateModulation;
+        : apvts.getRawParameterValue(id + "rateFree")->load()) * rateModulation;
 
     float actualDt = rate * dt;
 

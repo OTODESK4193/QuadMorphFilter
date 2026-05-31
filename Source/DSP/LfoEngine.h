@@ -124,6 +124,7 @@ private:
     // LFO1と同じLfoStateを使用、Recording不要
     LfoState             lfo4State;
     float                lfo4RateModulation = 1.0f;  // Rate変調係数 (1.0 = no mod)
+    bool                 lfo4RateModulationActive[3] = { false, false, false };  // アサイン先フラグ
 
     // ===== Recording バッファ =====
     std::array<juce::Point<float>, 2048> recordingData[3];     // Step モード用 (生ピクセル中心)
