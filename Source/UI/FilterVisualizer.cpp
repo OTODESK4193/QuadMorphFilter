@@ -10,7 +10,7 @@ FilterVisualizer::FilterVisualizer(QuadMorphFilterAudioProcessor& p)
 }
 void FilterVisualizer::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff1E272E));
+    g.fillAll(juce::Colour(0xff2a2a2a));
     auto w = (float)getWidth();
     auto h = (float)getHeight();
     // dbTop = 80dB: Reso=10 / 高スロープ時の共鳴ピークが +60dB を超えるモデルがあるため
@@ -19,19 +19,19 @@ void FilterVisualizer::paint(juce::Graphics& g)
     const float dbBottom = -120.0f;
     // ----- 0dB ライン -----
     float y0dB = juce::jmap(0.0f, dbTop, dbBottom, 0.0f, h);
-    g.setColour(juce::Colours::white.withAlpha(0.25f));
+    g.setColour(juce::Colours::white.withAlpha(0.15f));
     g.drawHorizontalLine((int)y0dB, 0.0f, w);
     g.setFont(10.0f);
-    g.setColour(juce::Colours::white.withAlpha(0.6f));
+    g.setColour(juce::Colours::white.withAlpha(0.5f));
     g.drawText("0dB", 2, (int)y0dB - 12, 35, 10, juce::Justification::left);
     // ----- dB グリッド -----
     float dbGridLines[] = { -20.0f, -40.0f, -60.0f, -80.0f, -100.0f };
     for (float dbLine : dbGridLines)
     {
         float yDb = juce::jmap(dbLine, dbTop, dbBottom, 0.0f, h);
-        g.setColour(juce::Colours::white.withAlpha(0.08f));
+        g.setColour(juce::Colours::white.withAlpha(0.05f));
         g.drawHorizontalLine((int)yDb, 0.0f, w);
-        g.setColour(juce::Colours::white.withAlpha(0.35f));
+        g.setColour(juce::Colours::white.withAlpha(0.3f));
         g.drawText(juce::String((int)dbLine) + "dB", 2, (int)yDb - 12, 40, 10,
             juce::Justification::left);
     }
@@ -41,12 +41,12 @@ void FilterVisualizer::paint(juce::Graphics& g)
     for (int i = 0; i < 5; ++i)
     {
         float x = w * std::log10(freqs[i] / 20.0f) / 3.0f;
-        g.setColour(juce::Colours::white.withAlpha(0.15f));
+        g.setColour(juce::Colours::white.withAlpha(0.08f));
         g.drawVerticalLine((int)x, 0.0f, h);
-        g.setColour(juce::Colours::white.withAlpha(0.5f));
+        g.setColour(juce::Colours::white.withAlpha(0.4f));
         g.drawText(labels[i], (int)x + 2, (int)h - 15, 40, 10, juce::Justification::left);
     }
-    g.setColour(juce::Colour(0xff00D2D3));
+    g.setColour(juce::Colour(0xff00bcd4));
     // ----- LFO 情報取得 -----
     auto cPos = processor.getLfoPos(1);
     auto rPos = processor.getLfoPos(2);

@@ -32,7 +32,7 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
             addAndMakeVisible(l);
             sl.setSliderStyle(juce::Slider::LinearHorizontal);
             sl.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
-            sl.setColour(juce::Slider::thumbColourId, juce::Colour(0xff2980B9));
+            sl.setColour(juce::Slider::thumbColourId, juce::Colour(0xffff9900));
             addAndMakeVisible(sl);
             att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
                 audioProcessor.apvts, id, sl);
@@ -94,7 +94,7 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
             // Cut ボタン
             lfoCutBtn[i].setButtonText("Off");           // 初期テキスト。タイマーで更新
             lfoCutBtn[i].setClickingTogglesState(false); // 手動でトグル状態を管理
-            lfoCutBtn[i].setColour(juce::TextButton::textColourOnId, juce::Colour(0xffC2185B));
+            lfoCutBtn[i].setColour(juce::TextButton::textColourOnId, juce::Colour(0xff00bcd4));
             addAndMakeVisible(lfoCutBtn[i]);
 
             lfoCutBtn[i].onClick = [this, paramId = cutParamIds[i]]()
@@ -111,7 +111,7 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
             // Res ボタン
             lfoResBtn[i].setButtonText("Off");
             lfoResBtn[i].setClickingTogglesState(false);
-            lfoResBtn[i].setColour(juce::TextButton::textColourOnId, juce::Colour(0xffE65100));
+            lfoResBtn[i].setColour(juce::TextButton::textColourOnId, juce::Colour(0xffff9900));
             addAndMakeVisible(lfoResBtn[i]);
 
             lfoResBtn[i].onClick = [this, paramId = resParamIds[i]]()
@@ -140,7 +140,7 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
         lfoTitleLabels[j].setText(titleTexts[j], juce::dontSendNotification);
         lfoTitleLabels[j].setJustificationType(juce::Justification::centred);
         lfoTitleLabels[j].setFont(juce::Font(10.0f, juce::Font::bold));
-        lfoTitleLabels[j].setColour(juce::Label::textColourId, juce::Colour(0xff4a5568));  // ダークグレー (明るい背景に対応)
+        lfoTitleLabels[j].setColour(juce::Label::textColourId, juce::Colour(0xffcccccc));  // ライトグレー (暗い背景に対応)
         addAndMakeVisible(lfoTitleLabels[j]);
     }
 
@@ -155,7 +155,7 @@ QuadMorphFilterAudioProcessorEditor::~QuadMorphFilterAudioProcessorEditor()
 
 void QuadMorphFilterAudioProcessorEditor::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xffF0F4F8));
+    g.fillAll(juce::Colour(0xff1a1a1a));
 }
 
 // ==========================================

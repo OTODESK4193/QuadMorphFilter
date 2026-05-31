@@ -179,9 +179,9 @@ void XYPadComponent::paint(juce::Graphics& g)
     const float h = (float)getHeight();
 
     auto b = getLocalBounds().toFloat();
-    g.setColour(juce::Colour(0xff1E272E));
+    g.setColour(juce::Colour(0xff2a2a2a));
     g.fillRoundedRectangle(b, 8.0f);
-    g.setColour(juce::Colour(0xffD5DDE5));
+    g.setColour(juce::Colour(0xff444444));
     g.drawRoundedRectangle(b, 8.0f, 1.5f);
 
     int xyMode = (int)processor.apvts.getRawParameterValue("xyMode")->load();
@@ -228,9 +228,9 @@ void XYPadComponent::paint(juce::Graphics& g)
 
     // LFO トレイルと現在位置 (toPix で正規化 → ピクセル変換)
     juce::Colour colors[] = {
-        juce::Colour(0xff00D2D3),
-        juce::Colour(0xffFF9FF3),
-        juce::Colour(0xffFEECA1)
+        juce::Colour(0xff00bcd4),
+        juce::Colour(0xff4dd0e1),
+        juce::Colour(0xffff9900)
     };
 
     for (int i = 0; i < 3; ++i)

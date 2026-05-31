@@ -5,15 +5,15 @@
 
 QuadMorphLookAndFeel::QuadMorphLookAndFeel()
 {
-    setColour(juce::Label::textColourId, juce::Colour(0xff2C3E50));
-    setColour(juce::Slider::textBoxTextColourId, juce::Colour(0xff2C3E50));
-    setColour(juce::ComboBox::textColourId, juce::Colour(0xff2C3E50));
+    setColour(juce::Label::textColourId, juce::Colour(0xffcccccc));
+    setColour(juce::Slider::textBoxTextColourId, juce::Colour(0xffcccccc));
+    setColour(juce::ComboBox::textColourId, juce::Colour(0xffcccccc));
     setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
-    setColour(juce::TextButton::textColourOffId, juce::Colour(0xff2C3E50));
-    setColour(juce::PopupMenu::backgroundColourId, juce::Colour(0xffFFFFFF));
-    setColour(juce::PopupMenu::textColourId, juce::Colour(0xff2C3E50));
-    setColour(juce::PopupMenu::highlightedBackgroundColourId, juce::Colour(0xffE0E6ED));
-    setColour(juce::PopupMenu::highlightedTextColourId, juce::Colour(0xff2C3E50));
+    setColour(juce::TextButton::textColourOffId, juce::Colour(0xffcccccc));
+    setColour(juce::PopupMenu::backgroundColourId, juce::Colour(0xff333333));
+    setColour(juce::PopupMenu::textColourId, juce::Colour(0xffcccccc));
+    setColour(juce::PopupMenu::highlightedBackgroundColourId, juce::Colour(0xff444444));
+    setColour(juce::PopupMenu::highlightedTextColourId, juce::Colour(0xffff9900));
 }
 
 void QuadMorphLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, int y,
@@ -25,11 +25,11 @@ void QuadMorphLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, int y,
     auto trackRect = juce::Rectangle<float>(static_cast<float>(x),
         (float)y + (float)height * 0.5f - 1.5f,
         (float)width, 3.0f);
-    g.setColour(juce::Colour(0xffE0E6ED));
+    g.setColour(juce::Colour(0xff444444));
     g.fillRoundedRectangle(trackRect, 1.5f);
 
     auto activeColour = slider.findColour(juce::Slider::thumbColourId);
-    if (activeColour.isTransparent()) activeColour = juce::Colour(0xff7F8C8D);
+    if (activeColour.isTransparent()) activeColour = juce::Colour(0xffff9900);
 
     g.setColour(activeColour.withAlpha(0.7f));
     g.fillRoundedRectangle(trackRect.withWidth(sliderPos - (float)x), 1.5f);
@@ -42,16 +42,16 @@ void QuadMorphLookAndFeel::drawComboBox(juce::Graphics& g, int width, int height
     bool, int, int, int, int, juce::ComboBox&)
 {
     juce::Rectangle<int> boxBounds(0, 0, width, height);
-    g.setColour(juce::Colour(0xffFFFFFF));
+    g.setColour(juce::Colour(0xff2a2a2a));
     g.fillRoundedRectangle(boxBounds.toFloat(), 4.0f);
-    g.setColour(juce::Colour(0xffD5DDE5));
+    g.setColour(juce::Colour(0xff444444));
     g.drawRoundedRectangle(boxBounds.toFloat().reduced(0.5f), 4.0f, 1.0f);
 
     juce::Path path;
     float arrowX = width - 15.0f;
     float arrowY = height * 0.45f;
     path.addTriangle(arrowX, arrowY, arrowX + 8.0f, arrowY, arrowX + 4.0f, arrowY + 5.0f);
-    g.setColour(juce::Colour(0xff95A5A6));
+    g.setColour(juce::Colour(0xff999999));
     g.fillPath(path);
 }
 
@@ -61,11 +61,10 @@ void QuadMorphLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button&
     auto bounds = button.getLocalBounds().toFloat().reduced(1.0f);
     bool isOn = button.getToggleState();
 
-    // ===== 【修正】alpha 0.15 → 0.30 で視認性向上 =====
     auto baseColour = isOn ? button.findColour(juce::TextButton::textColourOnId).withAlpha(0.30f)
-        : juce::Colour(0xffFFFFFF);
+        : juce::Colour(0xff2a2a2a);
     auto borderColour = isOn ? button.findColour(juce::TextButton::textColourOnId)
-        : juce::Colour(0xffD5DDE5);
+        : juce::Colour(0xff444444);
 
     g.setColour(baseColour);
     g.fillRoundedRectangle(bounds, 4.0f);
