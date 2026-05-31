@@ -108,10 +108,14 @@ void XYPadComponent::timerCallback()
         xyCutoff = juce::jlimit(20.0f, 20000.0f, xyCutoff);
         xyRes    = juce::jlimit(0.1f,  10.0f,    xyRes);
 
+        // ※ lfoCutSrc/lfoResSrc は AudioParameterChoice (index 0=Off,1〜4=変調有効)
+        //    getRawParameterValue は index をそのまま float で返す → > 0 で ON 判定
         const juce::String suffixes[4] = { "A", "B", "C", "D" };
         for (const auto& s : suffixes)
         {
-            if (processor.apvts.getRawParameterValue("lfoCut" + s)->load() > 0.5f)
+            const int cutSrc = juce::roundToInt(
+                processor.apvts.getRawParameterValue("lfoCutSrc" + s)->load());
+            if (cutSrc > 0)
             {
                 if (auto* p = dynamic_cast<juce::AudioParameterFloat*>(
                     processor.apvts.getParameter("cutoff" + s)))
@@ -120,7 +124,9 @@ void XYPadComponent::timerCallback()
                         *p = juce::jlimit(p->range.start, p->range.end, xyCutoff);
                 }
             }
-            if (processor.apvts.getRawParameterValue("lfoRes" + s)->load() > 0.5f)
+            const int resSrc = juce::roundToInt(
+                processor.apvts.getRawParameterValue("lfoResSrc" + s)->load());
+            if (resSrc > 0)
             {
                 if (auto* p = dynamic_cast<juce::AudioParameterFloat*>(
                     processor.apvts.getParameter("res" + s)))
@@ -405,36 +411,43 @@ bool XYPadComponent::isRecordingMode() const
 // ────────────────────────────────────────
 void XYPadComponent::startRecording()
 {
-    // mouseDown で呼ばれる：wave==6 の最初の1つのLFOのみ Recording 開始
-    // 複数の wave==6 LFO がある場合も、一度に1つのLFOのみを Recording する
+    // 既に録音中なら何もしない
+    if (recording[0] || recording[1] || recording[2]) return;
 
-    // 既に recording 中のLFOがあればスキップ（重複 Recording 防止）
-    for (int i = 0; i < 3; ++i)
+    // ===== 愚直な方法: LFO1 / LFO2 / LFO3 を個別に処理 =====
+    // wave==6 のLFO は全て同時に録音開始（LFO番号に関わらず同じロジック）
+
+    // LFO 1
+    if (juce::roundToInt(processor.apvts.getRawParameterValue("lfo1wave")->load()) == 6)
     {
-        if (recording[i]) return;
+        recording[0] = true;
+        recordingLength[0] = 0;
+        std::fill(pixelMap[0].begin(), pixelMap[0].end(), 0);
+        processor.recLength[0].store(0);
+        processor.isWaitingForRecord[0].store(true,  std::memory_order_release);
+        processor.isRecordingDrag[0].store   (false, std::memory_order_release);
     }
 
-    // 最初の wave==6 LFO を recording 開始
-    for (int i = 0; i < 3; ++i)
+    // LFO 2
+    if (juce::roundToInt(processor.apvts.getRawParameterValue("lfo2wave")->load()) == 6)
     {
-        int wave = (int)processor.apvts.getRawParameterValue(
-            "lfo" + juce::String(i + 1) + "wave")->load();
+        recording[1] = true;
+        recordingLength[1] = 0;
+        std::fill(pixelMap[1].begin(), pixelMap[1].end(), 0);
+        processor.recLength[1].store(0);
+        processor.isWaitingForRecord[1].store(true,  std::memory_order_release);
+        processor.isRecordingDrag[1].store   (false, std::memory_order_release);
+    }
 
-        if (wave == 6)
-        {
-            recording[i] = true;
-            recordingLength[i] = 0;
-            std::fill(pixelMap[i].begin(), pixelMap[i].end(), 0);
-            processor.recLength[i].store(0);
-
-            // 【修正】LfoEngine に録音開始を通知
-            // isWaiting=true → processSingleLfo がマウス位置を参照するモードへ切替
-            // isRecordingDrag=false → 最初は「待機パルス」アニメーション表示
-            processor.isWaitingForRecord[i].store(true,  std::memory_order_release);
-            processor.isRecordingDrag[i].store   (false, std::memory_order_release);
-
-            return;  // 1つだけ設定したら終了
-        }
+    // LFO 3
+    if (juce::roundToInt(processor.apvts.getRawParameterValue("lfo3wave")->load()) == 6)
+    {
+        recording[2] = true;
+        recordingLength[2] = 0;
+        std::fill(pixelMap[2].begin(), pixelMap[2].end(), 0);
+        processor.recLength[2].store(0);
+        processor.isWaitingForRecord[2].store(true,  std::memory_order_release);
+        processor.isRecordingDrag[2].store   (false, std::memory_order_release);
     }
 }
 
@@ -525,17 +538,22 @@ void XYPadComponent::paintRecordingGrid(juce::Graphics& g)
         juce::Colour(0xffFEECA1)   // LFO 3
     };
 
-    int firstRecordingIdx = -1;
+    // ステータス表示用インデックスを決定
+    // activeIdx: 実際に録音中のLFO（REC表示）
+    // firstWave6: 最初の wave==6 LFO（Ready表示）
+    int activeIdx    = -1;
+    int firstWave6   = -1;
 
     for (int lfo = 0; lfo < 3; ++lfo)
     {
-        int wave = (int)processor.apvts.getRawParameterValue(
-            "lfo" + juce::String(lfo + 1) + "wave")->load();
-        if (wave != 6) continue;  // wave=="6" (Recording) のみ
+        int wave = juce::roundToInt(processor.apvts.getRawParameterValue(
+            "lfo" + juce::String(lfo + 1) + "wave")->load());
+        if (wave != 6) continue;
 
-        if (firstRecordingIdx < 0) firstRecordingIdx = lfo;
+        if (firstWave6 < 0) firstWave6 = lfo;
+        if (recording[lfo] && activeIdx < 0) activeIdx = lfo;
 
-        // グリッドセル描画
+        // グリッドセル描画（各LFO別色）
         for (int y = 0; y < GRID_SIZE; ++y)
         {
             for (int x = 0; x < GRID_SIZE; ++x)
@@ -543,11 +561,9 @@ void XYPadComponent::paintRecordingGrid(juce::Graphics& g)
                 float px = gridStartX + x * cellW;
                 float py = gridStartY + y * cellH;
 
-                // グリッド線
                 g.setColour(juce::Colour(0xff444444));
                 g.drawRect(px, py, cellW, cellH, 0.5f);
 
-                // ピクセル塗りつぶし（各LFO別色）
                 if (pixelMap[lfo][y * GRID_SIZE + x] > 128)
                 {
                     g.setColour(lfoColors[lfo].withAlpha(0.8f));
@@ -557,23 +573,21 @@ void XYPadComponent::paintRecordingGrid(juce::Graphics& g)
         }
     }
 
-    // Recording ステータス表示
-    if (firstRecordingIdx >= 0)
+    // ステータス表示: 録音中は activeIdx、待機中は firstWave6 を使用
+    const int displayIdx = (activeIdx >= 0) ? activeIdx : firstWave6;
+    if (displayIdx >= 0)
     {
-        bool isRecording = recording[firstRecordingIdx];
-        g.setColour(isRecording ? juce::Colours::red : juce::Colours::grey);
+        const bool isRec = (activeIdx >= 0);
+        g.setColour(isRec ? juce::Colours::red : juce::Colours::grey);
         g.setFont(14.0f);
         g.drawText(
-            (isRecording ? "REC: " : "Ready: ") + juce::String("LFO ") + juce::String(firstRecordingIdx + 1),
-            10, 5, 200, 20,
-            juce::Justification::centredLeft);
+            (isRec ? "REC: " : "Ready: ") + juce::String("LFO ") + juce::String(displayIdx + 1),
+            10, 5, 200, 20, juce::Justification::centredLeft);
 
-        // フレーム数表示
         g.setColour(juce::Colours::white.withAlpha(0.6f));
         g.setFont(12.0f);
         g.drawText(
-            "Frames: " + juce::String(recordingLength[firstRecordingIdx]),
-            (int)w - 120, 5, 110, 20,
-            juce::Justification::centredRight);
+            "Frames: " + juce::String(recordingLength[displayIdx]),
+            (int)w - 120, 5, 110, 20, juce::Justification::centredRight);
     }
 }

@@ -152,12 +152,12 @@ void FilterVisualizer::paint(juce::Graphics& g)
             {
                 if (processor.apvts.getRawParameterValue("enable" + s)->load() < 0.5f)
                     return 0.0f;
-                // AudioParameterChoice 5択: normalized = index / 4.0
+                // AudioParameterChoice は getRawParameterValue がインデックス値を返す
                 // 0=Off, 1=+X(cM[0]), 2=+Y(cM[1]), 3=-X(cM[2]), 4=-Y(cM[3])
-                const int cutSrc = juce::roundToInt(
-                    processor.apvts.getRawParameterValue("lfoCutSrc" + s)->load() * 4.0f);
-                const int resSrc = juce::roundToInt(
-                    processor.apvts.getRawParameterValue("lfoResSrc" + s)->load() * 4.0f);
+                const int cutSrc = juce::jlimit(0, 4, juce::roundToInt(
+                    processor.apvts.getRawParameterValue("lfoCutSrc" + s)->load()));
+                const int resSrc = juce::jlimit(0, 4, juce::roundToInt(
+                    processor.apvts.getRawParameterValue("lfoResSrc" + s)->load()));
                 const bool lfoCutOn  = cutSrc > 0;
                 const bool lfoResOn  = resSrc > 0;
                 const int  cutModIdx = cutSrc > 0 ? cutSrc - 1 : 0;

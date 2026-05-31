@@ -258,8 +258,10 @@
         // lfoResOn も同様
         // AudioParameterChoice (5択) の正規化値 → インデックス変換
         // 5択なので normalized = index / 4.0f → index = round(raw * 4.0f)
+        // AudioParameterChoice は getRawParameterValue がインデックス値をそのまま返す
+        // 0=Off, 1=+X, 2=+Y, 3=-X, 4=-Y → * 4.0f は不要
         auto readModSrc = [&](const juce::String& paramId) -> int {
-            return juce::roundToInt(apvts.getRawParameterValue(paramId)->load() * 4.0f);
+            return juce::jlimit(0, 4, juce::roundToInt(apvts.getRawParameterValue(paramId)->load()));
         };
 
         auto getFilterParams = [&](const juce::String& s, int /*idx*/) -> std::pair<float, float>

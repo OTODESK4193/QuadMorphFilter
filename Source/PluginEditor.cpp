@@ -105,6 +105,7 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
                     int next = (p->getIndex() + 1) % 5;  // 0→1→2→3→4→0
                     p->setValueNotifyingHost(p->convertTo0to1((float)next));
                 }
+                updateLfoCutResButtons();  // 即時表示更新（タイマー待ちなし）
             };
 
             // Res ボタン
@@ -121,6 +122,7 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
                     int next = (p->getIndex() + 1) % 5;
                     p->setValueNotifyingHost(p->convertTo0to1((float)next));
                 }
+                updateLfoCutResButtons();  // 即時表示更新
             };
         }
     }
@@ -160,10 +162,12 @@ void QuadMorphFilterAudioProcessorEditor::updateLfoCutResButtons()
     for (int i = 0; i < 4; ++i)
     {
         // AudioParameterChoice (5択) normalized → index: round(raw * 4)
+        // AudioParameterChoice は getRawParameterValue がインデックス値をそのまま返す
+        // (0=Off, 1=+X, 2=+Y, 3=-X, 4=-Y) → * 4.0f は不要
         int cutState = juce::jlimit(0, 4, juce::roundToInt(
-            audioProcessor.apvts.getRawParameterValue("lfoCutSrc" + filterLetters[i])->load() * 4.0f));
+            audioProcessor.apvts.getRawParameterValue("lfoCutSrc" + filterLetters[i])->load()));
         int resState = juce::jlimit(0, 4, juce::roundToInt(
-            audioProcessor.apvts.getRawParameterValue("lfoResSrc" + filterLetters[i])->load() * 4.0f));
+            audioProcessor.apvts.getRawParameterValue("lfoResSrc" + filterLetters[i])->load()));
 
         lfoCutBtn[i].setButtonText(labels[cutState]);
         // setToggleState で ON/OFF の視覚状態を手動制御 (setClickingTogglesState=false のため)
