@@ -48,12 +48,35 @@ public:
     std::array<float, 4> getMod4(int index) const;
 
     // ===== Recording データセッター =====
-    // XYPadComponent から呼び出される
+    // XYPadComponent から呼び出される。
+    // ・recordingData: 生ピクセル中心列（Step モード用）
+    // ・smoothedRecData: 3パス移動平均で平滑化（Smooth モード用）
     void setRecordingData(int index, const std::array<juce::Point<float>, 2048>& buffer, int len)
     {
         if (index < 0 || index >= 3) return;
-        recordingData[index] = buffer;
-        recordingLength[index] = len;
+        recordingData[index]    = buffer;
+        recordingLength[index]  = len;
+
+        // ===== Smooth モード用: 3パス移動平均で事前平滑化 =====
+        // 移動平均を繰り返すことで B-スプライン的な滑らかな曲線に近づく。
+        // ループ接続（先頭・末尾をリングで扱う）で途切れのないループが作れる。
+        smoothedRecData[index] = buffer;
+        if (len > 2)
+        {
+            auto& sd = smoothedRecData[index];
+            std::array<juce::Point<float>, 2048> tmp;
+            for (int pass = 0; pass < 3; ++pass)
+            {
+                tmp = sd;
+                for (int k = 0; k < len; ++k)
+                {
+                    const int km1 = (k - 1 + len) % len;
+                    const int kp1 = (k + 1) % len;
+                    sd[k].x = 0.25f * tmp[km1].x + 0.5f * tmp[k].x + 0.25f * tmp[kp1].x;
+                    sd[k].y = 0.25f * tmp[km1].y + 0.5f * tmp[k].y + 0.25f * tmp[kp1].y;
+                }
+            }
+        }
     }
 
     // ===== フェーズリセット =====
@@ -98,7 +121,8 @@ private:
     bool                 spreadActive[3] = { false, false, false };
 
     // ===== Recording バッファ =====
-    std::array<juce::Point<float>, 2048> recordingData[3];
+    std::array<juce::Point<float>, 2048> recordingData[3];     // Step モード用 (生ピクセル中心)
+    std::array<juce::Point<float>, 2048> smoothedRecData[3];   // Smooth モード用 (事前平滑化済み)
     int recordingLength[3] = { 0, 0, 0 };
 
     // ===== ヘルパー =====

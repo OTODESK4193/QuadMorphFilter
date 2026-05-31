@@ -188,23 +188,25 @@ void LfoEngine::processSingleLfo(int i,
                     W_y = recordingData[i][idx1].y * 2.f - 1.f;
                 }
                 else {
-                    // Smooth モード: Hermite 補間
+                    // Smooth モード: 事前平滑化済みデータ + 修正 Hermite 補間
+                    // smoothedRecData は setRecordingData 時に3パス移動平均で作成済み。
+                    // これにより折れ線パスのオーバーシュートを防ぎ、滑らかな軌道を実現する。
                     int idx0 = (idx1 - 1 + len) % len;
                     int idx2 = (idx1 + 1) % len;
                     int idx3 = (idx2 + 1) % len;
                     float frac = exactIdx - std::floor(exactIdx);
 
                     float interp_x = hermite(
-                        recordingData[i][idx0].x,
-                        recordingData[i][idx1].x,
-                        recordingData[i][idx2].x,
-                        recordingData[i][idx3].x,
+                        smoothedRecData[i][idx0].x,
+                        smoothedRecData[i][idx1].x,
+                        smoothedRecData[i][idx2].x,
+                        smoothedRecData[i][idx3].x,
                         frac);
                     float interp_y = hermite(
-                        recordingData[i][idx0].y,
-                        recordingData[i][idx1].y,
-                        recordingData[i][idx2].y,
-                        recordingData[i][idx3].y,
+                        smoothedRecData[i][idx0].y,
+                        smoothedRecData[i][idx1].y,
+                        smoothedRecData[i][idx2].y,
+                        smoothedRecData[i][idx3].y,
                         frac);
 
                     W_x = interp_x * 2.f - 1.f;
@@ -420,20 +422,21 @@ float LfoEngine::evaluateWaveX(int wave, float p, float t)
 // ==========================================
 float LfoEngine::hermite(float p0, float p1, float p2, float p3, float t)
 {
-    // 3次 Hermite 補間（Catmull-Rom）
-    // t: [0, 1]
-    // p0, p1, p2, p3: 4つのコントロールポイント
+    // 正しい Catmull-Rom スプライン
+    // 区間 [p1, p2] を補間。p0, p3 はタンジェント計算用コンテキスト点。
+    // タンジェント: p1 での傾き = 0.5*(p2-p0), p2 での傾き = 0.5*(p3-p1)
+    // → セグメント間で C1 連続（速度連続）を保証、キンク無し。
+    //
+    // 旧実装の a0 = -0.5*mt³+mt²-0.5*mt は誤りで
+    // 実際には 0.5t³-0.5t² (= a3 と同値) になっており、
+    // p0 の影響が過小/過大になってセグメント境界で鋭いキンクが発生していた。
     float t2 = t * t;
     float t3 = t2 * t;
-    float mt = 1.0f - t;
-    float mt2 = mt * mt;
-    float mt3 = mt2 * mt;
 
-    // Catmull-Rom 係数
-    float a0 = -0.5f * mt3 + mt2 - 0.5f * mt;
-    float a1 = 1.5f * t3 - 2.5f * t2 + 1.0f;
-    float a2 = -1.5f * t3 + 2.0f * t2 + 0.5f * t;
-    float a3 = 0.5f * t3 - 0.5f * t2;
+    float a0 = -0.5f * t3 + t2 - 0.5f * t;   // p0 の寄与（タンジェント用コンテキスト）
+    float a1 =  1.5f * t3 - 2.5f * t2 + 1.0f; // p1（補間区間の始点）
+    float a2 = -1.5f * t3 + 2.0f * t2 + 0.5f * t; // p2（補間区間の終点）
+    float a3 =  0.5f * t3 - 0.5f * t2;        // p3 の寄与（タンジェント用コンテキスト）
 
     return a0 * p0 + a1 * p1 + a2 * p2 + a3 * p3;
 }

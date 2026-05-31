@@ -131,7 +131,20 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
     updateLfoCutResButtons();
     startTimerHz(30);
 
-    setSize(1000, 680);
+    // ===== LFO タイトルラベル =====
+    static const char* const titleTexts[] = {
+        "LFO", "Wave", "Bound", "Step", "Sync", "Rate", "Min", "Max", "Phase", "Fade", "Spread"
+    };
+    for (int j = 0; j < 11; ++j)
+    {
+        lfoTitleLabels[j].setText(titleTexts[j], juce::dontSendNotification);
+        lfoTitleLabels[j].setJustificationType(juce::Justification::centred);
+        lfoTitleLabels[j].setFont(juce::Font(10.0f, juce::Font::bold));
+        lfoTitleLabels[j].setColour(juce::Label::textColourId, juce::Colour(0xff4a5568));  // ダークグレー (明るい背景に対応)
+        addAndMakeVisible(lfoTitleLabels[j]);
+    }
+
+    setSize(1000, 700);   // LFO タイトル行分 (+20px)
 }
 
 QuadMorphFilterAudioProcessorEditor::~QuadMorphFilterAudioProcessorEditor()
@@ -861,6 +874,27 @@ void QuadMorphFilterAudioProcessorEditor::resized()
         g->res.setBounds(resArea);
     }
     b.removeFromTop(6);
+
+    // ===== LFO セクション タイトル行 =====
+    {
+        auto tr = b.removeFromTop(16).reduced(5, 0);
+
+        // LFO コントロール行と同じ幅配分でラベルを配置
+        lfoTitleLabels[0].setBounds(tr.removeFromLeft(100));  // LFO
+        lfoTitleLabels[1].setBounds(tr.removeFromLeft(120));  // Wave
+        lfoTitleLabels[2].setBounds(tr.removeFromLeft(70));   // Bound
+        lfoTitleLabels[3].setBounds(tr.removeFromLeft(50));   // Step
+        lfoTitleLabels[4].setBounds(tr.removeFromLeft(50));   // Sync
+
+        auto tw = tr.getWidth();
+        auto ts = tw / 6;
+        lfoTitleLabels[5].setBounds(tr.removeFromLeft(ts));   // Rate
+        lfoTitleLabels[6].setBounds(tr.removeFromLeft(ts));   // Min
+        lfoTitleLabels[7].setBounds(tr.removeFromLeft(ts));   // Max
+        lfoTitleLabels[8].setBounds(tr.removeFromLeft(ts));   // Phase
+        lfoTitleLabels[9].setBounds(tr.removeFromLeft(ts));   // Fade
+        lfoTitleLabels[10].setBounds(tr);                     // Spread
+    }
 
     for (int i = 0; i < 3; ++i)
     {
