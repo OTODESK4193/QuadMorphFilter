@@ -108,8 +108,23 @@ void XYPadComponent::timerCallback()
         xyCutoff = juce::jlimit(20.0f, 20000.0f, xyCutoff);
         xyRes    = juce::jlimit(0.1f,  10.0f,    xyRes);
 
-        // ※ lfoCutSrc/lfoResSrc は AudioParameterChoice (index 0=Off,1〜4=変調有効)
-        //    getRawParameterValue は index をそのまま float で返す → > 0 で ON 判定
+        // ===== LFO2/3 変調値をフィルターごとに計算 =====
+        // LFO2 → Cutoff 変調、LFO3 → Reso 変調
+        // Cutoffモードでは xyCutoff/xyRes を基準に LFO2/3 が ±変調するため、
+        // スライダーにはフィルターごとの実際の変調済み値を表示する。
+        // (A=+X, C=−X に設定していれば A と C で値が異なって見える)
+        auto lfo2Pos     = processor.getLfoPos(1);
+        auto lfo2Mod4    = processor.getLfoMod4(1);
+        bool lfo2En      = processor.apvts.getRawParameterValue("lfo2en")->load() > 0.5f;
+        bool lfo2IsRand1 = (juce::roundToInt(processor.apvts.getRawParameterValue("lfo2wave")->load()) == 3) && lfo2En;
+        auto cM          = MorphEngine::computeModulation(lfo2Pos, lfo2Mod4, lfo2IsRand1);
+
+        auto lfo3Pos     = processor.getLfoPos(2);
+        auto lfo3Mod4    = processor.getLfoMod4(2);
+        bool lfo3En      = processor.apvts.getRawParameterValue("lfo3en")->load() > 0.5f;
+        bool lfo3IsRand1 = (juce::roundToInt(processor.apvts.getRawParameterValue("lfo3wave")->load()) == 3) && lfo3En;
+        auto rM          = MorphEngine::computeModulation(lfo3Pos, lfo3Mod4, lfo3IsRand1);
+
         const juce::String suffixes[4] = { "A", "B", "C", "D" };
         for (const auto& s : suffixes)
         {
@@ -117,22 +132,36 @@ void XYPadComponent::timerCallback()
                 processor.apvts.getRawParameterValue("lfoCutSrc" + s)->load());
             if (cutSrc > 0)
             {
+                // フィルターごとの変調ソースで実際のカットオフを計算
+                const int cutModIdx = cutSrc - 1;  // 0=+X,1=+Y,2=-X,3=-Y
+                float actualCutoff  = lfo2En
+                    ? MorphEngine::applyFrequencyMod(xyCutoff, cM[cutModIdx])
+                    : xyCutoff;
+                actualCutoff = juce::jlimit(20.0f, 20000.0f, actualCutoff);
+
                 if (auto* p = dynamic_cast<juce::AudioParameterFloat*>(
-                    processor.apvts.getParameter("cutoff" + s)))
+                        processor.apvts.getParameter("cutoff" + s)))
                 {
-                    if (std::abs(p->get() - xyCutoff) > 0.5f)
-                        *p = juce::jlimit(p->range.start, p->range.end, xyCutoff);
+                    if (std::abs(p->get() - actualCutoff) > 0.5f)
+                        *p = juce::jlimit(p->range.start, p->range.end, actualCutoff);
                 }
             }
+
             const int resSrc = juce::roundToInt(
                 processor.apvts.getRawParameterValue("lfoResSrc" + s)->load());
             if (resSrc > 0)
             {
+                const int resModIdx = resSrc - 1;
+                float actualRes     = lfo3En
+                    ? MorphEngine::applyResonanceMod(xyRes, rM[resModIdx])
+                    : xyRes;
+                actualRes = juce::jlimit(0.1f, 10.0f, actualRes);
+
                 if (auto* p = dynamic_cast<juce::AudioParameterFloat*>(
-                    processor.apvts.getParameter("res" + s)))
+                        processor.apvts.getParameter("res" + s)))
                 {
-                    if (std::abs(p->get() - xyRes) > 0.01f)
-                        *p = juce::jlimit(p->range.start, p->range.end, xyRes);
+                    if (std::abs(p->get() - actualRes) > 0.01f)
+                        *p = juce::jlimit(p->range.start, p->range.end, actualRes);
                 }
             }
         }
@@ -573,21 +602,51 @@ void XYPadComponent::paintRecordingGrid(juce::Graphics& g)
         }
     }
 
-    // ステータス表示: 録音中は activeIdx、待機中は firstWave6 を使用
-    const int displayIdx = (activeIdx >= 0) ? activeIdx : firstWave6;
-    if (displayIdx >= 0)
+    // ステータス表示: 録音中の全LFO番号を列挙
+    // 例: "REC: LFO 1 2" "Ready: LFO 3"
     {
         const bool isRec = (activeIdx >= 0);
-        g.setColour(isRec ? juce::Colours::red : juce::Colours::grey);
-        g.setFont(14.0f);
-        g.drawText(
-            (isRec ? "REC: " : "Ready: ") + juce::String("LFO ") + juce::String(displayIdx + 1),
-            10, 5, 200, 20, juce::Justification::centredLeft);
+        juce::String lfoNums;
+        int maxFrames = 0;
 
-        g.setColour(juce::Colours::white.withAlpha(0.6f));
-        g.setFont(12.0f);
-        g.drawText(
-            "Frames: " + juce::String(recordingLength[displayIdx]),
-            (int)w - 120, 5, 110, 20, juce::Justification::centredRight);
+        if (isRec)
+        {
+            // 実際に録音中のLFO番号を列挙
+            for (int lfo = 0; lfo < 3; ++lfo)
+            {
+                if (recording[lfo])
+                {
+                    lfoNums += juce::String(lfo + 1) + " ";
+                    maxFrames = juce::jmax(maxFrames, recordingLength[lfo]);
+                }
+            }
+        }
+        else if (firstWave6 >= 0)
+        {
+            // 待機中: wave==6 のLFO番号を列挙
+            for (int lfo = 0; lfo < 3; ++lfo)
+            {
+                int wave = juce::roundToInt(processor.apvts.getRawParameterValue(
+                    "lfo" + juce::String(lfo + 1) + "wave")->load());
+                if (wave == 6) lfoNums += juce::String(lfo + 1) + " ";
+            }
+        }
+
+        if (lfoNums.isNotEmpty())
+        {
+            g.setColour(isRec ? juce::Colours::red : juce::Colours::grey);
+            g.setFont(14.0f);
+            g.drawText(
+                (isRec ? "REC: LFO " : "Ready: LFO ") + lfoNums.trim(),
+                10, 5, 200, 20, juce::Justification::centredLeft);
+
+            if (isRec)
+            {
+                g.setColour(juce::Colours::white.withAlpha(0.6f));
+                g.setFont(12.0f);
+                g.drawText("Frames: " + juce::String(maxFrames),
+                    (int)w - 120, 5, 110, 20, juce::Justification::centredRight);
+            }
+        }
     }
 }
