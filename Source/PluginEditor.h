@@ -53,12 +53,10 @@ private:
         juce::TextButton enableButton, stepMode, syncToggle;
         juce::ComboBox   wave, rateSync;
         juce::Slider     rateFree, depthSlider;
-        juce::Slider     phaseSlider, fadeSlider, spreadSlider;
         // ===== アサイン先ボタン =====
         juce::TextButton assignLFO1, assignLFO2, assignLFO3;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>   eAtt, sAtt, syAtt;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>   rfAtt, depthAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>   phaseAtt, fadeAtt, spreadAtt;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> wAtt, rsAtt;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>   assignAtt1, assignAtt2, assignAtt3;
     };
@@ -106,9 +104,6 @@ private:
     // ===== LFO セクションタイトル行 =====
     // LFO | Wave | Step | Sync | Rate | Min | Max | Phase | Fade | Spread
     juce::Label lfoTitleLabels[10];
-    // ===== LFO4 パラメータラベル =====
-    // LFO4 | Wave | Step | Sync | Rate | Depth | Phase | Fade | Spread
-    juce::Label lfo4ParamLabels[9];
 
     // ===== 既存コード: private セクション末尾 =====
     void setupFilterGroup(FilterGroup& g, juce::String s, juce::String name);

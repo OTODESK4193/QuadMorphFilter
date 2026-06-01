@@ -136,19 +136,6 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
         addAndMakeVisible(lfoTitleLabels[j]);
     }
 
-    // ===== LFO4 パラメータラベル =====
-    static const char* const lfo4LabelTexts[] = {
-        "LFO4", "Wave", "Step", "Sync", "Rate", "Depth", "Phase", "Fade", "Spread"
-    };
-    for (int j = 0; j < 9; ++j)
-    {
-        lfo4ParamLabels[j].setText(lfo4LabelTexts[j], juce::dontSendNotification);
-        lfo4ParamLabels[j].setJustificationType(juce::Justification::centred);
-        lfo4ParamLabels[j].setFont(juce::Font(10.0f, juce::Font::bold));
-        lfo4ParamLabels[j].setColour(juce::Label::textColourId, juce::Colour(0xffcccccc));
-        addAndMakeVisible(lfo4ParamLabels[j]);
-    }
-
     // ===== LFO4 セットアップ =====
     lfo4.enableButton.setButtonText("LFO4");
     lfo4.enableButton.setClickingTogglesState(true);
@@ -195,24 +182,6 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
     addAndMakeVisible(lfo4.depthSlider);
     lfo4.depthAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.apvts, "lfo4depth", lfo4.depthSlider);
-
-    lfo4.phaseSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    lfo4.phaseSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
-    addAndMakeVisible(lfo4.phaseSlider);
-    lfo4.phaseAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        audioProcessor.apvts, "lfo4phase", lfo4.phaseSlider);
-
-    lfo4.fadeSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    lfo4.fadeSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
-    addAndMakeVisible(lfo4.fadeSlider);
-    lfo4.fadeAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        audioProcessor.apvts, "lfo4fade", lfo4.fadeSlider);
-
-    lfo4.spreadSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    lfo4.spreadSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
-    addAndMakeVisible(lfo4.spreadSlider);
-    lfo4.spreadAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        audioProcessor.apvts, "lfo4spread", lfo4.spreadSlider);
 
     // ===== LFO4 アサイン先ボタン =====
     lfo4.assignLFO1.setButtonText("LFO1");
@@ -1061,25 +1030,7 @@ void QuadMorphFilterAudioProcessorEditor::resized()
     // ===== LFO4 セクション =====
     b.removeFromTop(8);
 
-    // ===== LFO4 パラメータラベル行 =====
-    {
-        auto lr = b.removeFromTop(16).reduced(5, 0);
-
-        lfo4ParamLabels[0].setBounds(lr.removeFromLeft(100));      // LFO4
-        lfo4ParamLabels[1].setBounds(lr.removeFromLeft(120));      // Wave
-        lfo4ParamLabels[2].setBounds(lr.removeFromLeft(50));       // Step
-        lfo4ParamLabels[3].setBounds(lr.removeFromLeft(50));       // Sync
-
-        auto tw = lr.getWidth();
-        auto ts = tw / 5;  // Rate, Depth, Phase, Fade, Spread (5等分)
-        lfo4ParamLabels[4].setBounds(lr.removeFromLeft(ts));       // Rate
-        lfo4ParamLabels[5].setBounds(lr.removeFromLeft(ts));       // Depth
-        lfo4ParamLabels[6].setBounds(lr.removeFromLeft(ts));       // Phase
-        lfo4ParamLabels[7].setBounds(lr.removeFromLeft(ts));       // Fade
-        lfo4ParamLabels[8].setBounds(lr);                          // Spread
-    }
-
-    // ===== LFO4 レイアウト =====
+    // ===== LFO4 セクション（LFO1/2/3 アサイン先ボタンと同一行）=====
     {
         auto r = b.removeFromTop(28).reduced(5, 2);
 
@@ -1088,15 +1039,12 @@ void QuadMorphFilterAudioProcessorEditor::resized()
         lfo4.stepMode.setBounds(r.removeFromLeft(50).reduced(2, 2));
         lfo4.syncToggle.setBounds(r.removeFromLeft(50).reduced(2, 2));
 
-        // 残り幅を Rate / Depth / Phase / Fade / Spread の 5 等分
-        auto remainW    = r.getWidth();
-        auto slotW      = remainW / 5;
-        auto rateArea   = r.removeFromLeft(slotW);
-        auto depthArea  = r.removeFromLeft(slotW);
-        auto phaseArea  = r.removeFromLeft(slotW);
-        auto fadeArea   = r.removeFromLeft(slotW);
-        auto spreadArea = r;
+        // 残り幅を Rate / Depth / [LFO1] [LFO2] [LFO3] で 5 等分
+        auto remainW = r.getWidth();
+        auto slotW = remainW / 5;
 
+        // Rate
+        auto rateArea = r.removeFromLeft(slotW);
         bool isSynced = audioProcessor.apvts.getRawParameterValue("lfo4sync")->load() > 0.5f;
         if (isSynced) {
             lfo4.rateSync.setBounds(rateArea.withSizeKeepingCentre(rateArea.getWidth() - 5, 20));
@@ -1108,28 +1056,18 @@ void QuadMorphFilterAudioProcessorEditor::resized()
             lfo4.rateFree.setVisible(true);
             lfo4.rateSync.setVisible(false);
         }
+
+        // Depth
+        auto depthArea = r.removeFromLeft(slotW);
         lfo4.depthSlider.setBounds(depthArea.reduced(2, 5));
-        lfo4.phaseSlider.setBounds(phaseArea.reduced(2, 5));
-        lfo4.fadeSlider.setBounds(fadeArea.reduced(2, 5));
-        lfo4.spreadSlider.setBounds(spreadArea.reduced(2, 5));
-    }
 
-    // ===== LFO4 アサイン先ボタン行 =====
-    {
-        auto r = b.removeFromTop(24).reduced(5, 2);
-        r.removeFromLeft(100);       // LFO4 ラベル位置に合わせる
-        r.removeFromLeft(120);       // Wave 位置をスキップ
-        r.removeFromLeft(50);        // Step 位置をスキップ
-        r.removeFromLeft(50);        // Sync 位置をスキップ
-
-        // 残り幅を 5 等分、最初の 3 スロットを使用
-        auto slotW = r.getWidth() / 5;
+        // LFO1/2/3 アサイン先ボタン（残り 3 等分）
         lfo4.assignLFO1.setBounds(r.removeFromLeft(slotW).reduced(2, 2));
         lfo4.assignLFO2.setBounds(r.removeFromLeft(slotW).reduced(2, 2));
         lfo4.assignLFO3.setBounds(r.removeFromLeft(slotW).reduced(2, 2));
     }
 
-    b.removeFromTop(10);
+    b.removeFromTop(8);
 
     // ===== Envelope Follower セクション =====
     {
