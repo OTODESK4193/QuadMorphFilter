@@ -80,5 +80,11 @@ private:
 
     float currentGainReduction[2] = { 1.0f, 1.0f };
 
+    // ===== Envelope Follower =====
+    float envelopeValue = 0.0f;        // Current envelope (0.0-1.0)
+    float attackCoeff = 0.0f;          // Attack coefficient
+    float releaseCoeff = 0.0f;         // Release coefficient
+    double envFollowerSampleRate = 0.0;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(QuadMorphFilterAudioProcessor)
 };

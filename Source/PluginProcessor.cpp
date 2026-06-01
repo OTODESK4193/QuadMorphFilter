@@ -173,6 +173,12 @@
         currentGainReduction[0] = 1.0f;
         currentGainReduction[1] = 1.0f;
 
+        // ===== Envelope Follower 初期化 =====
+        envFollowerSampleRate = sampleRate;
+        envelopeValue = 0.0f;
+        attackCoeff = 0.0f;
+        releaseCoeff = 0.0f;
+
         // ===== 【新規追加】ここに挿入 =====
         // OSのレイテンシをホストに報告
         // (filterA~D で最大のレイテンシを使用)
@@ -331,6 +337,46 @@
         updateTpt(filterB, "B", 1);
         updateTpt(filterC, "C", 2);
         updateTpt(filterD, "D", 3);
+
+        // ===== Envelope Follower (Filter A にのみ適用) =====
+        if (apvts.getRawParameterValue("envFollowen")->load() > 0.5f)
+        {
+            // Attack/Release 係数を毎ブロック計算（パラメータ変更に追従）
+            float attackMs = apvts.getRawParameterValue("envFollowattack")->load();
+            float releaseMs = apvts.getRawParameterValue("envFollowrelease")->load();
+
+            // 係数計算: exp(-dt / tau) where tau = ms / 1000
+            attackCoeff = std::exp(-numSamples / (attackMs * 0.001f * (float)envFollowerSampleRate));
+            releaseCoeff = std::exp(-numSamples / (releaseMs * 0.001f * (float)envFollowerSampleRate));
+
+            // 入力ピーク値を計算（ブロック単位）
+            float peakValue = 0.0f;
+            for (int ch = 0; ch < numChannels; ++ch)
+            {
+                const auto* data = buffer.getReadPointer(ch);
+                for (int i = 0; i < numSamples; ++i)
+                    peakValue = std::max(peakValue, std::abs(data[i]));
+            }
+            peakValue = juce::jlimit(0.0f, 1.0f, peakValue);
+
+            // Envelope を Attack/Release で更新
+            if (peakValue > envelopeValue)
+                envelopeValue = attackCoeff * envelopeValue + (1.0f - attackCoeff) * peakValue;
+            else
+                envelopeValue = releaseCoeff * envelopeValue + (1.0f - releaseCoeff) * peakValue;
+
+            // Invert フラグを確認
+            bool invert = apvts.getRawParameterValue("envFollowinvert")->load() > 0.5f;
+            float envMod = invert ? (1.0f - envelopeValue) : envelopeValue;
+
+            // FilterA の cutoff を変調
+            float depthPercent = apvts.getRawParameterValue("envFollowdepth")->load() / 100.0f;
+            float baseCutoff = apvts.getRawParameterValue("cutoffA")->load();
+
+            // Envelope で周波数を変調（±4 octave range）
+            float modulatedCutoff = baseCutoff * std::pow(2.0f, (envMod - 0.5f) * 8.0f * depthPercent);
+            filterA.setCutoff(juce::jlimit(20.0f, 20000.0f, modulatedCutoff));
+        }
 
         // ===== SIMD SVF パラメータ更新 =====
         // 【注意】FilterA_SVF_SIMD はスロープ（ステージ数）に非対応のため常に無効化。
