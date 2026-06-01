@@ -81,6 +81,16 @@
             layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "assignC", 1 }, "LFO4 Assign to LFO3", false));
         }
 
+        // ===== Envelope Follower =====
+        {
+            juce::String id = "envFollow";
+            layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "en", 1 }, "Envelope Follower Enable", false));
+            layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "invert", 1 }, "Envelope Follower Invert", false));
+            layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "attack", 1 }, "Envelope Follower Attack", juce::NormalisableRange<float>(1.0f, 500.0f, 1.0f, 0.3f), 10.0f));
+            layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "release", 1 }, "Envelope Follower Release", juce::NormalisableRange<float>(1.0f, 500.0f, 1.0f, 0.3f), 100.0f));
+            layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "depth", 1 }, "Envelope Follower Depth", juce::NormalisableRange<float>(0.0f, 100.0f, 0.1f), 50.0f));
+        }
+
         juce::StringArray suffixes = { "A", "B", "C", "D" };
         juce::StringArray models = {
             "Clean SVF", "Moog Ladder", "Diode (TB-303)", "SEM (Oberheim)", "Bitcrush / SRR",

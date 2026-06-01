@@ -64,6 +64,17 @@ private:
     };
     LFO4Group lfo4;
 
+    // ===== Envelope Follower =====
+    struct EnvelopeFollowerGroup {
+        juce::TextButton enableButton;
+        juce::TextButton invertButton;
+        juce::Label      attackLabel, releaseLabel, depthLabel;
+        juce::Slider     attackSlider, releaseSlider, depthSlider;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>   eAtt, invAtt;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>   attAtt, relAtt, depthAtt;
+    };
+    EnvelopeFollowerGroup envFollower;
+
     juce::Label  masterGainLabel, dryWetLabel, ceilingLabel;
     juce::Slider masterGainSlider, dryWetSlider, ceilingSlider;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mgAtt, dwAtt, clAtt;

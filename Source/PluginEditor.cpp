@@ -233,6 +233,50 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
     lfo4.assignAtt3 = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         audioProcessor.apvts, "lfo4assignC", lfo4.assignLFO3);
 
+    // ===== Envelope Follower セットアップ =====
+    envFollower.enableButton.setButtonText("EnvFollow");
+    envFollower.enableButton.setClickingTogglesState(true);
+    addAndMakeVisible(envFollower.enableButton);
+    envFollower.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        audioProcessor.apvts, "envFollowen", envFollower.enableButton);
+
+    envFollower.invertButton.setButtonText("Invert");
+    envFollower.invertButton.setClickingTogglesState(true);
+    addAndMakeVisible(envFollower.invertButton);
+    envFollower.invAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        audioProcessor.apvts, "envFollowinvert", envFollower.invertButton);
+
+    envFollower.attackLabel.setText("Attack", juce::dontSendNotification);
+    envFollower.attackLabel.setJustificationType(juce::Justification::centredRight);
+    addAndMakeVisible(envFollower.attackLabel);
+    envFollower.attackSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    envFollower.attackSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
+    envFollower.attackSlider.setTextValueSuffix(" ms");
+    addAndMakeVisible(envFollower.attackSlider);
+    envFollower.attAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.apvts, "envFollowattack", envFollower.attackSlider);
+
+    envFollower.releaseLabel.setText("Release", juce::dontSendNotification);
+    envFollower.releaseLabel.setJustificationType(juce::Justification::centredRight);
+    addAndMakeVisible(envFollower.releaseLabel);
+    envFollower.releaseSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    envFollower.releaseSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
+    envFollower.releaseSlider.setTextValueSuffix(" ms");
+    addAndMakeVisible(envFollower.releaseSlider);
+    envFollower.relAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.apvts, "envFollowrelease", envFollower.releaseSlider);
+
+    envFollower.depthLabel.setText("Depth", juce::dontSendNotification);
+    envFollower.depthLabel.setJustificationType(juce::Justification::centredRight);
+    addAndMakeVisible(envFollower.depthLabel);
+    envFollower.depthSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    envFollower.depthSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
+    envFollower.depthSlider.setTextValueSuffix(" %");
+    envFollower.depthSlider.setColour(juce::Slider::thumbColourId, juce::Colour(0xffff9900));
+    addAndMakeVisible(envFollower.depthSlider);
+    envFollower.depthAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.apvts, "envFollowdepth", envFollower.depthSlider);
+
     setSize(1000, 700);   // LFO タイトル行分 (+20px)
 }
 
@@ -1086,6 +1130,38 @@ void QuadMorphFilterAudioProcessorEditor::resized()
     }
 
     b.removeFromTop(10);
+
+    // ===== Envelope Follower セクション =====
+    {
+        auto r = b.removeFromTop(28).reduced(5, 2);
+
+        // Enable ボタン
+        envFollower.enableButton.setBounds(r.removeFromLeft(100).reduced(0, 2));
+
+        // Invert ボタン
+        envFollower.invertButton.setBounds(r.removeFromLeft(80).reduced(2, 2));
+
+        // Attack, Release, Depth スライダー (3等分)
+        auto remainW = r.getWidth();
+        auto slotW = remainW / 3;
+
+        // Attack
+        auto attArea = r.removeFromLeft(slotW);
+        envFollower.attackLabel.setBounds(attArea.removeFromLeft(50));
+        envFollower.attackSlider.setBounds(attArea.reduced(2, 5));
+
+        // Release
+        auto relArea = r.removeFromLeft(slotW);
+        envFollower.releaseLabel.setBounds(relArea.removeFromLeft(60));
+        envFollower.releaseSlider.setBounds(relArea.reduced(2, 5));
+
+        // Depth
+        auto depArea = r;
+        envFollower.depthLabel.setBounds(depArea.removeFromLeft(50));
+        envFollower.depthSlider.setBounds(depArea.reduced(2, 5));
+    }
+
+    b.removeFromTop(8);
 
     auto masterArea = b.removeFromTop(28).reduced(5, 2);
     auto cellW = masterArea.getWidth() / 3;
