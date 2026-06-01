@@ -7,6 +7,7 @@
 
 #include "DSP/FilterA_SVF_SIMD.h"     // ← 追加
 #include "DSP/LfoEngine.h"
+#include "DSP/Lfo5Engine.h"
 #include "DSP/MorphEngine.h"
 #include <vector>
 #include <array>
@@ -66,6 +67,7 @@ private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
     LfoEngine lfoEngine;
+    Lfo5Engine lfo5Engine;
 
     // ===== Clean SVF 4インスタンス（SIMD並列処理）=====
     // 旧: svfA, svfB, svfC, svfD の4つ

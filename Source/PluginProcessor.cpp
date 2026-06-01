@@ -81,6 +81,18 @@
             layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "assignC", 1 }, "LFO4 Assign to LFO3", false));
         }
 
+        // ===== LFO5: Dry/Wet Modulation 専用 =====
+        {
+            juce::String id = "lfo5";
+            layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "en", 1 }, "LFO5 Enable", false));
+            layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ id + "wave", 1 }, "LFO5 Wave", waveTypes, 0));
+            layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "step", 1 }, "LFO5 Step Mode", false));
+            layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "sync", 1 }, "LFO5 Sync", false));
+            layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ id + "rateSync", 1 }, "LFO5 Rate Sync", syncRates, 5));
+            layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "rateFree", 1 }, "LFO5 Rate Free", juce::NormalisableRange<float>(0.01f, 20.0f, 0.001f, 0.2f), 1.0f));
+            layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "depth", 1 }, "LFO5 Depth", juce::NormalisableRange<float>(0.0f, 100.0f, 0.1f), 50.0f));
+        }
+
         // ===== Envelope Follower =====
         {
             juce::String id = "envFollow";
@@ -160,6 +172,7 @@
     void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     {
         lfoEngine.prepare(sampleRate);
+        lfo5Engine.prepare(sampleRate);
         svfQuad.prepare(sampleRate, samplesPerBlock);
         filterA.prepare(sampleRate, samplesPerBlock, 2);
         filterB.prepare(sampleRate, samplesPerBlock, 2);
@@ -219,6 +232,10 @@
             recBuffer, recLength, isWaitingForRecord, isRecordingDrag, currentRecX, currentRecY
         };
         lfoEngine.process(dt, bpm, baseX, baseY, apvts, recCtx);
+
+        // ===== LFO5 (Dry/Wet Modulation) =====
+        lfo5Engine.process(dt, bpm, apvts);
+        float lfo5Mod = lfo5Engine.getOutput();  // 0.0 ~ depth%
 
         float posX = lfoEngine.getPosition(0).x;
         float posY = lfoEngine.getPosition(0).y;
@@ -468,7 +485,9 @@
         }
 
         // ===== Dry/Wet + ゲイン + リミッター =====
-        const float mixRatio = apvts.getRawParameterValue("dryWet")->load() / 100.0f;
+        float mixRatio = apvts.getRawParameterValue("dryWet")->load() / 100.0f;
+        // ===== LFO5 でDry/Wet を変調 =====
+        mixRatio = juce::jlimit(0.0f, 1.0f, mixRatio + lfo5Mod);
         const float gainLinear = juce::Decibels::decibelsToGain(
             apvts.getRawParameterValue("masterGain")->load());
         const float ceilingLinear = juce::Decibels::decibelsToGain(

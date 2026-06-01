@@ -53,6 +53,7 @@ private:
         juce::TextButton enableButton, stepMode, syncToggle;
         juce::ComboBox   wave, rateSync;
         juce::Slider     rateFree, depthSlider;
+        juce::Label      depthLabel;
         // ===== アサイン先ボタン =====
         juce::TextButton assignLFO1, assignLFO2, assignLFO3;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>   eAtt, sAtt, syAtt;
@@ -61,6 +62,18 @@ private:
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>   assignAtt1, assignAtt2, assignAtt3;
     };
     LFO4Group lfo4;
+
+    // ===== LFO5: Dry/Wet Modulation 専用 =====
+    struct LFO5Group {
+        juce::TextButton enableButton, stepMode, syncToggle;
+        juce::ComboBox   wave, rateSync;
+        juce::Slider     rateFree, depthSlider;
+        juce::Label      depthLabel;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>   eAtt, sAtt, syAtt;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>   rfAtt, depthAtt;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> wAtt, rsAtt;
+    };
+    LFO5Group lfo5;
 
     // ===== Envelope Follower =====
     struct EnvelopeFollowerGroup {
