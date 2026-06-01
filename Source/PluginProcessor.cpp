@@ -81,16 +81,16 @@
             layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "assignC", 1 }, "LFO4 Assign to LFO3", false));
         }
 
-        // ===== LFO5: Dry/Wet Modulation 専用 =====
+        // ===== LFO5: Dry/Wet Range Modulation 専用 =====
         {
             juce::String id = "lfo5";
             layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "en", 1 }, "LFO5 Enable", false));
-            layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ id + "wave", 1 }, "LFO5 Wave", waveTypes, 0));
             layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "step", 1 }, "LFO5 Step Mode", false));
             layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "sync", 1 }, "LFO5 Sync", false));
             layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ id + "rateSync", 1 }, "LFO5 Rate Sync", syncRates, 5));
             layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "rateFree", 1 }, "LFO5 Rate Free", juce::NormalisableRange<float>(0.01f, 20.0f, 0.001f, 0.2f), 1.0f));
-            layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "depth", 1 }, "LFO5 Depth", juce::NormalisableRange<float>(0.0f, 100.0f, 0.1f), 50.0f));
+            layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "min", 1 }, "LFO5 Min", juce::NormalisableRange<float>(0.0f, 100.0f, 0.1f), 0.0f));
+            layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "max", 1 }, "LFO5 Max", juce::NormalisableRange<float>(0.0f, 100.0f, 0.1f), 100.0f));
         }
 
         // ===== Envelope Follower =====

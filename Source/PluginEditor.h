@@ -63,14 +63,14 @@ private:
     };
     LFO4Group lfo4;
 
-    // ===== LFO5: Dry/Wet Modulation 専用 =====
+    // ===== LFO5: Dry/Wet Range Modulation 専用 =====
     struct LFO5Group {
         juce::TextButton enableButton, stepMode, syncToggle;
         juce::ComboBox   wave, rateSync;
-        juce::Slider     rateFree, depthSlider;
-        juce::Label      depthLabel;
+        juce::Slider     rateFree, minSlider, maxSlider;
+        juce::Label      minLabel, maxLabel;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>   eAtt, sAtt, syAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>   rfAtt, depthAtt;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>   rfAtt, minAtt, maxAtt;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> wAtt, rsAtt;
     };
     LFO5Group lfo5;

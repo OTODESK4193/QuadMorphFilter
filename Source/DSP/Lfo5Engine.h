@@ -56,9 +56,13 @@ public:
             baseOutput = (baseOutput < 0.5f) ? 0.0f : 1.0f;  // Binary
         }
 
-        // ===== Depth 適用 =====
-        float depthPercent = apvts.getRawParameterValue("lfo5depth")->load() / 100.0f;
-        output = baseOutput * depthPercent;
+        // ===== Min/Max 範囲を適用 (0.0 ~ 1.0 の output を Min～Max 範囲にマップ) =====
+        float minVal = apvts.getRawParameterValue("lfo5min")->load() / 100.0f;
+        float maxVal = apvts.getRawParameterValue("lfo5max")->load() / 100.0f;
+        minVal = juce::jlimit(0.0f, 1.0f, minVal);
+        maxVal = juce::jlimit(0.0f, 1.0f, maxVal);
+
+        output = baseOutput * (maxVal - minVal) + minVal;
     }
 
     float getOutput() const { return output; }

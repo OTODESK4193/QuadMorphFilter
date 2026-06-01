@@ -205,7 +205,7 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
     lfo4.assignAtt3 = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         audioProcessor.apvts, "lfo4assignC", lfo4.assignLFO3);
 
-    // ===== LFO5 セットアップ =====
+    // ===== LFO5 セットアップ (Dry/Wet Range Modulation) =====
     lfo5.enableButton.setButtonText("LFO5");
     lfo5.enableButton.setClickingTogglesState(true);
     addAndMakeVisible(lfo5.enableButton);
@@ -245,16 +245,27 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
     lfo5.rfAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.apvts, "lfo5rateFree", lfo5.rateFree);
 
-    lfo5.depthLabel.setText("Depth", juce::dontSendNotification);
-    lfo5.depthLabel.setJustificationType(juce::Justification::centredRight);
-    addAndMakeVisible(lfo5.depthLabel);
-    lfo5.depthSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    lfo5.depthSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
-    lfo5.depthSlider.setTextValueSuffix(" %");
-    lfo5.depthSlider.setColour(juce::Slider::thumbColourId, juce::Colour(0xff00ff00));
-    addAndMakeVisible(lfo5.depthSlider);
-    lfo5.depthAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        audioProcessor.apvts, "lfo5depth", lfo5.depthSlider);
+    lfo5.minLabel.setText("Min", juce::dontSendNotification);
+    lfo5.minLabel.setJustificationType(juce::Justification::centredRight);
+    addAndMakeVisible(lfo5.minLabel);
+    lfo5.minSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    lfo5.minSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 50, 20);
+    lfo5.minSlider.setTextValueSuffix(" %");
+    lfo5.minSlider.setColour(juce::Slider::thumbColourId, juce::Colour(0xff00ff00));
+    addAndMakeVisible(lfo5.minSlider);
+    lfo5.minAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.apvts, "lfo5min", lfo5.minSlider);
+
+    lfo5.maxLabel.setText("Max", juce::dontSendNotification);
+    lfo5.maxLabel.setJustificationType(juce::Justification::centredRight);
+    addAndMakeVisible(lfo5.maxLabel);
+    lfo5.maxSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    lfo5.maxSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 50, 20);
+    lfo5.maxSlider.setTextValueSuffix(" %");
+    lfo5.maxSlider.setColour(juce::Slider::thumbColourId, juce::Colour(0xff00ff00));
+    addAndMakeVisible(lfo5.maxSlider);
+    lfo5.maxAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.apvts, "lfo5max", lfo5.maxSlider);
 
     // ===== Envelope Follower セットアップ =====
     envFollower.enableButton.setButtonText("EnvFollow");
@@ -1091,11 +1102,11 @@ void QuadMorphFilterAudioProcessorEditor::resized()
         lfo4.stepMode.setBounds(r.removeFromLeft(50).reduced(2, 2));
         lfo4.syncToggle.setBounds(r.removeFromLeft(50).reduced(2, 2));
 
-        // 残り幅を Rate / Depth(Label+Slider) / [LFO1] [LFO2] [LFO3] で配置
+        // 残り幅を Rate / 周波数 / Depth(Label+Slider) / [LFO1] [LFO2] [LFO3] で配置
         auto remainW = r.getWidth();
 
-        // Rate: 20%
-        auto rateArea = r.removeFromLeft(remainW * 0.2f);
+        // Rate: 10%
+        auto rateArea = r.removeFromLeft(remainW * 0.10f);
         bool isSynced = audioProcessor.apvts.getRawParameterValue("lfo4sync")->load() > 0.5f;
         if (isSynced) {
             lfo4.rateSync.setBounds(rateArea.withSizeKeepingCentre(rateArea.getWidth() - 5, 20));
@@ -1108,13 +1119,16 @@ void QuadMorphFilterAudioProcessorEditor::resized()
             lfo4.rateSync.setVisible(false);
         }
 
-        // Depth(Label+Slider): 20%
-        auto depthArea = r.removeFromLeft(remainW * 0.2f);
+        // 周波数スライダー: 25%
+        // (Note: 「周波数スライダー」は rate コンボボックスなので、この部分で配置済み)
+
+        // Depth(Label+Slider): 25% (周波数と同じ長さ)
+        auto depthArea = r.removeFromLeft(remainW * 0.25f);
         auto depthLabelArea = depthArea.removeFromLeft(45);
         lfo4.depthLabel.setBounds(depthLabelArea);
         lfo4.depthSlider.setBounds(depthArea.reduced(2, 5));
 
-        // LFO1/2/3 ボタン（残り 3 個、各 20%）
+        // LFO1/2/3 ボタン（残り 40% を 3 分割 → 各 ~13.3%）
         auto buttonSlotW = r.getWidth() / 3;
         lfo4.assignLFO1.setBounds(r.removeFromLeft(buttonSlotW).reduced(2, 2));
         lfo4.assignLFO2.setBounds(r.removeFromLeft(buttonSlotW).reduced(2, 2));
@@ -1123,21 +1137,21 @@ void QuadMorphFilterAudioProcessorEditor::resized()
 
     b.removeFromTop(6);
 
-    // ===== LFO5 セクション (Dry/Wet Modulation) =====
+    // ===== LFO5 セクション (Dry/Wet Range Modulation) - 一行配置 =====
     {
         auto r = b.removeFromTop(28).reduced(5, 2);
 
         lfo5.enableButton.setBounds(r.removeFromLeft(100).reduced(0, 2));
-        lfo5.wave.setBounds(r.removeFromLeft(120).withSizeKeepingCentre(115, 20));
+        lfo5.wave.setBounds(r.removeFromLeft(100).withSizeKeepingCentre(95, 20));
         lfo5.stepMode.setBounds(r.removeFromLeft(50).reduced(2, 2));
         lfo5.syncToggle.setBounds(r.removeFromLeft(50).reduced(2, 2));
 
-        // 残り幅を Rate / Depth の 2 等分
+        // 残り幅を Rate / Min / Max で均等配置
         auto remainW = r.getWidth();
-        auto slotW = remainW / 2;
-        auto rateArea = r.removeFromLeft(slotW);
-        auto depthArea = r;
+        auto slotW = remainW / 3;
 
+        // Rate
+        auto rateArea = r.removeFromLeft(slotW);
         bool isSynced = audioProcessor.apvts.getRawParameterValue("lfo5sync")->load() > 0.5f;
         if (isSynced) {
             lfo5.rateSync.setBounds(rateArea.withSizeKeepingCentre(rateArea.getWidth() - 5, 20));
@@ -1149,9 +1163,18 @@ void QuadMorphFilterAudioProcessorEditor::resized()
             lfo5.rateFree.setVisible(true);
             lfo5.rateSync.setVisible(false);
         }
-        auto depthLabelArea5 = depthArea.removeFromLeft(45);
-        lfo5.depthLabel.setBounds(depthLabelArea5);
-        lfo5.depthSlider.setBounds(depthArea.reduced(2, 5));
+
+        // Min
+        auto minArea = r.removeFromLeft(slotW);
+        auto minLabelArea = minArea.removeFromLeft(35);
+        lfo5.minLabel.setBounds(minLabelArea);
+        lfo5.minSlider.setBounds(minArea.reduced(2, 5));
+
+        // Max
+        auto maxArea = r;
+        auto maxLabelArea = maxArea.removeFromLeft(35);
+        lfo5.maxLabel.setBounds(maxLabelArea);
+        lfo5.maxSlider.setBounds(maxArea.reduced(2, 5));
     }
 
     b.removeFromTop(6);
