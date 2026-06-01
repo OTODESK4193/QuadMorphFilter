@@ -1102,11 +1102,11 @@ void QuadMorphFilterAudioProcessorEditor::resized()
         lfo4.stepMode.setBounds(r.removeFromLeft(50).reduced(2, 2));
         lfo4.syncToggle.setBounds(r.removeFromLeft(50).reduced(2, 2));
 
-        // 残り幅を Rate / 周波数 / Depth(Label+Slider) / [LFO1] [LFO2] [LFO3] で配置
+        // 残り幅を Rate / Depth / [LFO1] [LFO2] [LFO3] で配置（均等配置）
         auto remainW = r.getWidth();
 
-        // Rate: 10%
-        auto rateArea = r.removeFromLeft(remainW * 0.10f);
+        // Rate (ComboBox/Slider): 25% ★ 均等
+        auto rateArea = r.removeFromLeft(remainW * 0.25f);
         bool isSynced = audioProcessor.apvts.getRawParameterValue("lfo4sync")->load() > 0.5f;
         if (isSynced) {
             lfo4.rateSync.setBounds(rateArea.withSizeKeepingCentre(rateArea.getWidth() - 5, 20));
@@ -1119,11 +1119,8 @@ void QuadMorphFilterAudioProcessorEditor::resized()
             lfo4.rateSync.setVisible(false);
         }
 
-        // 周波数スライダー: 25%
-        // (Note: 「周波数スライダー」は rate コンボボックスなので、この部分で配置済み)
-
-        // Depth(Label+Slider): 25% (周波数と同じ長さ)
-        auto depthArea = r.removeFromLeft(remainW * 0.25f);
+        // Depth (Label + Slider): 35% ★ Label 45px を引いても Rate と同じ長さになる
+        auto depthArea = r.removeFromLeft(remainW * 0.35f);
         auto depthLabelArea = depthArea.removeFromLeft(45);
         lfo4.depthLabel.setBounds(depthLabelArea);
         lfo4.depthSlider.setBounds(depthArea.reduced(2, 5));
