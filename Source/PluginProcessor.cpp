@@ -85,6 +85,7 @@
         {
             juce::String id = "lfo5";
             layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "en", 1 }, "LFO5 Enable", false));
+            layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ id + "wave", 1 }, "LFO5 Wave", waveTypes, 0));
             layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "step", 1 }, "LFO5 Step Mode", false));
             layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "sync", 1 }, "LFO5 Sync", false));
             layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ id + "rateSync", 1 }, "LFO5 Rate Sync", syncRates, 5));
@@ -486,8 +487,11 @@
 
         // ===== Dry/Wet + ゲイン + リミッター =====
         float mixRatio = apvts.getRawParameterValue("dryWet")->load() / 100.0f;
-        // ===== LFO5 でDry/Wet を変調 =====
-        mixRatio = juce::jlimit(0.0f, 1.0f, mixRatio + lfo5Mod);
+        // ===== LFO5 でDry/Wet を変調（LFO5 On なら Min/Max の値で置き換える）=====
+        bool lfo5Enabled = apvts.getRawParameterValue("lfo5en")->load() > 0.5f;
+        if (lfo5Enabled) {
+            mixRatio = lfo5Mod;  // LFO5 の Min/Max 出力で置き換える
+        }
         const float gainLinear = juce::Decibels::decibelsToGain(
             apvts.getRawParameterValue("masterGain")->load());
         const float ceilingLinear = juce::Decibels::decibelsToGain(
