@@ -190,10 +190,21 @@
         attackCoeff = 0.0f;
         releaseCoeff = 0.0f;
 
-        // ===== パラメータスムージング初期化（最後の値を記録）=====
-        lastDryWet = apvts.getRawParameterValue("dryWet")->load();
-        lastMasterGain = apvts.getRawParameterValue("masterGain")->load();
-        lastCeiling = apvts.getRawParameterValue("limiterCeiling")->load();
+        // ===== パラメータスムージング初期化（修正版）=====
+        // Dry/Wet: 0-100% → 0.0-1.0 に正規化
+        lastDryWet = apvts.getRawParameterValue("dryWet")->load() / 100.0f;
+
+        // Master Gain: dB値を linear に変換
+        float masterGaindB = apvts.getRawParameterValue("masterGain")->load();
+        lastMasterGainLinear = juce::Decibels::decibelsToGain(masterGaindB);
+
+        // Ceiling: dB値を linear に変換
+        float ceilingdB = apvts.getRawParameterValue("limiterCeiling")->load();
+        lastCeilingLinear = juce::Decibels::decibelsToGain(ceilingdB);
+
+        // Morph パラメータの初期化
+        lastMorphX = apvts.getRawParameterValue("posX")->load();
+        lastMorphY = apvts.getRawParameterValue("posY")->load();
 
         // ===== 【新規追加】ここに挿入 =====
         // OSのレイテンシをホストに報告
@@ -219,10 +230,22 @@
         const int   numChannels = buffer.getNumChannels();
         const float dt = numSamples / (float)sampleRate;
 
-        // ===== 毎ブロック新しいパラメータ値を取得 =====
-        float currentDryWet = apvts.getRawParameterValue("dryWet")->load();
-        float currentMasterGain = apvts.getRawParameterValue("masterGain")->load();
-        float currentCeiling = apvts.getRawParameterValue("limiterCeiling")->load();
+        // ===== Dry/Wet + ゲイン + リミッター（修正版）=====
+        bool lfo5Enabled = apvts.getRawParameterValue("lfo5en")->load() > 0.5f;
+        const float releaseCoef = 1.0f - std::exp(-1.0f / (0.050f * sampleRate));
+
+        // 【修正】毎ブロック開始時にスムージング係数を計算（毎サンプルではなく）
+        // τ = 20ms で統一
+        const float smoothCoef = 1.0f - std::exp(-16.0f / (0.020f * sampleRate));
+
+        // 現在のパラメータ値を取得
+        float currentDryWetNormalized = apvts.getRawParameterValue("dryWet")->load() / 100.0f;
+        float currentMasterGaindB = apvts.getRawParameterValue("masterGain")->load();
+        float currentCeilingdB = apvts.getRawParameterValue("limiterCeiling")->load();
+
+        // Linear domain に変換
+        float currentMasterGainLinear = juce::Decibels::decibelsToGain(currentMasterGaindB);
+        float currentCeilingLinear = juce::Decibels::decibelsToGain(currentCeilingdB);
 
         for (int ch = 0; ch < numChannels; ++ch)
             dryBuffer.copyFrom(ch, 0, buffer, ch, 0, numSamples);
@@ -233,8 +256,10 @@
                 if (pos->getBpm().hasValue())
                     bpm = *(pos->getBpm());
 
-        float baseX = apvts.getRawParameterValue("posX")->load();
-        float baseY = apvts.getRawParameterValue("posY")->load();
+        // ===== Morph スムージング値を使用（毎ブロック初期化時に更新）=====
+        // baseX, baseY は後で毎 16 サンプルごとに更新される
+        float baseX = lastMorphX;
+        float baseY = lastMorphY;
 
         LfoEngine::RecordingContext recCtx{
             recBuffer, recLength, isWaitingForRecord, isRecordingDrag, currentRecX, currentRecY
@@ -492,10 +517,6 @@
             if (enD) buffer.addFrom(ch, 0, filterBuffers[3], ch, 0, numSamples, wMix[3]);
         }
 
-        // ===== Dry/Wet + ゲイン + リミッター =====
-        bool lfo5Enabled = apvts.getRawParameterValue("lfo5en")->load() > 0.5f;
-        const float releaseCoef = 1.0f - std::exp(-1.0f / (0.050f * sampleRate));
-
         for (int ch = 0; ch < numChannels; ++ch)
         {
             auto* out = buffer.getWritePointer(ch);
@@ -503,23 +524,35 @@
 
             for (int i = 0; i < numSamples; ++i)
             {
-                // ===== Dry/Wet 手動スムージング（exponential smoothing） =====
-                float smoothCoef = 1.0f - std::exp(-16.0f / (0.01f * sampleRate));  // 10ms ラップ
-                lastDryWet += smoothCoef * (currentDryWet - lastDryWet);
-                float dryWetSmoothed = lastDryWet / 100.0f;
+                // ===== パラメータスムージング（毎 16 サンプルごと）=====
+                if (i % 16 == 0)
+                {
+                    // Dry/Wet スムージング（0-1 range で統一）
+                    lastDryWet += smoothCoef * (currentDryWetNormalized - lastDryWet);
 
-                // LFO5 が有効な場合は LFO5 の値で置き換える
-                if (lfo5Enabled) {
-                    dryWetSmoothed = lfo5Mod;
+                    // Master Gain スムージング（linear domain）
+                    lastMasterGainLinear += smoothCoef * (currentMasterGainLinear - lastMasterGainLinear);
+
+                    // Ceiling スムージング（linear domain）
+                    lastCeilingLinear += smoothCoef * (currentCeilingLinear - lastCeilingLinear);
+
+                    // Morph パラメータのスムージング
+                    float targetMorphX = apvts.getRawParameterValue("posX")->load();
+                    float targetMorphY = apvts.getRawParameterValue("posY")->load();
+                    lastMorphX += smoothCoef * (targetMorphX - lastMorphX);
+                    lastMorphY += smoothCoef * (targetMorphY - lastMorphY);
                 }
 
-                // ===== Master Gain 手動スムージング =====
-                lastMasterGain += smoothCoef * (currentMasterGain - lastMasterGain);
-                float gainLinear = juce::Decibels::decibelsToGain(lastMasterGain);
+                // LFO5 が有効な場合は dryWet を置き換え
+                float dryWetSmoothed = lastDryWet;
+                if (lfo5Enabled)
+                {
+                    dryWetSmoothed = lfo5Mod;  // LFO5 の出力で上書き
+                }
 
-                // ===== Ceiling 手動スムージング =====
-                lastCeiling += smoothCoef * (currentCeiling - lastCeiling);
-                float ceilingLinear = juce::Decibels::decibelsToGain(lastCeiling);
+                // Gain および Ceiling は既にスムージング済みの linear 値
+                float gainLinear = lastMasterGainLinear;
+                float ceilingLinear = lastCeilingLinear;
 
                 float gained = (dry[i] * (1.0f - dryWetSmoothed) + out[i] * dryWetSmoothed) * gainLinear;
                 float absSignal = std::abs(gained);
