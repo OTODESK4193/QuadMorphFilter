@@ -243,6 +243,12 @@
         // τ = 50ms で目標値に完全到達（早い動きにも対応）
         const float smoothStepPerSample = 1.0f / (0.050f * sampleRate);  // 50ms で 1.0 分移動
 
+        // ===== デバッグ出力（ブロック開始時） =====
+        DBG("=== Block Start ===");
+        DBG("sampleRate: " << sampleRate);
+        DBG("smoothStepPerSample: " << smoothStepPerSample);
+        DBG("numSamples: " << numSamples);
+
         // 現在のパラメータ値を取得（正規化: 0-1 range）
         // パラメータ定義は 0-100 の NormalisableRange なので、/100.0f で正規化
         float currentDryWetNormalized = apvts.getRawParameterValue("dryWet")->load() / 100.0f;
@@ -556,6 +562,17 @@
                 // 毎サンプル smoothStepPerSample 分だけ目標値に近づく
                 float dryWetDiff = currentDryWetNormalized - lastDryWet;
                 lastDryWet += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, dryWetDiff);
+
+                // ===== デバッグ出力（最初のサンプルのみ） =====
+                if (i == 0 && ch == 0)
+                {
+                    DBG("Sample 0:");
+                    DBG("  currentDryWetNormalized: " << currentDryWetNormalized);
+                    DBG("  lastDryWet (before): " << (lastDryWet - juce::jlimit(-smoothStepPerSample, smoothStepPerSample, dryWetDiff)));
+                    DBG("  dryWetDiff: " << dryWetDiff);
+                    DBG("  smoothStepPerSample: " << smoothStepPerSample);
+                    DBG("  lastDryWet (after): " << lastDryWet);
+                }
 
                 // Master Gain スムージング（linear domain）
                 float gainDiff = currentMasterGainLinear - lastMasterGainLinear;
