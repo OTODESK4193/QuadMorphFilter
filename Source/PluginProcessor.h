@@ -82,12 +82,13 @@ private:
 
     float currentGainReduction[2] = { 1.0f, 1.0f };
 
-    // ===== パラメータスムージング（統一的な 20ms タイムコンスタント）=====
+    // ===== パラメータスムージング（統一的な 5ms タイムコンスタント）=====
     float lastDryWet = 0.5f;                   // 0.0-1.0 range（dB domain ではない）
     float lastMasterGainLinear = 1.0f;         // linear scale（dB→linear 変換済み）
     float lastCeilingLinear = 0.977f;          // linear scale
     float lastMorphX = 0.5f;                   // Morph X スムージング
     float lastMorphY = 0.5f;                   // Morph Y スムージング
+    float lastLfo5Mod = 0.5f;                  // LFO5 modulation スムージング（P4）
 
     // ===== Envelope Follower =====
     float envelopeValue = 0.0f;        // Current envelope (0.0-1.0)
