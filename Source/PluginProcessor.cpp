@@ -191,8 +191,8 @@
         releaseCoeff = 0.0f;
 
         // ===== パラメータスムージング初期化（修正版）=====
-        // Dry/Wet: 0-100% → 0.0-1.0 に正規化
-        lastDryWet = apvts.getRawParameterValue("dryWet")->load() / 100.0f;
+        // Dry/Wet: 0-100% → 0.0-1.0 に正規化、かつ安全性チェック
+        lastDryWet = juce::jlimit(0.0f, 1.0f, apvts.getRawParameterValue("dryWet")->load() / 100.0f);
 
         // Master Gain: dB値を linear に変換
         float masterGaindB = apvts.getRawParameterValue("masterGain")->load();
@@ -238,13 +238,18 @@
         const float releaseCoef = 1.0f - std::exp(-1.0f / (0.050f * sampleRate));
 
         // ===== スムージング時定数の最適化 (毎サンプル更新) =====
-        // τ = 1ms: 高速・リアルタイム性重視。スライダー変化への追従性向上
-        // 毎サンプル更新により、微小時間での sin/cos 計算が連続的に進行
-        // → パワー保存が常に満たされる
-        const float smoothCoef = 1.0f - std::exp(-1.0f / (0.001f * sampleRate));  // τ = 1ms, per-sample
+        // τ = 5ms: Dry/Wet クロスフェードの安定性・パワー保存重視
+        // 毎サンプル更新により、sin/cos 計算が常に連続的に進行
+        // → クリック・ジッパーノイズを完全に排除
+        // 計算: smoothCoef = 1.0 - exp(-1.0 / (tau_seconds * sampleRate))
+        // 例) 48kHz, 5ms: smoothCoef ≈ 0.00408 (毎サンプル 0.408% 更新)
+        const float smoothCoef = 1.0f - std::exp(-1.0f / (0.005f * sampleRate));  // τ = 5ms, per-sample
 
-        // 現在のパラメータ値を取得
+        // 現在のパラメータ値を取得（正規化: 0-1 range）
+        // パラメータ定義は 0-100 の NormalisableRange なので、/100.0f で正規化
         float currentDryWetNormalized = apvts.getRawParameterValue("dryWet")->load() / 100.0f;
+        // クリッピング（安全性）: float の丸め誤差やパラメータ外れ値を回避
+        currentDryWetNormalized = juce::jlimit(0.0f, 1.0f, currentDryWetNormalized);
         float currentMasterGaindB = apvts.getRawParameterValue("masterGain")->load();
         float currentCeilingdB = apvts.getRawParameterValue("limiterCeiling")->load();
 
@@ -594,22 +599,21 @@
                 if (enD) wet += fD[i] * wMix_current[3];
 
                 // ===== LFO5 modulation スムージング =====
+                float dryWetSmoothed = lastDryWet;  // デフォルト: Dry/Wet スライダー値
                 if (lfo5Enabled)
                 {
                     lastLfo5Mod += smoothCoef * (lfo5Mod - lastLfo5Mod);
+                    dryWetSmoothed = lastLfo5Mod;  // LFO5 有効時: LFO5 モジュレーション値を使用
                 }
-                else
-                {
-                    lastLfo5Mod = lastDryWet;
-                }
-
-                // ===== Dry/Wet パラメータの決定（LFO5有効時の処理） =====
-                float dryWetSmoothed = lfo5Enabled ? lastLfo5Mod : lastDryWet;
 
                 // ===== 正しい Equal Power Crossfade（sin/cos）=====
-                // w=0（Dry） → dry_amp=1, wet_amp=0
-                // w=1（Wet） → dry_amp=0, wet_amp=1
-                float w_rad = dryWetSmoothed * juce::MathConstants<float>::pi / 2.0f;
+                // Equal Power: Power_dry + Power_wet = constant
+                // 実装: dry_amp = cos(π/2 * w), wet_amp = sin(π/2 * w)
+                // w=0（Dry）   → dry_amp=1.0, wet_amp=0.0
+                // w=0.5（中央）→ dry_amp≈0.707, wet_amp≈0.707 (パワー保存)
+                // w=1（Wet）   → dry_amp=0.0, wet_amp=1.0
+                // 注: Denormal 安全。dryWetSmoothed は [0, 1] に正規化済み
+                float w_rad = dryWetSmoothed * juce::MathConstants<float>::pi * 0.5f;  // [0, π/2]
                 float dry_amp = std::cos(w_rad);
                 float wet_amp = std::sin(w_rad);
 
