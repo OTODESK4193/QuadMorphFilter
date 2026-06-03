@@ -2,10 +2,11 @@
 // PluginProcessor.h
 // ==========================================
 #pragma once
-#include <juce_audio_processors/juce_audio_processors.h>
-#include "DSP/TptFilter.h"
 
-#include "DSP/FilterA_SVF_SIMD.h"     // ← 追加
+#include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_dsp/juce_dsp.h> // FastMathApproximations 等のために必須
+#include "DSP/TptFilter.h"
+#include "DSP/FilterA_SVF_SIMD.h"
 #include "DSP/LfoEngine.h"
 #include "DSP/Lfo5Engine.h"
 #include "DSP/MorphEngine.h"
@@ -70,8 +71,6 @@ private:
     Lfo5Engine lfo5Engine;
 
     // ===== Clean SVF 4インスタンス（SIMD並列処理）=====
-    // 旧: svfA, svfB, svfC, svfD の4つ
-    // 新: svfQuad の1つで4インスタンス分を内部管理
     FilterA_SVF_SIMD svfQuad;
 
     // その他27モデル用
@@ -82,7 +81,10 @@ private:
 
     float currentGainReduction[2] = { 1.0f, 1.0f };
 
-    // ===== パラメータスムージング（統一的な 5ms タイムコンスタント）=====
+    // ===== Ableton Live フェイルセーフ用 =====
+    double expectedSampleRate = 0.0;
+
+    // ===== パラメータスムージング（統一的な 5ms タイムコンスタント）オリジナル復元 =====
     float lastDryWet = 0.5f;                   // 0.0-1.0 range（dB domain ではない）
     float lastMasterGainLinear = 1.0f;         // linear scale（dB→linear 変換済み）
     float lastCeilingLinear = 0.977f;          // linear scale
