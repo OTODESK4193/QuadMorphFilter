@@ -190,14 +190,10 @@
         attackCoeff = 0.0f;
         releaseCoeff = 0.0f;
 
-        // ===== パラメータスムージング初期化（10ms のラップ時間）=====
-        smoothedDryWet.reset(sampleRate, 0.010);
-        smoothedMasterGain.reset(sampleRate, 0.010);
-        smoothedCeiling.reset(sampleRate, 0.010);
-        // 現在の値を設定（ジャンプを防止）
-        smoothedDryWet.setCurrentAndTargetValue(apvts.getRawParameterValue("dryWet")->load());
-        smoothedMasterGain.setCurrentAndTargetValue(apvts.getRawParameterValue("masterGain")->load());
-        smoothedCeiling.setCurrentAndTargetValue(apvts.getRawParameterValue("limiterCeiling")->load());
+        // ===== パラメータスムージング初期化（最後の値を記録）=====
+        lastDryWet = apvts.getRawParameterValue("dryWet")->load();
+        lastMasterGain = apvts.getRawParameterValue("masterGain")->load();
+        lastCeiling = apvts.getRawParameterValue("limiterCeiling")->load();
 
         // ===== 【新規追加】ここに挿入 =====
         // OSのレイテンシをホストに報告
@@ -223,10 +219,10 @@
         const int   numChannels = buffer.getNumChannels();
         const float dt = numSamples / (float)sampleRate;
 
-        // ===== SmoothedValue の target を毎ブロック更新（パラメータ変更に追従）=====
-        smoothedDryWet.setTargetValue(apvts.getRawParameterValue("dryWet")->load());
-        smoothedMasterGain.setTargetValue(apvts.getRawParameterValue("masterGain")->load());
-        smoothedCeiling.setTargetValue(apvts.getRawParameterValue("limiterCeiling")->load());
+        // ===== 毎ブロック新しいパラメータ値を取得 =====
+        float currentDryWet = apvts.getRawParameterValue("dryWet")->load();
+        float currentMasterGain = apvts.getRawParameterValue("masterGain")->load();
+        float currentCeiling = apvts.getRawParameterValue("limiterCeiling")->load();
 
         for (int ch = 0; ch < numChannels; ++ch)
             dryBuffer.copyFrom(ch, 0, buffer, ch, 0, numSamples);
@@ -507,16 +503,23 @@
 
             for (int i = 0; i < numSamples; ++i)
             {
-                // ===== Sample-accurate Dry/Wet スムージング =====
-                float dryWetSmoothed = smoothedDryWet.getNextValue() / 100.0f;
+                // ===== Dry/Wet 手動スムージング（exponential smoothing） =====
+                float smoothCoef = 1.0f - std::exp(-16.0f / (0.01f * sampleRate));  // 10ms ラップ
+                lastDryWet += smoothCoef * (currentDryWet - lastDryWet);
+                float dryWetSmoothed = lastDryWet / 100.0f;
+
                 // LFO5 が有効な場合は LFO5 の値で置き換える
                 if (lfo5Enabled) {
                     dryWetSmoothed = lfo5Mod;
                 }
 
-                // ===== Sample-accurate Gain スムージング =====
-                float gainLinear = juce::Decibels::decibelsToGain(smoothedMasterGain.getNextValue());
-                float ceilingLinear = juce::Decibels::decibelsToGain(smoothedCeiling.getNextValue());
+                // ===== Master Gain 手動スムージング =====
+                lastMasterGain += smoothCoef * (currentMasterGain - lastMasterGain);
+                float gainLinear = juce::Decibels::decibelsToGain(lastMasterGain);
+
+                // ===== Ceiling 手動スムージング =====
+                lastCeiling += smoothCoef * (currentCeiling - lastCeiling);
+                float ceilingLinear = juce::Decibels::decibelsToGain(lastCeiling);
 
                 float gained = (dry[i] * (1.0f - dryWetSmoothed) + out[i] * dryWetSmoothed) * gainLinear;
                 float absSignal = std::abs(gained);

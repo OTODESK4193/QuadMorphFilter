@@ -462,10 +462,11 @@ float LfoEngine::hermite(float p0, float p1, float p2, float p3, float t)
 // ==========================================
 float LfoEngine::getSyncTime(int selection, double bpm)
 {
-    double beatLen = 60.0 / bpm;
-    if (selection < 10) return (float)(beatLen * std::pow(2.0, 3 - selection));
-    if (selection < 16) return (float)(beatLen * std::pow(2.0, 0 - (selection - 10)) * 1.5);
-    return (float)(beatLen * std::pow(2.0, 0 - (selection - 16)) * (2.0 / 3.0));
+    // ===== 正しい音符計算：1/1 = 全音符（4拍）, 1/2 = 二分音符（2拍）, 1/4 = 四分音符（1拍） =====
+    double beatLen = 60.0 / bpm;  // 1拍の時間
+    if (selection < 10) return (float)(beatLen * std::pow(2.0, 5 - selection));
+    if (selection < 16) return (float)(beatLen * std::pow(2.0, 2 - (selection - 10)) * 1.5);
+    return (float)(beatLen * std::pow(2.0, 2 - (selection - 16)) * (2.0 / 3.0));
 }
 
 // ==========================================

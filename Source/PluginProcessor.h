@@ -82,10 +82,10 @@ private:
 
     float currentGainReduction[2] = { 1.0f, 1.0f };
 
-    // ===== パラメータスムージング（クリック音防止）=====
-    juce::SmoothedValue<float> smoothedDryWet;
-    juce::SmoothedValue<float> smoothedMasterGain;
-    juce::SmoothedValue<float> smoothedCeiling;
+    // ===== パラメータスムージング（クリック音防止・手動スムージング）=====
+    float lastDryWet = 50.0f;
+    float lastMasterGain = 0.0f;
+    float lastCeiling = -6.0f;
 
     // ===== Envelope Follower =====
     float envelopeValue = 0.0f;        // Current envelope (0.0-1.0)

@@ -84,17 +84,17 @@ private:
 
     float computeSyncRate(int selection, float bpm)
     {
-        // LfoEngine::getSyncTime() をベースに、rate（周波数）を返す
-        // getSyncTime() は beat length を返すため、逆数を取る
-        double beatLen = 60.0 / bpm;
+        // ===== 正しい音符計算：1/1 = 全音符（4拍）, 1/2 = 二分音符（2拍）, 1/4 = 四分音符（1拍） =====
+        // getLfoEngine::getSyncTime() をベースに、rate（周波数）を返す
+        double beatLen = 60.0 / bpm;  // 1拍の時間
         float beatTime = 0.0f;
 
         if (selection < 10)
-            beatTime = (float)(beatLen * std::pow(2.0, 3 - selection));
+            beatTime = (float)(beatLen * std::pow(2.0, 5 - selection));
         else if (selection < 16)
-            beatTime = (float)(beatLen * std::pow(2.0, 0 - (selection - 10)) * 1.5);
+            beatTime = (float)(beatLen * std::pow(2.0, 2 - (selection - 10)) * 1.5);
         else
-            beatTime = (float)(beatLen * std::pow(2.0, 0 - (selection - 16)) * (2.0 / 3.0));
+            beatTime = (float)(beatLen * std::pow(2.0, 2 - (selection - 16)) * (2.0 / 3.0));
 
         return (beatTime > 0.0f) ? (1.0f / beatTime) : 1.0f;
     }
