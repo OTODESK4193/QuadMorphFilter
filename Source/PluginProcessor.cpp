@@ -238,10 +238,10 @@
         const float releaseCoef = 1.0f - std::exp(-1.0f / (0.050f * sampleRate));
 
         // ===== スムージング時定数の最適化 (毎サンプル更新) =====
-        // τ = 10ms: 低周波 Sine (125Hz) との相互作用によるビートを防止
+        // τ = 1ms: 高速・リアルタイム性重視。スライダー変化への追従性向上
         // 毎サンプル更新により、微小時間での sin/cos 計算が連続的に進行
         // → パワー保存が常に満たされる
-        const float smoothCoef = 1.0f - std::exp(-1.0f / (0.010f * sampleRate));  // τ = 10ms, per-sample
+        const float smoothCoef = 1.0f - std::exp(-1.0f / (0.001f * sampleRate));  // τ = 1ms, per-sample
 
         // 現在のパラメータ値を取得
         float currentDryWetNormalized = apvts.getRawParameterValue("dryWet")->load() / 100.0f;
@@ -449,6 +449,9 @@
         bool enC = apvts.getRawParameterValue("enableC")->load() > 0.5f;
         bool enD = apvts.getRawParameterValue("enableD")->load() > 0.5f;
 
+        // ===== 有効フィルター数をカウント =====
+        int enabledCount = (int)enA + (int)enB + (int)enC + (int)enD;
+
         // ===== wMix 計算 =====
         // Morphモード: morphBlend パラメータでブレンドアルゴリズムを切替
         std::array<float, 4> wMix;
@@ -459,8 +462,14 @@
         {
             wMix = lfoEngine.getMod4(0);
         }
+        else if (enabledCount == 1)
+        {
+            // 有効フィルターが1個のみ: Morph しない（常に100%）
+            wMix = { enA ? 1.0f : 0.0f, enB ? 1.0f : 0.0f, enC ? 1.0f : 0.0f, enD ? 1.0f : 0.0f };
+        }
         else
         {
+            // 有効フィルターが2個以上: 通常の Morph 計算
             const int morphBlend = (int)apvts.getRawParameterValue("morphBlend")->load();
             switch (morphBlend)
             {
@@ -471,7 +480,14 @@
             }
         }
 
-        // 有効フィルターのみで正規化
+        // ===== 改善: 有効フィルターのみで正規化（無効フィルターは 0 に設定） =====
+        // 有効でないフィルターの重みを完全にゼロクリア（ノイズ防止）
+        if (!enA) wMix[0] = 0.0f;
+        if (!enB) wMix[1] = 0.0f;
+        if (!enC) wMix[2] = 0.0f;
+        if (!enD) wMix[3] = 0.0f;
+
+        // 有効フィルターのみで正規化（パワー保存）
         float sumSq = 0.0f;
         if (enA) sumSq += wMix[0] * wMix[0];
         if (enB) sumSq += wMix[1] * wMix[1];
