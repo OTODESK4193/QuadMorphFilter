@@ -140,23 +140,23 @@ void LfoEngine::processSingleLfo(int i,
     // ===== 波形計算 (19種類) =====
     switch (wave)
     {
-    case 0: // Sine
-        W_x = std::sin(p);
-        W_y = std::sin(p + juce::MathConstants<float>::halfPi);
+    case 0: // Sine (圓運動: X,Y が同位相で円を描く)
+        // W_x = cos(p), W_y = sin(p) により、
+        // (W_x, W_y) は2π周期で単位円を描く（マウス円運動と同じ軌跡）
+        W_x = std::cos(p);
+        W_y = std::sin(p);
         break;
 
-    case 1: // SAW
+    case 1: // SAW (X: 左→右の sawtooth, Y: 下→上の sawtooth, 位相無ズレ)
         W_x = 1.0f - (p / juce::MathConstants<float>::pi);
-        W_y = 1.0f - (std::fmod(p + juce::MathConstants<float>::halfPi,
-            juce::MathConstants<float>::twoPi)
-            / juce::MathConstants<float>::pi);
+        W_y = 1.0f - (std::fmod(p, juce::MathConstants<float>::pi) / juce::MathConstants<float>::pi);
+        // 注: Y の phase shift を削除し、X と Y が同期した sawtooth パターンに
         break;
 
-    case 2: // Pulse
+    case 2: // Pulse (X: 左右 pulse, Y: 上下 pulse, 位相無ズレ)
         W_x = (p < juce::MathConstants<float>::pi) ? 1.0f : -1.0f;
-        W_y = (std::fmod(p + juce::MathConstants<float>::halfPi,
-            juce::MathConstants<float>::twoPi)
-            < juce::MathConstants<float>::pi) ? 1.0f : -1.0f;
+        W_y = (std::fmod(p, juce::MathConstants<float>::pi) < juce::MathConstants<float>::pi * 0.5f) ? 1.0f : -1.0f;
+        // 注: Y の phase shift を削除し、X と Y が同期した pulse パターンに
         break;
 
     case 3: // Random 1 (per-filter independent)
@@ -410,9 +410,9 @@ float LfoEngine::evaluateWaveX(int wave, float p, float t)
     const float pi = juce::MathConstants<float>::pi;
     switch (wave)
     {
-    case 0:  return std::sin(p);                                         // Sine
+    case 0:  return std::cos(p);                                         // Sine (圓運動の X軸 = cos)
     case 1:  return 1.0f - (p / pi);                                    // SAW
-    case 2:  return (p < pi) ? 1.0f : -1.0f;                           // Pulse
+    case 2:  return (std::fmod(p, pi) < pi * 0.5f) ? 1.0f : -1.0f;    // Pulse (修正版)
     case 8:  return 0.5f * std::cos(p) + 0.5f * std::cos(5.2f * p);   // Spirograph
     case 9:  return (std::sin(p) + std::sin(1.37f * p)                  // Harmonic Swarm
                   +  std::sin(2.11f * p)) / 3.0f;

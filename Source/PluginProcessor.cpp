@@ -237,12 +237,11 @@
         bool lfo5Enabled = apvts.getRawParameterValue("lfo5en")->load() > 0.5f;
         const float releaseCoef = 1.0f - std::exp(-1.0f / (0.050f * sampleRate));
 
-        // ===== スムージング時定数の最適化 (P2改善) =====
-        // τ = 20ms → 5ms に短縮（Pulse 周期 ~7.8ms @ 128Hz に対応）
-        // 毎 16 サンプルごとの更新により、Pulse 信号の 1 周期内で複数回の
-        // パラメータ更新が行われ、より滑らかなクロスフェードが実現される
-        // 16サンプル更新時の係数: 1 - exp(-16 / (τ * SR))
-        const float smoothCoef = 1.0f - std::exp(-16.0f / (0.005f * sampleRate));  // τ = 5ms
+        // ===== スムージング時定数の最適化 (毎サンプル更新) =====
+        // τ = 10ms: 低周波 Sine (125Hz) との相互作用によるビートを防止
+        // 毎サンプル更新により、微小時間での sin/cos 計算が連続的に進行
+        // → パワー保存が常に満たされる
+        const float smoothCoef = 1.0f - std::exp(-1.0f / (0.010f * sampleRate));  // τ = 10ms, per-sample
 
         // 現在のパラメータ値を取得
         float currentDryWetNormalized = apvts.getRawParameterValue("dryWet")->load() / 100.0f;
@@ -530,62 +529,59 @@
 
             for (int i = 0; i < numSamples; ++i)
             {
-                // ===== パラメータスムージング（毎 16 サンプルごと）=====
-                if (i % 16 == 0)
+                // ===== パラメータスムージング（毎サンプル更新） =====
+                // Dry/Wet スムージング（0-1 range で統一）
+                lastDryWet += smoothCoef * (currentDryWetNormalized - lastDryWet);
+
+                // Master Gain スムージング（linear domain）
+                lastMasterGainLinear += smoothCoef * (currentMasterGainLinear - lastMasterGainLinear);
+
+                // Ceiling スムージング（linear domain）
+                lastCeilingLinear += smoothCoef * (currentCeilingLinear - lastCeilingLinear);
+
+                // Morph パラメータのスムージング
+                float targetMorphX = apvts.getRawParameterValue("posX")->load();
+                float targetMorphY = apvts.getRawParameterValue("posY")->load();
+                lastMorphX += smoothCoef * (targetMorphX - lastMorphX);
+                lastMorphY += smoothCoef * (targetMorphY - lastMorphY);
+
+                // ===== 毎サンプルごとにwMixを再計算（Morph スムージング反映） =====
+                std::array<float, 4> wMix_current;
+                int morphBlendCurrent = (int)apvts.getRawParameterValue("morphBlend")->load();
+                switch (morphBlendCurrent)
                 {
-                    // Dry/Wet スムージング（0-1 range で統一）
-                    lastDryWet += smoothCoef * (currentDryWetNormalized - lastDryWet);
+                    case 1:  wMix_current = MorphEngine::computeLinearWMix    (lastMorphX, lastMorphY); break;
+                    case 2:  wMix_current = MorphEngine::computeSmoothstepWMix(lastMorphX, lastMorphY); break;
+                    case 3:  wMix_current = MorphEngine::computeRadialWMix    (lastMorphX, lastMorphY); break;
+                    default: wMix_current = MorphEngine::computeEqualPowerWMix(lastMorphX, lastMorphY); break;
+                }
+                // 正規化（パワー保存）
+                float sumSq_current = 0.0f;
+                if (enA) sumSq_current += wMix_current[0] * wMix_current[0];
+                if (enB) sumSq_current += wMix_current[1] * wMix_current[1];
+                if (enC) sumSq_current += wMix_current[2] * wMix_current[2];
+                if (enD) sumSq_current += wMix_current[3] * wMix_current[3];
+                if (sumSq_current > 0.0f)
+                {
+                    float norm = 1.0f / std::sqrt(sumSq_current);
+                    if (enA) wMix_current[0] *= norm;
+                    if (enB) wMix_current[1] *= norm;
+                    if (enC) wMix_current[2] *= norm;
+                    if (enD) wMix_current[3] *= norm;
+                }
+                // キャッシュに保存
+                wMix = wMix_current;
 
-                    // Master Gain スムージング（linear domain）
-                    lastMasterGainLinear += smoothCoef * (currentMasterGainLinear - lastMasterGainLinear);
-
-                    // Ceiling スムージング（linear domain）
-                    lastCeilingLinear += smoothCoef * (currentCeilingLinear - lastCeilingLinear);
-
-                    // Morph パラメータのスムージング
-                    float targetMorphX = apvts.getRawParameterValue("posX")->load();
-                    float targetMorphY = apvts.getRawParameterValue("posY")->load();
-                    lastMorphX += smoothCoef * (targetMorphX - lastMorphX);
-                    lastMorphY += smoothCoef * (targetMorphY - lastMorphY);
-
-                    // ===== 【新規】毎16サンプルごとにwMixを再計算（Morph スムージング反映）=====
-                    std::array<float, 4> wMix_current;
-                    int morphBlendCurrent = (int)apvts.getRawParameterValue("morphBlend")->load();
-                    switch (morphBlendCurrent)
-                    {
-                        case 1:  wMix_current = MorphEngine::computeLinearWMix    (lastMorphX, lastMorphY); break;
-                        case 2:  wMix_current = MorphEngine::computeSmoothstepWMix(lastMorphX, lastMorphY); break;
-                        case 3:  wMix_current = MorphEngine::computeRadialWMix    (lastMorphX, lastMorphY); break;
-                        default: wMix_current = MorphEngine::computeEqualPowerWMix(lastMorphX, lastMorphY); break;
-                    }
-                    // 正規化（パワー保存）
-                    float sumSq_current = 0.0f;
-                    if (enA) sumSq_current += wMix_current[0] * wMix_current[0];
-                    if (enB) sumSq_current += wMix_current[1] * wMix_current[1];
-                    if (enC) sumSq_current += wMix_current[2] * wMix_current[2];
-                    if (enD) sumSq_current += wMix_current[3] * wMix_current[3];
-                    if (sumSq_current > 0.0f)
-                    {
-                        float norm = 1.0f / std::sqrt(sumSq_current);
-                        if (enA) wMix_current[0] *= norm;
-                        if (enB) wMix_current[1] *= norm;
-                        if (enC) wMix_current[2] *= norm;
-                        if (enD) wMix_current[3] *= norm;
-                    }
-                    // キャッシュに保存
-                    wMix = wMix_current;
-
-                    // ===== LFO5 modulation スムージング（P4強化） =====
-                    // LFO5 が有効な場合のみ、その出力値をスムージング
-                    if (lfo5Enabled)
-                    {
-                        lastLfo5Mod += smoothCoef * (lfo5Mod - lastLfo5Mod);
-                    }
-                    else
-                    {
-                        // LFO5 無効時は lastDryWet に追従（正規化）
-                        lastLfo5Mod = lastDryWet;
-                    }
+                // ===== LFO5 modulation スムージング =====
+                // LFO5 が有効な場合のみ、その出力値をスムージング
+                if (lfo5Enabled)
+                {
+                    lastLfo5Mod += smoothCoef * (lfo5Mod - lastLfo5Mod);
+                }
+                else
+                {
+                    // LFO5 無効時は lastDryWet に追従（正規化）
+                    lastLfo5Mod = lastDryWet;
                 }
 
                 // ===== Dry/Wet パラメータの決定（LFO5有効時の処理） =====
