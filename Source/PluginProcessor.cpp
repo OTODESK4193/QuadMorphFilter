@@ -528,20 +528,20 @@
         procTptIfNeeded(filterBuffers[2], filterC, modelC, enC);
         procTptIfNeeded(filterBuffers[3], filterD, modelD, enD);
 
-        // ===== ABCD ミキシング =====
+        // ===== ABCD ミキシング（毎サンプル更新用に初期化）=====
         buffer.clear();
-        for (int ch = 0; ch < numChannels; ++ch)
-        {
-            if (enA) buffer.addFrom(ch, 0, filterBuffers[0], ch, 0, numSamples, wMix[0]);
-            if (enB) buffer.addFrom(ch, 0, filterBuffers[1], ch, 0, numSamples, wMix[1]);
-            if (enC) buffer.addFrom(ch, 0, filterBuffers[2], ch, 0, numSamples, wMix[2]);
-            if (enD) buffer.addFrom(ch, 0, filterBuffers[3], ch, 0, numSamples, wMix[3]);
-        }
+        // 【重要】毎サンプルループ内で wMix を更新するため、ここではミキシングしない
+        // 代わりに毎サンプルループ内で加算する
 
+        // ===== 毎サンプルミキシング + Dry/Wet フェーダー処理 =====
         for (int ch = 0; ch < numChannels; ++ch)
         {
             auto* out = buffer.getWritePointer(ch);
             auto* dry = dryBuffer.getReadPointer(ch);
+            auto* fA = filterBuffers[0].getReadPointer(ch);
+            auto* fB = filterBuffers[1].getReadPointer(ch);
+            auto* fC = filterBuffers[2].getReadPointer(ch);
+            auto* fD = filterBuffers[3].getReadPointer(ch);
 
             for (int i = 0; i < numSamples; ++i)
             {
@@ -561,7 +561,7 @@
                 lastMorphX += smoothCoef * (targetMorphX - lastMorphX);
                 lastMorphY += smoothCoef * (targetMorphY - lastMorphY);
 
-                // ===== 毎サンプルごとにwMixを再計算（Morph スムージング反映） =====
+                // ===== 毎サンプルごとに wMix を再計算（Morph スムージング反映） =====
                 std::array<float, 4> wMix_current;
                 int morphBlendCurrent = (int)apvts.getRawParameterValue("morphBlend")->load();
                 switch (morphBlendCurrent)
@@ -571,13 +571,13 @@
                     case 3:  wMix_current = MorphEngine::computeRadialWMix    (lastMorphX, lastMorphY); break;
                     default: wMix_current = MorphEngine::computeEqualPowerWMix(lastMorphX, lastMorphY); break;
                 }
-                // 正規化（パワー保存）
+                // 正規化（パワー保存） — 無効フィルターは 0 のままに
                 float sumSq_current = 0.0f;
                 if (enA) sumSq_current += wMix_current[0] * wMix_current[0];
                 if (enB) sumSq_current += wMix_current[1] * wMix_current[1];
                 if (enC) sumSq_current += wMix_current[2] * wMix_current[2];
                 if (enD) sumSq_current += wMix_current[3] * wMix_current[3];
-                if (sumSq_current > 0.0f)
+                if (sumSq_current > 1e-8f)
                 {
                     float norm = 1.0f / std::sqrt(sumSq_current);
                     if (enA) wMix_current[0] *= norm;
@@ -585,39 +585,39 @@
                     if (enC) wMix_current[2] *= norm;
                     if (enD) wMix_current[3] *= norm;
                 }
-                // キャッシュに保存
-                wMix = wMix_current;
+
+                // ===== ABCD ミキシング（毎サンプル更新） =====
+                float wet = 0.0f;
+                if (enA) wet += fA[i] * wMix_current[0];
+                if (enB) wet += fB[i] * wMix_current[1];
+                if (enC) wet += fC[i] * wMix_current[2];
+                if (enD) wet += fD[i] * wMix_current[3];
 
                 // ===== LFO5 modulation スムージング =====
-                // LFO5 が有効な場合のみ、その出力値をスムージング
                 if (lfo5Enabled)
                 {
                     lastLfo5Mod += smoothCoef * (lfo5Mod - lastLfo5Mod);
                 }
                 else
                 {
-                    // LFO5 無効時は lastDryWet に追従（正規化）
                     lastLfo5Mod = lastDryWet;
                 }
 
                 // ===== Dry/Wet パラメータの決定（LFO5有効時の処理） =====
-                // LFO5 が有効な場合は lastLfo5Mod を使用（スムージング済み）
-                // LFO5 が無効な場合は lastDryWet を使用（通常のフェーダー値）
                 float dryWetSmoothed = lfo5Enabled ? lastLfo5Mod : lastDryWet;
 
                 // ===== 正しい Equal Power Crossfade（sin/cos）=====
-                // 従来（Linear）: out = dry * (1 - w) + wet * w
-                // 正規版（Equal Power）: dry_amp = sin(w*π/2), wet_amp = cos(w*π/2)
-                // パワー保存: dry_amp² + wet_amp² ≈ 1 → クリックノイズ軽減
+                // w=0（Dry） → dry_amp=1, wet_amp=0
+                // w=1（Wet） → dry_amp=0, wet_amp=1
                 float w_rad = dryWetSmoothed * juce::MathConstants<float>::pi / 2.0f;
-                float dry_amp = std::sin(w_rad);
-                float wet_amp = std::cos(w_rad);
+                float dry_amp = std::cos(w_rad);
+                float wet_amp = std::sin(w_rad);
 
                 // Gain および Ceiling は既にスムージング済みの linear 値
                 float gainLinear = lastMasterGainLinear;
                 float ceilingLinear = lastCeilingLinear;
 
-                float gained = (dry[i] * dry_amp + out[i] * wet_amp) * gainLinear;
+                float gained = (dry[i] * dry_amp + wet * wet_amp) * gainLinear;
                 float absSignal = std::abs(gained);
                 float targetGr = (absSignal > ceilingLinear) ? ceilingLinear / absSignal : 1.0f;
 
