@@ -18,7 +18,7 @@
             juce::NormalisableRange<float>(-36.0f, 24.0f, 0.1f), 0.0f));
         layout.add(std::make_unique<juce::AudioParameterFloat>(
             juce::ParameterID{ "dryWet", 1 }, "Dry/Wet",
-            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 100.0f));
+            juce::NormalisableRange<float>(0.0f, 100.0f, 0.01f), 100.0f));
         layout.add(std::make_unique<juce::AudioParameterFloat>(
             juce::ParameterID{ "limiterCeiling", 1 }, "Ceiling",
             juce::NormalisableRange<float>(-36.0f, 0.0f, 0.1f), -0.1f));
@@ -237,13 +237,11 @@
         bool lfo5Enabled = apvts.getRawParameterValue("lfo5en")->load() > 0.5f;
         const float releaseCoef = 1.0f - std::exp(-1.0f / (0.050f * sampleRate));
 
-        // ===== スムージング時定数の最適化 (毎サンプル更新) =====
-        // τ = 5ms: Dry/Wet クロスフェードの安定性・パワー保存重視
-        // 毎サンプル更新により、sin/cos 計算が常に連続的に進行
-        // → クリック・ジッパーノイズを完全に排除
-        // 計算: smoothCoef = 1.0 - exp(-1.0 / (tau_seconds * sampleRate))
-        // 例) 48kHz, 5ms: smoothCoef ≈ 0.00408 (毎サンプル 0.408% 更新)
-        const float smoothCoef = 1.0f - std::exp(-1.0f / (0.005f * sampleRate));  // τ = 5ms, per-sample
+        // ===== スムージング: 線形補間（毎サンプル更新） =====
+        // 目的: 急激なパラメータ変化（LFO/マウス操作）をスムーズに処理
+        // 方法: 毎サンプル、目標値に向かって一定速度で移動
+        // τ = 50ms で目標値に完全到達（早い動きにも対応）
+        const float smoothStepPerSample = 1.0f / (0.050f * sampleRate);  // 50ms で 1.0 分移動
 
         // 現在のパラメータ値を取得（正規化: 0-1 range）
         // パラメータ定義は 0-100 の NormalisableRange なので、/100.0f で正規化
@@ -550,21 +548,30 @@
 
             for (int i = 0; i < numSamples; ++i)
             {
-                // ===== パラメータスムージング（毎サンプル更新） =====
+                // ===== パラメータスムージング（毎サンプル更新・線形補間） =====
+                // 改善: 指数関数的スムージングから線形補間に変更
+                // → 急激なパラメータ変化（LFO/マウス）に対応可能
+
                 // Dry/Wet スムージング（0-1 range で統一）
-                lastDryWet += smoothCoef * (currentDryWetNormalized - lastDryWet);
+                // 毎サンプル smoothStepPerSample 分だけ目標値に近づく
+                float dryWetDiff = currentDryWetNormalized - lastDryWet;
+                lastDryWet += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, dryWetDiff);
 
                 // Master Gain スムージング（linear domain）
-                lastMasterGainLinear += smoothCoef * (currentMasterGainLinear - lastMasterGainLinear);
+                float gainDiff = currentMasterGainLinear - lastMasterGainLinear;
+                lastMasterGainLinear += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, gainDiff);
 
                 // Ceiling スムージング（linear domain）
-                lastCeilingLinear += smoothCoef * (currentCeilingLinear - lastCeilingLinear);
+                float ceilingDiff = currentCeilingLinear - lastCeilingLinear;
+                lastCeilingLinear += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, ceilingDiff);
 
                 // Morph パラメータのスムージング
                 float targetMorphX = apvts.getRawParameterValue("posX")->load();
                 float targetMorphY = apvts.getRawParameterValue("posY")->load();
-                lastMorphX += smoothCoef * (targetMorphX - lastMorphX);
-                lastMorphY += smoothCoef * (targetMorphY - lastMorphY);
+                float morphXDiff = targetMorphX - lastMorphX;
+                float morphYDiff = targetMorphY - lastMorphY;
+                lastMorphX += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, morphXDiff);
+                lastMorphY += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, morphYDiff);
 
                 // ===== 毎サンプルごとに wMix を再計算（Morph スムージング反映） =====
                 std::array<float, 4> wMix_current;
@@ -598,11 +605,12 @@
                 if (enC) wet += fC[i] * wMix_current[2];
                 if (enD) wet += fD[i] * wMix_current[3];
 
-                // ===== LFO5 modulation スムージング =====
+                // ===== LFO5 modulation スムージング（線形補間） =====
                 float dryWetSmoothed = lastDryWet;  // デフォルト: Dry/Wet スライダー値
                 if (lfo5Enabled)
                 {
-                    lastLfo5Mod += smoothCoef * (lfo5Mod - lastLfo5Mod);
+                    float lfo5Diff = lfo5Mod - lastLfo5Mod;
+                    lastLfo5Mod += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, lfo5Diff);
                     dryWetSmoothed = lastLfo5Mod;  // LFO5 有効時: LFO5 モジュレーション値を使用
                 }
 
