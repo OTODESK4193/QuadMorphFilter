@@ -502,12 +502,14 @@ void LfoEngine::processLFO4(float dt,
     if (lfo4State.phase < 0.0f) lfo4State.phase += twoPi;
 
     // ===== Fade エンベロープ計算 =====
+    // （Fade パラメータ廃止のため、常に targetFade = 1.0）
     float targetFade = 1.0f;
-    float fadeCoeff = fade > 0.01f ? 1.0f - std::exp(-dt / fade) : 1.0f;
+    float fadeCoeff = 1.0f;
     lfo4State.fadeEnv = lfo4State.fadeEnv * (1.0f - fadeCoeff) + targetFade * fadeCoeff;
 
     // ===== Wave計算（Rate変調用） =====
-    float phaseVal = phase * twoPi / 360.0f;
+    // （Phase offset パラメータ廃止のため、phaseVal = 0）
+    float phaseVal = 0.0f;  // phase offset 廃止
     float pX = lfo4State.phase + phaseVal;
     float tX = pX / twoPi;
 
