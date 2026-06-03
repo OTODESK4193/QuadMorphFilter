@@ -82,6 +82,11 @@ private:
 
     float currentGainReduction[2] = { 1.0f, 1.0f };
 
+    // ===== パラメータスムージング（クリック音防止）=====
+    juce::SmoothedValue<float> smoothedDryWet;
+    juce::SmoothedValue<float> smoothedMasterGain;
+    juce::SmoothedValue<float> smoothedCeiling;
+
     // ===== Envelope Follower =====
     float envelopeValue = 0.0f;        // Current envelope (0.0-1.0)
     float attackCoeff = 0.0f;          // Attack coefficient

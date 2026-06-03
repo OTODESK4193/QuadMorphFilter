@@ -37,11 +37,18 @@ public:
         }
 
         // ===== Phase アップデート =====
+        float prevPhase = phase;
         phase += rate * dt;
         if (phase >= 1.0f)
+        {
             phase -= 1.0f;
+            randomValue = rng.nextFloat();  // サイクル開始時に新しいランダム値を生成
+        }
         else if (phase < 0.0f)
+        {
             phase += 1.0f;
+            randomValue = rng.nextFloat();  // サイクル開始時に新しいランダム値を生成
+        }
 
         // ===== Wave 形を計算 =====
         int waveType = (int)apvts.getRawParameterValue("lfo5wave")->load();
@@ -72,6 +79,8 @@ private:
     double sampleRate = 0.0;
     float phase = 0.0f;
     float output = 0.0f;
+    juce::Random rng;
+    float randomValue = 0.5f;
 
     float computeSyncRate(int selection, float bpm)
     {
@@ -138,6 +147,4 @@ private:
         float smooth = t * t * (3.0f - 2.0f * t);
         return smooth;
     }
-
-    float randomValue = 0.5f;
 };

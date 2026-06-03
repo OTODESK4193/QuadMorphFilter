@@ -72,9 +72,6 @@
             layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ id + "rateSync", 1 }, "LFO4 Rate Sync", syncRates, 5));
             layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "rateFree", 1 }, "LFO4 Rate Free", juce::NormalisableRange<float>(0.01f, 20.0f, 0.001f, 0.2f), 1.0f));
             layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "depth", 1 }, "LFO4 Depth", juce::NormalisableRange<float>(0.0f, 4.0f, 0.01f, 0.5f), 0.0f));
-            layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "phase", 1 }, "LFO4 Phase", juce::NormalisableRange<float>(0.0f, 360.0f, 0.1f), 0.0f));
-            layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "fade", 1 }, "LFO4 Fade", juce::NormalisableRange<float>(0.0f, 10.0f, 0.01f, 0.3f), 0.0f));
-            layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "spread", 1 }, "LFO4 Filter Spread", juce::NormalisableRange<float>(0.0f, 360.0f, 0.1f), 0.0f));
             // ===== LFO4 アサイン先 =====
             layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "assignA", 1 }, "LFO4 Assign to LFO1", true));
             layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ id + "assignB", 1 }, "LFO4 Assign to LFO2", false));
@@ -193,6 +190,15 @@
         attackCoeff = 0.0f;
         releaseCoeff = 0.0f;
 
+        // ===== パラメータスムージング初期化（10ms のラップ時間）=====
+        smoothedDryWet.reset(sampleRate, 0.010);
+        smoothedMasterGain.reset(sampleRate, 0.010);
+        smoothedCeiling.reset(sampleRate, 0.010);
+        // 現在の値を設定（ジャンプを防止）
+        smoothedDryWet.setCurrentAndTargetValue(apvts.getRawParameterValue("dryWet")->load());
+        smoothedMasterGain.setCurrentAndTargetValue(apvts.getRawParameterValue("masterGain")->load());
+        smoothedCeiling.setCurrentAndTargetValue(apvts.getRawParameterValue("limiterCeiling")->load());
+
         // ===== 【新規追加】ここに挿入 =====
         // OSのレイテンシをホストに報告
         // (filterA~D で最大のレイテンシを使用)
@@ -216,6 +222,11 @@
         const auto  sampleRate = getSampleRate();
         const int   numChannels = buffer.getNumChannels();
         const float dt = numSamples / (float)sampleRate;
+
+        // ===== SmoothedValue の target を毎ブロック更新（パラメータ変更に追従）=====
+        smoothedDryWet.setTargetValue(apvts.getRawParameterValue("dryWet")->load());
+        smoothedMasterGain.setTargetValue(apvts.getRawParameterValue("masterGain")->load());
+        smoothedCeiling.setTargetValue(apvts.getRawParameterValue("limiterCeiling")->load());
 
         for (int ch = 0; ch < numChannels; ++ch)
             dryBuffer.copyFrom(ch, 0, buffer, ch, 0, numSamples);
@@ -486,16 +497,7 @@
         }
 
         // ===== Dry/Wet + ゲイン + リミッター =====
-        float mixRatio = apvts.getRawParameterValue("dryWet")->load() / 100.0f;
-        // ===== LFO5 でDry/Wet を変調（LFO5 On なら Min/Max の値で置き換える）=====
         bool lfo5Enabled = apvts.getRawParameterValue("lfo5en")->load() > 0.5f;
-        if (lfo5Enabled) {
-            mixRatio = lfo5Mod;  // LFO5 の Min/Max 出力で置き換える
-        }
-        const float gainLinear = juce::Decibels::decibelsToGain(
-            apvts.getRawParameterValue("masterGain")->load());
-        const float ceilingLinear = juce::Decibels::decibelsToGain(
-            apvts.getRawParameterValue("limiterCeiling")->load());
         const float releaseCoef = 1.0f - std::exp(-1.0f / (0.050f * sampleRate));
 
         for (int ch = 0; ch < numChannels; ++ch)
@@ -505,7 +507,18 @@
 
             for (int i = 0; i < numSamples; ++i)
             {
-                float gained = (dry[i] * (1.0f - mixRatio) + out[i] * mixRatio) * gainLinear;
+                // ===== Sample-accurate Dry/Wet スムージング =====
+                float dryWetSmoothed = smoothedDryWet.getNextValue() / 100.0f;
+                // LFO5 が有効な場合は LFO5 の値で置き換える
+                if (lfo5Enabled) {
+                    dryWetSmoothed = lfo5Mod;
+                }
+
+                // ===== Sample-accurate Gain スムージング =====
+                float gainLinear = juce::Decibels::decibelsToGain(smoothedMasterGain.getNextValue());
+                float ceilingLinear = juce::Decibels::decibelsToGain(smoothedCeiling.getNextValue());
+
+                float gained = (dry[i] * (1.0f - dryWetSmoothed) + out[i] * dryWetSmoothed) * gainLinear;
                 float absSignal = std::abs(gained);
                 float targetGr = (absSignal > ceilingLinear) ? ceilingLinear / absSignal : 1.0f;
 

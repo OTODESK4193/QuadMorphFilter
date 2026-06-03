@@ -491,9 +491,6 @@ void LfoEngine::processLFO4(float dt,
     int   rateSync  = (int)apvts.getRawParameterValue("lfo4rateSync")->load();
     float rateFree  = apvts.getRawParameterValue("lfo4rateFree")->load();
     float depth     = apvts.getRawParameterValue("lfo4depth")->load();
-    float phase     = apvts.getRawParameterValue("lfo4phase")->load();
-    float fade      = apvts.getRawParameterValue("lfo4fade")->load();
-    float spread    = apvts.getRawParameterValue("lfo4spread")->load();  // 将来拡張用
 
     // ===== Rate計算 =====
     float rate = sync ? getSyncTime(rateSync, bpm) : rateFree;
