@@ -14,6 +14,7 @@ class XYPadComponent : public juce::Component,
 {
 public:
     explicit XYPadComponent(QuadMorphFilterAudioProcessor& p);
+    ~XYPadComponent() override;
 
     void timerCallback() override;
     void paint(juce::Graphics& g) override;

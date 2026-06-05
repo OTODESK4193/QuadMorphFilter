@@ -24,14 +24,15 @@
 // ────────────────────────────────────────
 namespace {
     constexpr float TAB_HEIGHT_NS = 35.0f;  // タブ高さ
-    constexpr float MARGIN = 15.0f;         // タブ下の余白
+    constexpr float MARGIN_TOP = 15.0f;     // タブ下の余白
+    constexpr float MARGIN_BOTTOM = 15.0f;  // 下の余白
 
-    // ピクセル → 正規化 [0,1] (ラベル中心を 0/1 とする)
+    // ピクセル → 正規化 [0,1] (タブ下のエリアを 0-1 にマップ)
     inline juce::Point<float> toNorm(float px, float py, float w, float h)
     {
         const float iL = 20.0f, iR = w - 20.0f;
-        const float iT = TAB_HEIGHT_NS + MARGIN;
-        const float iB = h - 15.0f;
+        const float iT = TAB_HEIGHT_NS + MARGIN_TOP;
+        const float iB = h - MARGIN_BOTTOM;
         return {
             juce::jlimit(0.0f, 1.0f, (px - iL) / (iR - iL)),
             juce::jlimit(0.0f, 1.0f, (py - iT) / (iB - iT))
@@ -41,8 +42,8 @@ namespace {
     inline juce::Point<float> toPix(float nx, float ny, float w, float h)
     {
         const float iL = 20.0f, iR = w - 20.0f;
-        const float iT = TAB_HEIGHT_NS + MARGIN;
-        const float iB = h - 15.0f;
+        const float iT = TAB_HEIGHT_NS + MARGIN_TOP;
+        const float iB = h - MARGIN_BOTTOM;
         return { iL + nx * (iR - iL), iT + ny * (iB - iT) };
     }
 }
@@ -56,6 +57,20 @@ XYPadComponent::XYPadComponent(QuadMorphFilterAudioProcessor& p)
     for (int i = 0; i < 3; ++i)
         trails[i].fill({ 0.5f, 0.5f });
     startTimerHz(60);
+}
+
+// ────────────────────────────────────────
+// デストラクタ（メモリリーク対策）
+// ────────────────────────────────────────
+XYPadComponent::~XYPadComponent()
+{
+    stopTimer();
+    for (int i = 0; i < 3; ++i)
+    {
+        pixelSeq[i].clear();
+        pixelMap[i].fill(0);
+        trails[i].fill({ 0.5f, 0.5f });
+    }
 }
 
 // ────────────────────────────────────────
@@ -345,13 +360,19 @@ bool XYPadComponent::isRecordingNow() const
 bool XYPadComponent::hitTestTab(float x, float y, int& tabIndex)
 {
     const float w = (float)getWidth();
+    if (w <= 0.0f || getHeight() <= 0)
+        return false;
+
     const float tabW = w / 3.0f;
+    if (tabW <= 0.0f)
+        return false;
 
     if (x < 0.0f || x >= w || y < 0.0f || y >= TAB_HEIGHT)
         return false;
 
-    tabIndex = (int)(x / tabW);
-    return tabIndex >= 0 && tabIndex < 3;
+    int idx = (int)(x / tabW);
+    tabIndex = juce::jlimit(0, 2, idx);
+    return true;
 }
 
 // ────────────────────────────────────────

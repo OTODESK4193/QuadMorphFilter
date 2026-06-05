@@ -485,29 +485,42 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         lastMorphX += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, morphXDiff);
         lastMorphY += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, morphYDiff);
 
+        // ===== 有効フィルター数をカウント =====
+        int enabledCount = (enA ? 1 : 0) + (enB ? 1 : 0) + (enC ? 1 : 0) + (enD ? 1 : 0);
+
         // 毎サンプル wMix 再計算（既存のMorphアルゴリズムを完全維持）
         std::array<float, 4> wMix_current;
-        int morphBlendCurrent = (int)apvts.getRawParameterValue("morphBlend")->load();
-        switch (morphBlendCurrent)
-        {
-        case 1:  wMix_current = MorphEngine::computeLinearWMix(lastMorphX, lastMorphY); break;
-        case 2:  wMix_current = MorphEngine::computeSmoothstepWMix(lastMorphX, lastMorphY); break;
-        case 3:  wMix_current = MorphEngine::computeRadialWMix(lastMorphX, lastMorphY); break;
-        default: wMix_current = MorphEngine::computeEqualPowerWMix(lastMorphX, lastMorphY); break;
-        }
 
-        float sumSq_current = 0.0f;
-        if (enA) sumSq_current += wMix_current[0] * wMix_current[0];
-        if (enB) sumSq_current += wMix_current[1] * wMix_current[1];
-        if (enC) sumSq_current += wMix_current[2] * wMix_current[2];
-        if (enD) sumSq_current += wMix_current[3] * wMix_current[3];
-        if (sumSq_current > 1e-8f)
+        // ===== 有効フィルター数が1以下の場合、モーフィング無効（LFO1効果なし） =====
+        if (enabledCount <= 1)
         {
-            float norm = 1.0f / std::sqrt(sumSq_current);
-            if (enA) wMix_current[0] *= norm;
-            if (enB) wMix_current[1] *= norm;
-            if (enC) wMix_current[2] *= norm;
-            if (enD) wMix_current[3] *= norm;
+            wMix_current = { enA ? 1.0f : 0.0f, enB ? 1.0f : 0.0f,
+                           enC ? 1.0f : 0.0f, enD ? 1.0f : 0.0f };
+        }
+        else
+        {
+            int morphBlendCurrent = (int)apvts.getRawParameterValue("morphBlend")->load();
+            switch (morphBlendCurrent)
+            {
+            case 1:  wMix_current = MorphEngine::computeLinearWMix(lastMorphX, lastMorphY); break;
+            case 2:  wMix_current = MorphEngine::computeSmoothstepWMix(lastMorphX, lastMorphY); break;
+            case 3:  wMix_current = MorphEngine::computeRadialWMix(lastMorphX, lastMorphY); break;
+            default: wMix_current = MorphEngine::computeEqualPowerWMix(lastMorphX, lastMorphY); break;
+            }
+
+            float sumSq_current = 0.0f;
+            if (enA) sumSq_current += wMix_current[0] * wMix_current[0];
+            if (enB) sumSq_current += wMix_current[1] * wMix_current[1];
+            if (enC) sumSq_current += wMix_current[2] * wMix_current[2];
+            if (enD) sumSq_current += wMix_current[3] * wMix_current[3];
+            if (sumSq_current > 1e-8f)
+            {
+                float norm = 1.0f / std::sqrt(sumSq_current);
+                if (enA) wMix_current[0] *= norm;
+                if (enB) wMix_current[1] *= norm;
+                if (enC) wMix_current[2] *= norm;
+                if (enD) wMix_current[3] *= norm;
+            }
         }
 
         // ===== LFO5 modulation スムージング：あなたのオリジナルの挙動へ完全復元 =====
