@@ -206,8 +206,8 @@ void XYPadComponent::mouseDown(const juce::MouseEvent& e)
         // 【修正】ドラッグ中フラグ → LFO がマウス現在位置をリアルタイム表示
         processor.isRecordingDrag[i].store(true, std::memory_order_release);
 
-        // ピクセル記録
-        recordPixel((float)e.x / getWidth(), (float)e.y / getHeight());
+        // ピクセル記録（正しく正規化座標を使用）
+        recordPixel(n.x, n.y);
     }
 
     repaint();
@@ -218,7 +218,7 @@ void XYPadComponent::mouseDrag(const juce::MouseEvent& e)
     auto n = toNorm((float)e.x, (float)e.y,
                     (float)getWidth(), (float)getHeight());
 
-    recordPixel((float)e.x / getWidth(), (float)e.y / getHeight());
+    recordPixel(n.x, n.y);
 
     // Recording 中の各LFOに線形補間でポイント記録
     bool isRecording = false;
