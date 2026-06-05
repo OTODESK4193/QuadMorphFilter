@@ -8,9 +8,15 @@ FilterVisualizer::FilterVisualizer(QuadMorphFilterAudioProcessor& p)
 {
     startTimerHz(60);
 }
+
+FilterVisualizer::~FilterVisualizer()
+{
+    stopTimer();
+}
+
 void FilterVisualizer::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff2a2a2a));
+    g.fillAll(bgColour);
     auto w = (float)getWidth();
     auto h = (float)getHeight();
     // dbTop = 80dB: Reso=10 / 高スロープ時の共鳴ピークが +60dB を超えるモデルがあるため
@@ -687,4 +693,56 @@ void FilterVisualizer::paint(juce::Graphics& g)
         else         path.lineTo((float)px, yPos);
     }
     g.strokePath(path, juce::PathStrokeType(2.0f));
+
+    // ===== E Button at bottom-right =====
+    const int btnSize = 24;
+    juce::Rectangle<int> btnBounds((int)w - btnSize - 4, (int)h - btnSize - 4, btnSize, btnSize);
+    g.setColour(juce::Colours::darkgrey);
+    g.fillRect(btnBounds);
+    g.setColour(juce::Colours::white);
+    g.drawRect(btnBounds, 1);
+    g.setFont(14.0f);
+    g.setColour(juce::Colours::white);
+    g.drawText("E", btnBounds, juce::Justification::centred);
+}
+
+void FilterVisualizer::mouseDown(const juce::MouseEvent& e)
+{
+    if (hitTestEButton(e.x, e.y))
+    {
+        if (e.mods.isPopupMenu())
+        {
+            // Right-click: reset to default color
+            resetBackgroundColour();
+        }
+        else
+        {
+            // Left-click: randomize color
+            randomizeBackgroundColour();
+        }
+        repaint();
+    }
+}
+
+void FilterVisualizer::randomizeBackgroundColour()
+{
+    auto rng = juce::Random();
+    uint8_t r = rng.nextInt(256);
+    uint8_t g = rng.nextInt(256);
+    uint8_t b = rng.nextInt(256);
+    bgColour = juce::Colour(0xff000000 | (r << 16) | (g << 8) | b);
+}
+
+void FilterVisualizer::resetBackgroundColour()
+{
+    bgColour = juce::Colour(0xff2a2a2a);  // Default dark color
+}
+
+bool FilterVisualizer::hitTestEButton(int x, int y) const
+{
+    const int btnSize = 24;
+    int w = getWidth();
+    int h = getHeight();
+    juce::Rectangle<int> btnBounds(w - btnSize - 4, h - btnSize - 4, btnSize, btnSize);
+    return btnBounds.contains(x, y);
 }

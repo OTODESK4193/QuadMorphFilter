@@ -958,7 +958,7 @@ void QuadMorphFilterAudioProcessorEditor::resized()
         {
             auto area = juce::Rectangle<int>(rightX, ctrlY, rightW, rowH).reduced(4, 1);
             osModeLabel.setBounds(area.removeFromLeft(24).reduced(0, 1));
-            osModeCombo.setBounds(area.removeFromLeft(60));
+            osModeCombo.setBounds(area.removeFromLeft(80));
             ctrlY += rowH + gap;
         }
 

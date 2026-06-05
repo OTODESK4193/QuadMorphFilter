@@ -120,7 +120,7 @@ QuadMorphFilterAudioProcessor::createParameterLayout()
 
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{ "osMode", 1 }, "OS Quality",
-        juce::StringArray{ "Off", "Auto", "2x", "4x" }, 0));
+        juce::StringArray{ "Off", "Auto", "2x", "4x" }, 1));
 
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{ "morphBlend", 1 }, "Morph Blend",
@@ -131,7 +131,7 @@ QuadMorphFilterAudioProcessor::createParameterLayout()
         juce::StringArray{ "Abs", "Rel", "Zone" }, 0));
 
     const juce::StringArray modSrcs = { "Off", "+X", "+Y", "-X", "-Y" };
-    const int defaults[4] = { 1, 2, 3, 4 };
+    const int defaults[4] = { 0, 0, 0, 0 };  // Default: All Off
     int fi = 0;
     for (const auto& s : suffixes)
     {
