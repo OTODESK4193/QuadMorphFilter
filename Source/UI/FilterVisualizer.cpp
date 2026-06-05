@@ -103,31 +103,45 @@ void FilterVisualizer::paint(juce::Graphics& g)
     bool visEnB = processor.apvts.getRawParameterValue("enableB")->load() > 0.5f;
     bool visEnC = processor.apvts.getRawParameterValue("enableC")->load() > 0.5f;
     bool visEnD = processor.apvts.getRawParameterValue("enableD")->load() > 0.5f;
+    int enabledCount = (int)visEnA + (int)visEnB + (int)visEnC + (int)visEnD;
+
     // ===== morphBlend 対応: processBlock と同一アルゴリズムを使用 =====
     float wA, wB, wC, wD;
     const int morphBlend = (int)processor.apvts.getRawParameterValue("morphBlend")->load();
     std::array<float, 4> wMixArr;
-    switch (morphBlend)
+
+    // ===== 有効フィルター数が1以下の場合、モーフィング無効（LFO1効果なし） =====
+    if (enabledCount <= 1)
     {
-        case 1:  wMixArr = MorphEngine::computeLinearWMix    (mPos.x, mPos.y); break;
-        case 2:  wMixArr = MorphEngine::computeSmoothstepWMix(mPos.x, mPos.y); break;
-        case 3:  wMixArr = MorphEngine::computeRadialWMix    (mPos.x, mPos.y); break;
-        default: wMixArr = MorphEngine::computeEqualPowerWMix(mPos.x, mPos.y); break;
+        wMixArr = { visEnA ? 1.0f : 0.0f, visEnB ? 1.0f : 0.0f,
+                    visEnC ? 1.0f : 0.0f, visEnD ? 1.0f : 0.0f };
     }
+    else
+    {
+        switch (morphBlend)
+        {
+            case 1:  wMixArr = MorphEngine::computeLinearWMix    (mPos.x, mPos.y); break;
+            case 2:  wMixArr = MorphEngine::computeSmoothstepWMix(mPos.x, mPos.y); break;
+            case 3:  wMixArr = MorphEngine::computeRadialWMix    (mPos.x, mPos.y); break;
+            default: wMixArr = MorphEngine::computeEqualPowerWMix(mPos.x, mPos.y); break;
+        }
+
+        float sumSq = 0.0f;
+        if (visEnA) sumSq += wMixArr[0] * wMixArr[0];
+        if (visEnB) sumSq += wMixArr[1] * wMixArr[1];
+        if (visEnC) sumSq += wMixArr[2] * wMixArr[2];
+        if (visEnD) sumSq += wMixArr[3] * wMixArr[3];
+        if (sumSq > 1e-8f)
+        {
+            float norm = 1.0f / std::sqrt(sumSq);
+            if (visEnA) wMixArr[0] *= norm;
+            if (visEnB) wMixArr[1] *= norm;
+            if (visEnC) wMixArr[2] *= norm;
+            if (visEnD) wMixArr[3] *= norm;
+        }
+    }
+
     wA = wMixArr[0]; wB = wMixArr[1]; wC = wMixArr[2]; wD = wMixArr[3];
-    float sumSq = 0.0f;
-    if (visEnA) sumSq += wA * wA;
-    if (visEnB) sumSq += wB * wB;
-    if (visEnC) sumSq += wC * wC;
-    if (visEnD) sumSq += wD * wD;
-    if (sumSq > 1e-8f)
-    {
-        float norm = 1.0f / std::sqrt(sumSq);
-        if (visEnA) wA *= norm;
-        if (visEnB) wB *= norm;
-        if (visEnC) wC *= norm;
-        if (visEnD) wD *= norm;
-    }
     // ----- 周波数応答の計算 -----
     int wInt = (int)w;
     // rawMag はメンバー変数 (paint()内allocを回避)。使用範囲だけゼロクリア。
