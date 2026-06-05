@@ -20,13 +20,18 @@
 
 // ────────────────────────────────────────
 // 座標変換ヘルパー (インスタンスメソッド内で使用)
+// TAB_HEIGHT を考慮して、タブの下のエリアを 0-1 にマップ
 // ────────────────────────────────────────
 namespace {
+    constexpr float TAB_HEIGHT_NS = 35.0f;  // タブ高さ
+    constexpr float MARGIN = 15.0f;         // タブ下の余白
+
     // ピクセル → 正規化 [0,1] (ラベル中心を 0/1 とする)
     inline juce::Point<float> toNorm(float px, float py, float w, float h)
     {
         const float iL = 20.0f, iR = w - 20.0f;
-        const float iT = 20.0f, iB = h - 20.0f;
+        const float iT = TAB_HEIGHT_NS + MARGIN;
+        const float iB = h - 15.0f;
         return {
             juce::jlimit(0.0f, 1.0f, (px - iL) / (iR - iL)),
             juce::jlimit(0.0f, 1.0f, (py - iT) / (iB - iT))
@@ -36,7 +41,8 @@ namespace {
     inline juce::Point<float> toPix(float nx, float ny, float w, float h)
     {
         const float iL = 20.0f, iR = w - 20.0f;
-        const float iT = 20.0f, iB = h - 20.0f;
+        const float iT = TAB_HEIGHT_NS + MARGIN;
+        const float iB = h - 15.0f;
         return { iL + nx * (iR - iL), iT + ny * (iB - iT) };
     }
 }
@@ -90,32 +96,39 @@ void XYPadComponent::paint(juce::Graphics& g)
     const float w = (float)getWidth();
     const float h = (float)getHeight();
 
+    // ===== 背景と枠 =====
     auto b = getLocalBounds().toFloat();
     g.setColour(juce::Colour(0xff2a2a2a));
     g.fillRoundedRectangle(b, 8.0f);
     g.setColour(juce::Colour(0xff444444));
     g.drawRoundedRectangle(b, 8.0f, 1.5f);
 
-    // コーナーラベル (中心がコーナー 100% 点)
+    // ===== タブ領域の背景 =====
+    g.setColour(juce::Colour(0xff1a1a1a));
+    g.fillRect(0.0f, 0.0f, w, TAB_HEIGHT);
+    g.setColour(juce::Colour(0xff333333));
+    g.drawLine(0.0f, TAB_HEIGHT, w, TAB_HEIGHT, 1.0f);
+
+    // ===== タブボタンを描画 =====
+    drawTabs(g);
+
+    // コーナーラベル (中心がコーナー 100% 点、タブ下に移動)
     g.setColour(juce::Colours::white.withAlpha(0.3f));
     g.setFont(14.0f);
-    g.drawText("A", 10,         10,              20, 20, juce::Justification::centred);
-    g.drawText("B", (int)w-30,  10,              20, 20, juce::Justification::centred);
-    g.drawText("C", 10,         (int)h-30,       20, 20, juce::Justification::centred);
-    g.drawText("D", (int)w-30,  (int)h-30,       20, 20, juce::Justification::centred);
+    g.drawText("A", 10,         (int)TAB_HEIGHT + 10, 20, 20, juce::Justification::centred);
+    g.drawText("B", (int)w-30,  (int)TAB_HEIGHT + 10, 20, 20, juce::Justification::centred);
+    g.drawText("C", 10,         (int)h-30,             20, 20, juce::Justification::centred);
+    g.drawText("D", (int)w-30,  (int)h-30,             20, 20, juce::Justification::centred);
 
-    // ===== Recording グリッド描画（wave=="6" かつ recording[i]==true のLFOのみ） =====
-    // recording[i]==true は mouseDown で設定され、mouseUp/finishRecording() で false になる
-    // つまり、実際にドラッグ中のLFOだけがグリッド表示される
+    // ===== Recording グリッド描画（selectedLfoTab のみ） =====
     bool anyRecordingActive = false;
-    for (int i = 0; i < 3; ++i)
+    if (recording[selectedLfoTab])
     {
         int wave = (int)processor.apvts.getRawParameterValue(
-            "lfo" + juce::String(i + 1) + "wave")->load();
-        if (wave == 6 && recording[i])  // wave==6 かつ recording[i]==true
+            "lfo" + juce::String(selectedLfoTab + 1) + "wave")->load();
+        if (wave == 6)
         {
             anyRecordingActive = true;
-            break;
         }
     }
 
@@ -125,19 +138,18 @@ void XYPadComponent::paint(juce::Graphics& g)
         return;  // Recording モード時はグリッド表示のみ
     }
 
-    // LFO トレイルと現在位置 (toPix で正規化 → ピクセル変換)
+    // ===== 非Recording時：選択タブのLFOのみ表示 =====
     juce::Colour colors[] = {
         juce::Colour(0xff00bcd4),
         juce::Colour(0xffff66dd),
         juce::Colour(0xffff9900)
     };
 
-    for (int i = 0; i < 3; ++i)
-    {
-        if (processor.apvts.getRawParameterValue(
-            "lfo" + juce::String(i + 1) + "en")->load() < 0.5f)
-            continue;
+    const int i = selectedLfoTab;
 
+    if (processor.apvts.getRawParameterValue(
+        "lfo" + juce::String(i + 1) + "en")->load() >= 0.5f)
+    {
         // トレイル描画
         for (int t = 0; t < 30; ++t) {
             int  idx = (trailIdx[i] + t) % 30;
@@ -180,6 +192,19 @@ void XYPadComponent::paint(juce::Graphics& g)
 // ────────────────────────────────────────
 void XYPadComponent::mouseDown(const juce::MouseEvent& e)
 {
+    // ===== タブクリック判定 =====
+    int tabIndex = -1;
+    if (e.y < TAB_HEIGHT && hitTestTab((float)e.x, (float)e.y, tabIndex))
+    {
+        // Recording 中は他のタブに切り替えられない
+        if (isRecordingNow())
+            return;
+
+        selectedLfoTab = tabIndex;
+        repaint();
+        return;
+    }
+
     // 通常の XYPad ドラッグ
     updatePosition(e);
 
@@ -307,6 +332,87 @@ bool XYPadComponent::hitTest(int x, int y)
 }
 
 // ────────────────────────────────────────
+// Recording 状態を確認
+// ────────────────────────────────────────
+bool XYPadComponent::isRecordingNow() const
+{
+    return recording[0] || recording[1] || recording[2];
+}
+
+// ────────────────────────────────────────
+// タブクリック判定
+// ────────────────────────────────────────
+bool XYPadComponent::hitTestTab(float x, float y, int& tabIndex)
+{
+    const float w = (float)getWidth();
+    const float tabW = w / 3.0f;
+
+    if (x < 0.0f || x >= w || y < 0.0f || y >= TAB_HEIGHT)
+        return false;
+
+    tabIndex = (int)(x / tabW);
+    return tabIndex >= 0 && tabIndex < 3;
+}
+
+// ────────────────────────────────────────
+// タブボタンを描画
+// ────────────────────────────────────────
+void XYPadComponent::drawTabs(juce::Graphics& g)
+{
+    const float w = (float)getWidth();
+    const float tabW = w / 3.0f;
+
+    for (int i = 0; i < 3; ++i)
+    {
+        float px = i * tabW;
+        bool isSelected = (i == selectedLfoTab);
+        bool isRecording = recording[i];
+
+        // タブ背景
+        if (isSelected)
+        {
+            g.setColour(juce::Colour(0xff2a2a2a));  // 選択中は明るく
+        }
+        else if (isRecordingNow() && !isRecording)
+        {
+            g.setColour(juce::Colour(0xff0d0d0d).withAlpha(0.5f));  // 他は暗くグレーアウト
+        }
+        else
+        {
+            g.setColour(juce::Colour(0xff1a1a1a));  // 通常
+        }
+        g.fillRect(px, 0.0f, tabW, TAB_HEIGHT);
+
+        // タブ境界
+        g.setColour(juce::Colour(0xff444444));
+        if (i < 2) g.drawLine(px + tabW, 0.0f, px + tabW, TAB_HEIGHT, 1.0f);
+
+        // タブテキスト
+        juce::String tabLabel = "LFO " + juce::String(i + 1);
+        if (isRecording)
+            tabLabel += " REC";
+
+        juce::Colour textColor = juce::Colours::white;
+        if (isRecordingNow() && !isRecording)
+            textColor = juce::Colours::grey.withAlpha(0.4f);
+        else if (isRecording)
+            textColor = juce::Colours::red;
+
+        g.setColour(textColor);
+        g.setFont(13.0f);
+        g.drawText(tabLabel, (int)px, 0, (int)tabW, (int)TAB_HEIGHT,
+                   juce::Justification::centred);
+
+        // 選択中のタブに下線
+        if (isSelected)
+        {
+            g.setColour(juce::Colours::cyan);
+            g.fillRect(px, TAB_HEIGHT - 2.0f, tabW, 2.0f);
+        }
+    }
+}
+
+// ────────────────────────────────────────
 // updatePosition: マウス座標を正規化して APVTS に書き込む
 // ────────────────────────────────────────
 void XYPadComponent::updatePosition(const juce::MouseEvent& e)
@@ -335,35 +441,29 @@ bool XYPadComponent::isRecordingMode() const
 }
 
 // ────────────────────────────────────────
-// Recording 開始（wave=="6" のLFO）
+// Recording 開始（selectedLfoTab のLFOのみ）
 // ────────────────────────────────────────
 void XYPadComponent::startRecording()
 {
     // 既に録音中なら何もしない
-    if (recording[0] || recording[1] || recording[2]) return;
+    if (recording[selectedLfoTab]) return;
 
-    // ===== ラウンドロビン方式: nextRecordTarget から順に wave==6 のLFOを探す =====
-    // クリックのたびに LFO1→LFO2→LFO3→LFO1... とターゲットが切り替わる。
-    // → LFO1 を再録音したいときはクリックを繰り返すだけでよい。
-    for (int attempt = 0; attempt < 3; ++attempt)
-    {
-        int idx = (nextRecordTarget + attempt) % 3;
-        int wave = juce::roundToInt(processor.apvts.getRawParameterValue(
-            "lfo" + juce::String(idx + 1) + "wave")->load());
+    // selectedLfoTab のLFOが wave == 6 かをチェック
+    int wave = juce::roundToInt(processor.apvts.getRawParameterValue(
+        "lfo" + juce::String(selectedLfoTab + 1) + "wave")->load());
 
-        if (wave == 6)
-        {
-            recording[idx] = true;
-            recordingLength[idx] = 0;
-            pixelSeq[idx].clear();                              // Q2: ピクセル順序をリセット
-            std::fill(pixelMap[idx].begin(), pixelMap[idx].end(), 0);
-            processor.recLength[idx].store(0);
-            processor.isWaitingForRecord[idx].store(true,  std::memory_order_release);
-            processor.isRecordingDrag[idx].store   (false, std::memory_order_release);
-            nextRecordTarget = (idx + 1) % 3;                  // 次回ターゲットを進める
-            return;  // 1クリック = 1LFOのみ録音
-        }
-    }
+    if (wave != 6)
+        return;  // wave == 6 ではない場合は Recording しない
+
+    // 選択タブのLFOのみを Recording 対象にする
+    int idx = selectedLfoTab;
+    recording[idx] = true;
+    recordingLength[idx] = 0;
+    pixelSeq[idx].clear();
+    std::fill(pixelMap[idx].begin(), pixelMap[idx].end(), 0);
+    processor.recLength[idx].store(0);
+    processor.isWaitingForRecord[idx].store(true,  std::memory_order_release);
+    processor.isRecordingDrag[idx].store   (false, std::memory_order_release);
 }
 
 // ────────────────────────────────────────
@@ -435,7 +535,7 @@ void XYPadComponent::finishRecording()
 }
 
 // ────────────────────────────────────────
-// Recording グリッド描画（各LFO独立）
+// Recording グリッド描画（selectedLfoTab のみ）
 // ────────────────────────────────────────
 void XYPadComponent::paintRecordingGrid(juce::Graphics& g)
 {
@@ -449,99 +549,47 @@ void XYPadComponent::paintRecordingGrid(juce::Graphics& g)
     g.setColour(juce::Colour(0xffD5DDE5));
     g.drawRoundedRectangle(b, 8.0f, 1.5f);
 
-    // グリッド配置（XYPad 内に 16×16 グリッド）
-    const float cellW = (w - 40.0f) / GRID_SIZE;
-    const float cellH = (h - 40.0f) / GRID_SIZE;
-    const float gridStartX = 20.0f;
-    const float gridStartY = 20.0f;
+    // タブ領域を描画（paintRecordingGrid内でも必要）
+    g.setColour(juce::Colour(0xff1a1a1a));
+    g.fillRect(0.0f, 0.0f, w, TAB_HEIGHT);
+    g.setColour(juce::Colour(0xff333333));
+    g.drawLine(0.0f, TAB_HEIGHT, w, TAB_HEIGHT, 1.0f);
+    drawTabs(g);
 
-    // wave=="6" のLFOをすべて描画（recording フラグ不問）
+    // グリッド配置（XYPad 内に 16×16 グリッド、タブの下から十分な余白を作る）
+    const float gridStartY = TAB_HEIGHT + 15.0f;  // 余白を広げた
+    const float gridHeight = h - gridStartY - 15.0f;
+    const float cellW = (w - 40.0f) / GRID_SIZE;
+    const float cellH = gridHeight / GRID_SIZE;
+    const float gridStartX = 20.0f;
+
+    // selectedLfoTab のLFOのグリッドのみ描画
     juce::Colour lfoColors[] = {
         juce::Colour(0xff00D2D3),  // LFO 1
         juce::Colour(0xffFF9FF3),  // LFO 2
         juce::Colour(0xffFEECA1)   // LFO 3
     };
 
-    // ステータス表示用インデックスを決定
-    // activeIdx: 実際に録音中のLFO（REC表示）
-    // firstWave6: 最初の wave==6 LFO（Ready表示）
-    int activeIdx    = -1;
-    int firstWave6   = -1;
+    const int lfo = selectedLfoTab;
 
-    for (int lfo = 0; lfo < 3; ++lfo)
+    // グリッドセル描画
+    for (int y = 0; y < GRID_SIZE; ++y)
     {
-        int wave = juce::roundToInt(processor.apvts.getRawParameterValue(
-            "lfo" + juce::String(lfo + 1) + "wave")->load());
-        if (wave != 6) continue;
-
-        if (firstWave6 < 0) firstWave6 = lfo;
-        if (recording[lfo] && activeIdx < 0) activeIdx = lfo;
-
-        // グリッドセル描画（各LFO別色）
-        for (int y = 0; y < GRID_SIZE; ++y)
+        for (int x = 0; x < GRID_SIZE; ++x)
         {
-            for (int x = 0; x < GRID_SIZE; ++x)
+            float px = gridStartX + x * cellW;
+            float py = gridStartY + y * cellH;
+
+            g.setColour(juce::Colour(0xff444444));
+            g.drawRect(px, py, cellW, cellH, 0.5f);
+
+            if (pixelMap[lfo][y * GRID_SIZE + x] > 128)
             {
-                float px = gridStartX + x * cellW;
-                float py = gridStartY + y * cellH;
-
-                g.setColour(juce::Colour(0xff444444));
-                g.drawRect(px, py, cellW, cellH, 0.5f);
-
-                if (pixelMap[lfo][y * GRID_SIZE + x] > 128)
-                {
-                    g.setColour(lfoColors[lfo].withAlpha(0.8f));
-                    g.fillRect(px + 1.0f, py + 1.0f, cellW - 2.0f, cellH - 2.0f);
-                }
+                g.setColour(lfoColors[lfo].withAlpha(0.8f));
+                g.fillRect(px + 1.0f, py + 1.0f, cellW - 2.0f, cellH - 2.0f);
             }
         }
     }
 
-    // ステータス表示: 録音中の全LFO番号を列挙
-    // 例: "REC: LFO 1 2" "Ready: LFO 3"
-    {
-        const bool isRec = (activeIdx >= 0);
-        juce::String lfoNums;
-        int maxFrames = 0;
-
-        if (isRec)
-        {
-            // 実際に録音中のLFO番号を列挙
-            for (int lfo = 0; lfo < 3; ++lfo)
-            {
-                if (recording[lfo])
-                {
-                    lfoNums += juce::String(lfo + 1) + " ";
-                    maxFrames = juce::jmax(maxFrames, recordingLength[lfo]);
-                }
-            }
-        }
-        else if (firstWave6 >= 0)
-        {
-            // 待機中: wave==6 のLFO番号を列挙
-            for (int lfo = 0; lfo < 3; ++lfo)
-            {
-                int wave = juce::roundToInt(processor.apvts.getRawParameterValue(
-                    "lfo" + juce::String(lfo + 1) + "wave")->load());
-                if (wave == 6) lfoNums += juce::String(lfo + 1) + " ";
-            }
-        }
-
-        if (lfoNums.isNotEmpty())
-        {
-            g.setColour(isRec ? juce::Colours::red : juce::Colours::grey);
-            g.setFont(14.0f);
-            g.drawText(
-                (isRec ? "REC: LFO " : "Ready: LFO ") + lfoNums.trim(),
-                10, 5, 200, 20, juce::Justification::centredLeft);
-
-            if (isRec)
-            {
-                g.setColour(juce::Colours::white.withAlpha(0.6f));
-                g.setFont(12.0f);
-                g.drawText("Frames: " + juce::String(maxFrames),
-                    (int)w - 120, 5, 110, 20, juce::Justification::centredRight);
-            }
-        }
-    }
+    // ステータス表示は削除（タブで既に表示されているため不要）
 }

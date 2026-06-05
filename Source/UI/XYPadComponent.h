@@ -39,6 +39,13 @@ private:
     QuadMorphFilterAudioProcessor& processor;
     int draggingLfoIndex = -1;
 
+    // ===== タブ機能（LFO選択） =====
+    int selectedLfoTab = 0;  // 0=LFO1, 1=LFO2, 2=LFO3
+    static constexpr float TAB_HEIGHT = 35.0f;
+    bool isRecordingNow() const;
+    bool hitTestTab(float x, float y, int& tabIndex);
+    void drawTabs(juce::Graphics& g);
+
     std::array<juce::Point<float>, 30> trails[3];
     int trailIdx[3] = { 0, 0, 0 };
 
