@@ -284,9 +284,9 @@ A standalone executable is also provided — no DAW installation required. Simpl
 
 Comprehensive user manuals covering detailed operation, advanced techniques, and DSP background are included with this repository.
 
-[ ![Manual PDF (JP)](https://img.shields.io/badge/Manual-PDF_(JP)-red?style=for-the-badge&logo=adobe-acrobat-reader) ](Source/Assets/QuadMorphFilter_UserManual_JP.pdf)
+[ ![Manual Markdown (JP)](https://img.shields.io/badge/Manual-Markdown_(JP)-blue?style=for-the-badge&logo=markdown) ](Source/Assets/QuadMorphFilter_UserManual_JP.md)
 
-[ ![Manual PDF (EN)](https://img.shields.io/badge/Manual-PDF_(EN)-red?style=for-the-badge&logo=adobe-acrobat-reader) ](Source/Assets/QuadMorphFilter_UserManual_EN.pdf)
+[ ![Manual Markdown (EN)](https://img.shields.io/badge/Manual-Markdown_(EN)-blue?style=for-the-badge&logo=markdown) ](Source/Assets/QuadMorphFilter_UserManual_EN.md)
 
 ### Build Requirements
 
