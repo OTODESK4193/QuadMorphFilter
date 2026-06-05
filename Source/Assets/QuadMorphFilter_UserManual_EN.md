@@ -1,7 +1,7 @@
 # Quad Morph Filter — User Manual English Edition
 
 **Version: v1.0.0**  
-**Last Updated: 2024**  
+**Last Updated: June 6, 2026**  
 **Developer: OTODESK**
 
 ---
