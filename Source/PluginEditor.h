@@ -18,6 +18,7 @@ public:
 
     void paint(juce::Graphics&) override;
     void resized() override;
+    void setGuiBackgroundColour(juce::Colour newColour);
 
 private:
     QuadMorphFilterAudioProcessor& audioProcessor;
@@ -126,6 +127,9 @@ private:
     // ===== LFO Cut/Res ボタン外観の定期同期 (30Hz) =====
     void timerCallback() override;
     void updateLfoCutResButtons();
+
+    // ===== GUI Background Color =====
+    juce::Colour guiBgColour = juce::Colour(0xff1a1a1a);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(QuadMorphFilterAudioProcessorEditor)
 };

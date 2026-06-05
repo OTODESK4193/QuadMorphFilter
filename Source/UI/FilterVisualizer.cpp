@@ -3,8 +3,10 @@
 // ==========================================
 #include "FilterVisualizer.h"
 #include "../PluginProcessor.h"
-FilterVisualizer::FilterVisualizer(QuadMorphFilterAudioProcessor& p)
-    : processor(p)
+#include "../PluginEditor.h"
+
+FilterVisualizer::FilterVisualizer(QuadMorphFilterAudioProcessor& p, QuadMorphFilterAudioProcessorEditor* ed)
+    : processor(p), editor(ed)
 {
     startTimerHz(60);
 }
@@ -731,11 +733,21 @@ void FilterVisualizer::randomizeBackgroundColour()
     uint8_t g = rng.nextInt(256);
     uint8_t b = rng.nextInt(256);
     bgColour = juce::Colour(0xff000000 | (r << 16) | (g << 8) | b);
+    notifyBackgroundColourChanged();
 }
 
 void FilterVisualizer::resetBackgroundColour()
 {
     bgColour = juce::Colour(0xff2a2a2a);  // Default dark color
+    notifyBackgroundColourChanged();
+}
+
+void FilterVisualizer::notifyBackgroundColourChanged()
+{
+    if (editor != nullptr)
+    {
+        editor->setGuiBackgroundColour(bgColour);
+    }
 }
 
 bool FilterVisualizer::hitTestEButton(int x, int y) const

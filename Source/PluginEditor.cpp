@@ -12,6 +12,7 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
     juce::LookAndFeel::setDefaultLookAndFeel(&customLookAndFeel);
 
     addAndMakeVisible(visualizer);
+    visualizer.setEditorPointer(this);  // Set editor pointer for background color notification
     addAndMakeVisible(xyPad);
 
     setupFilterGroup(groupA, "A", "A");
@@ -322,7 +323,7 @@ QuadMorphFilterAudioProcessorEditor::~QuadMorphFilterAudioProcessorEditor()
 
 void QuadMorphFilterAudioProcessorEditor::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff1a1a1a));
+    g.fillAll(guiBgColour);
 }
 
 // ==========================================
@@ -356,6 +357,15 @@ void QuadMorphFilterAudioProcessorEditor::updateLfoCutResButtons()
         lfoResBtn[i].setButtonText(labels[resState]);
         lfoResBtn[i].setToggleState(resState > 0, juce::dontSendNotification);
     }
+}
+
+// ==========================================
+// GUI Background Color
+// ==========================================
+void QuadMorphFilterAudioProcessorEditor::setGuiBackgroundColour(juce::Colour newColour)
+{
+    guiBgColour = newColour;
+    repaint();
 }
 
 // ==========================================
