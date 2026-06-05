@@ -7,7 +7,7 @@
 ![Downloads](https://img.shields.io/github/downloads/OTODESK4193/QuadMorphFilter/total.svg)
 
 ##
-<img src="Source/Assets/Screenshot1.jpg" width="600">
+<img src="Source/Assets/Screenshot.jpg" width="600">
 
 ## Overview
 
@@ -365,9 +365,36 @@ Quad Morph Filter adheres to the strictest real-time audio constraints:
 * **Safe Timer Management:** `stopTimer()` explicitly called in UI component destructors to prevent DAW cleanup-order crashes.
 
 
-## Disclaimer
+## ⚠️ Disclaimer
+
+### Software Warranty
 
 This software is provided "as-is", without any warranty of any kind. While extreme care has been taken to ensure real-time safety, audio stability, and Ableton Live compatibility through rigorous testing and professional DSP practices, unexpected behavior may still occur in edge cases or unsupported hosts. Use at your own risk in mission-critical production environments.
+
+### 🔊 Audio Output & Hearing Protection — Critical Notice
+
+**This plugin can generate loud audio output. User bears sole responsibility for safe audio monitoring.**
+
+* **HEARING DAMAGE RISK:** Prolonged exposure to loud sound (≥85 dB SPL) can cause permanent hearing loss. This risk applies regardless of equipment type or volume settings.
+
+* **SPEAKER / HEADPHONE USE:** Always monitor output levels carefully when using speakers or headphones. Start with low volume and gradually increase. Never wear headphones at maximum volume. Take regular breaks during extended use.
+
+* **SELF RESPONSIBILITY:** The user assumes complete and exclusive responsibility for:
+  - Setting appropriate monitoring levels
+  - Protecting their own hearing and that of others
+  - Equipment safety and damage risk
+  - All consequences of audio output usage
+
+* **NO LIABILITY:** The developer(s) and distributor(s) of this software assume no liability for:
+  - Hearing loss, tinnitus, or any physical harm
+  - Equipment damage due to audio output
+  - Any injury or damage caused by improper use
+
+* **USE AT YOUR OWN RISK:** By using this plugin, you acknowledge and accept all audio-related risks inherent to audio production software. If you are sensitive to loud sounds or have any hearing condition, consult an audio professional or medical advisor before use.
+
+---
+
+**Your hearing is irreplaceable. Prioritize hearing protection at all times.** 🎧
 
 
 ## License
@@ -395,8 +422,8 @@ This project is free and open-source, distributed under the **GPLv3 License** (i
 
 ## Support
 
-* **Social / Demo:** [@OTODESK](https://twitter.com/OTODESK)
-* [![Website](https://img.shields.io/badge/Official%20Website-OTODESK-blue?style=for-the-badge)](https://otodesk.com)
+* **Social / Demo:** [@OTODESK](https://x.com/kijyoumusic)
+* [![Website](https://img.shields.io/badge/Official%20Website-OTODESK-blue?style=for-the-badge)](https://otodesk4193.github.io/OTODESK_SITE/)
 
 ---
 
