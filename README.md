@@ -6,6 +6,23 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%2064bit-lightgrey)
 ![Downloads](https://img.shields.io/github/downloads/OTODESK4193/QuadMorphFilter/total.svg)
 
+---
+
+## ⚠️ **IMPORTANT: Audio Safety Notice**
+
+> **This plugin can generate LOUD audio output. HEARING PROTECTION IS YOUR RESPONSIBILITY.**
+>
+> * Always monitor output levels carefully when using speakers or headphones
+> * Start with LOW volume and gradually increase
+> * **NEVER wear headphones at maximum volume**
+> * Take regular breaks during extended use
+> * Prolonged exposure to loud sound (≥85 dB SPL) causes permanent hearing loss
+> * By using this plugin, you assume FULL responsibility for your hearing safety and equipment protection
+>
+> **For detailed safety information, see the [Disclaimer](#%EF%B8%8F-disclaimer) section.**
+
+---
+
 ##
 <img src="Source/Assets/Screenshot.jpg" width="600">
 
