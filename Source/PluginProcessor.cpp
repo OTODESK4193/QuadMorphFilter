@@ -311,7 +311,7 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             maxInputLevel = std::max(maxInputLevel, inputLevel);
         }
 
-        // ===== Step 2: Attack/Release で平滑化（パラメータ連動に修正） =====
+        // ===== Step 2: Attack/Release で平滑化（パラメータ連動） =====
         const float attackTimeMs = apvts.getRawParameterValue("envFollowattack")->load();
         const float releaseTimeMs = apvts.getRawParameterValue("envFollowrelease")->load();
         const float attackTime = std::max(0.001f, attackTimeMs * 0.001f);   // 秒換算
@@ -325,7 +325,7 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         else
             envFollowEnvelopeValue = releaseCoeff * envFollowEnvelopeValue + (1.0f - releaseCoeff) * maxInputLevel;
 
-        // ===== Step 3: 平滑化された値で Cutoff を計算（単位空間ミスマッチの安全な修正） =====
+        // ===== Step 3: 平滑化された値で Cutoff を計算（Invertの論理矛盾を安全に修正） =====
         auto* cutoffAParam = apvts.getParameter("cutoffA");
         if (cutoffAParam != nullptr)
         {
@@ -333,12 +333,20 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             float depthPercent = apvts.getRawParameterValue("envFollowdepth")->load() / 100.0f;
             bool invert = apvts.getRawParameterValue("envFollowinvert")->load() > 0.5f;
 
-            float envMod = invert ? (1.0f - envFollowEnvelopeValue) : envFollowEnvelopeValue;
+            float modulatedNormalized = rawNormalizedCutoff;
 
-            // 正規化空間（0.0〜1.0）の枠組みで正しく増減・幅をコントロール
-            float modulatedNormalized = rawNormalizedCutoff + (envMod * depthPercent * (1.0f - rawNormalizedCutoff));
+            if (invert)
+            {
+                // 反転時：音が消えている時はベース位置（200Hz）を維持し、入力音に応じて下方向（床=0.0）へ閉じる
+                modulatedNormalized = rawNormalizedCutoff - (envFollowEnvelopeValue * depthPercent * rawNormalizedCutoff);
+            }
+            else
+            {
+                // 通常時：音が消えている時はベース位置（200Hz）を維持し、入力音に応じて上方向（天井=1.0）へ開く
+                modulatedNormalized = rawNormalizedCutoff + (envFollowEnvelopeValue * depthPercent * (1.0f - rawNormalizedCutoff));
+            }
 
-            // 最後にフィルターが要求する正しい実数Hz空間（20〜20000Hz）にマッピング
+            // 最後にフィルターが要求する正しい実数Hz空間（20〜20000Hz）に安全マッピング
             envFollowCutoffNormA = cutoffAParam->convertFrom0to1(juce::jlimit(0.0f, 1.0f, modulatedNormalized));
         }
     }
