@@ -499,13 +499,17 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         }
         else
         {
+            bool lfo1Enabled = apvts.getRawParameterValue("lfo1en")->load() > 0.5f;
+            float morphX = lfo1Enabled ? posX : lastMorphX;
+            float morphY = lfo1Enabled ? posY : lastMorphY;
+
             int morphBlendCurrent = (int)apvts.getRawParameterValue("morphBlend")->load();
             switch (morphBlendCurrent)
             {
-            case 1:  wMix_current = MorphEngine::computeLinearWMix(lastMorphX, lastMorphY); break;
-            case 2:  wMix_current = MorphEngine::computeSmoothstepWMix(lastMorphX, lastMorphY); break;
-            case 3:  wMix_current = MorphEngine::computeRadialWMix(lastMorphX, lastMorphY); break;
-            default: wMix_current = MorphEngine::computeEqualPowerWMix(lastMorphX, lastMorphY); break;
+            case 1:  wMix_current = MorphEngine::computeLinearWMix(morphX, morphY); break;
+            case 2:  wMix_current = MorphEngine::computeSmoothstepWMix(morphX, morphY); break;
+            case 3:  wMix_current = MorphEngine::computeRadialWMix(morphX, morphY); break;
+            default: wMix_current = MorphEngine::computeEqualPowerWMix(morphX, morphY); break;
             }
 
             float sumSq_current = 0.0f;
