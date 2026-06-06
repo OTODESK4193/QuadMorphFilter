@@ -175,9 +175,8 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
     currentGainReduction[1] = 1.0f;
 
     envFollowerSampleRate = sampleRate;
-    envelopeValue = 1.0f;
-    attackCoeff = 0.0f;
-    releaseCoeff = 0.0f;
+    peakValue = 0.0f;
+    lastPeakValue = 0.0f;
 
     lastDryWet = juce::jlimit(0.0f, 1.0f, apvts.getRawParameterValue("dryWet")->load() / 100.0f);
     lastMasterGainLinear = juce::Decibels::decibelsToGain(apvts.getRawParameterValue("masterGain")->load());
@@ -337,7 +336,8 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     // ===== Envelope Follower =====
     if (apvts.getRawParameterValue("envFollowen")->load() > 0.5f)
     {
-        float peakValue = 0.0f;
+        // ===== ブロック内のピーク値を計算（正確な音量変化キャプチャ） =====
+        peakValue = 0.0f;
         for (int ch = 0; ch < numChannels; ++ch)
         {
             const auto* data = buffer.getReadPointer(ch);
@@ -346,22 +346,12 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         }
         peakValue = juce::jlimit(0.0f, 1.0f, peakValue);
 
-        // ===== 入力信号の ENV に追従（固定 Attack/Release で平滑化） =====
-        // Attack と Release を非常に短く設定して、envelopeValue が peakValue に素早く追従
-        float attackCoeff = std::exp(-numSamples / (1.0f * 0.001f * (float)envFollowerSampleRate));
-        float releaseCoeff = std::exp(-numSamples / (1.0f * 0.001f * (float)envFollowerSampleRate));
-
-        if (peakValue > envelopeValue)
-            envelopeValue = attackCoeff * envelopeValue + (1.0f - attackCoeff) * peakValue;
-        else
-            envelopeValue = releaseCoeff * envelopeValue + (1.0f - releaseCoeff) * peakValue;
-
-        // ===== 前フレームの envelopeValue との差分を計算（変化幅を抽出） =====
-        float envelopeDelta = envelopeValue - lastEnvelopeValue;
-        lastEnvelopeValue = envelopeValue;
+        // ===== ピーク値の変化幅を計算（音量変化を直接追従） =====
+        float peakDelta = peakValue - lastPeakValue;
+        lastPeakValue = peakValue;
 
         // ===== 増加中（立ち上がり）のみを抽出 =====
-        float envMod = std::max(0.0f, envelopeDelta);
+        float envMod = std::max(0.0f, peakDelta);
 
         // ===== Invert：減衰を強調（立ち上がりを反転） =====
         bool invert = apvts.getRawParameterValue("envFollowinvert")->load() > 0.5f;
@@ -370,10 +360,14 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             envMod = 1.0f - std::min(1.0f, envMod);
         }
 
+        // ===== ベースカットオフからMAXまでの範囲をEnvFollowで制御 =====
+        float baseCutoff = apvts.getRawParameterValue("cutoffA")->load();  // 0.0-1.0
         float depthPercent = apvts.getRawParameterValue("envFollowdepth")->load() / 100.0f;
+        float totalCutoffNorm = baseCutoff + (envMod * depthPercent * (1.0f - baseCutoff));
+        totalCutoffNorm = juce::jlimit(0.0f, 1.0f, totalCutoffNorm);
 
         // ===== 毎ブロック 1 回だけ Cutoff を設定 =====
-        float modulatedCutoff = 20.0f * std::pow(1000.0f, envMod * depthPercent);
+        float modulatedCutoff = 20.0f * std::pow(1000.0f, totalCutoffNorm);
         filterA.setCutoff(juce::jlimit(20.0f, 20000.0f, modulatedCutoff));
     }
 
