@@ -3,6 +3,7 @@
 // ==========================================
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <iostream>
 
 juce::AudioProcessorValueTreeState::ParameterLayout
 QuadMorphFilterAudioProcessor::createParameterLayout()
@@ -328,48 +329,41 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             f.setSlope(juce::roundToInt(apvts.getRawParameterValue("slope" + s)->load()));
         };
 
+    // ===== Envelope Follower：毎サンプル入力レベルでCutoffを変調 =====
+    bool envFollowEnabled = apvts.getRawParameterValue("envFollowen")->load() > 0.5f;
+
+    if (envFollowEnabled)
+    {
+        float baseCutoff = apvts.getRawParameterValue("cutoffA")->load();
+        float depthPercent = apvts.getRawParameterValue("envFollowdepth")->load() / 100.0f;
+        bool invert = apvts.getRawParameterValue("envFollowinvert")->load() > 0.5f;
+
+        // ===== 毎サンプル処理 =====
+        for (int i = 0; i < numSamples; ++i)
+        {
+            // ===== 全チャンネルの入力レベルを取得（絶対値の最大値） =====
+            float inputLevel = 0.0f;
+            for (int ch = 0; ch < numChannels; ++ch)
+            {
+                inputLevel = std::max(inputLevel, std::abs(buffer.getSample(ch, i)));
+            }
+
+            // ===== Invert処理 =====
+            float envMod = invert ? (1.0f - inputLevel) : inputLevel;
+
+            // ===== Cutoffを計算 =====
+            float modifiedCutoff = baseCutoff + (envMod * depthPercent * (1.0f - baseCutoff));
+            modifiedCutoff = juce::jlimit(0.0f, 1.0f, modifiedCutoff);
+
+            // ===== Cutoffパラメーターを毎サンプル更新 =====
+            apvts.getParameter("cutoffA")->setValue(modifiedCutoff);
+        }
+    }
+
     updateTpt(filterA, "A", 0);
     updateTpt(filterB, "B", 1);
     updateTpt(filterC, "C", 2);
     updateTpt(filterD, "D", 3);
-
-    // ===== Envelope Follower =====
-    if (apvts.getRawParameterValue("envFollowen")->load() > 0.5f)
-    {
-        // ===== ブロック内のピーク値を計算（正確な音量変化キャプチャ） =====
-        peakValue = 0.0f;
-        for (int ch = 0; ch < numChannels; ++ch)
-        {
-            const auto* data = buffer.getReadPointer(ch);
-            for (int i = 0; i < numSamples; ++i)
-                peakValue = std::max(peakValue, std::abs(data[i]));
-        }
-        peakValue = juce::jlimit(0.0f, 1.0f, peakValue);
-
-        // ===== ピーク値の変化幅を計算（音量変化を直接追従） =====
-        float peakDelta = peakValue - lastPeakValue;
-        lastPeakValue = peakValue;
-
-        // ===== 増加中（立ち上がり）のみを抽出 =====
-        float envMod = std::max(0.0f, peakDelta);
-
-        // ===== Invert：減衰を強調（立ち上がりを反転） =====
-        bool invert = apvts.getRawParameterValue("envFollowinvert")->load() > 0.5f;
-        if (invert)
-        {
-            envMod = 1.0f - std::min(1.0f, envMod);
-        }
-
-        // ===== ベースカットオフからMAXまでの範囲をEnvFollowで制御 =====
-        float baseCutoff = apvts.getRawParameterValue("cutoffA")->load();  // 0.0-1.0
-        float depthPercent = apvts.getRawParameterValue("envFollowdepth")->load() / 100.0f;
-        float totalCutoffNorm = baseCutoff + (envMod * depthPercent * (1.0f - baseCutoff));
-        totalCutoffNorm = juce::jlimit(0.0f, 1.0f, totalCutoffNorm);
-
-        // ===== 毎ブロック 1 回だけ Cutoff を設定 =====
-        float modulatedCutoff = 20.0f * std::pow(1000.0f, totalCutoffNorm);
-        filterA.setCutoff(juce::jlimit(20.0f, 20000.0f, modulatedCutoff));
-    }
 
     for (int idx = 0; idx < 4; ++idx)
         svfQuad.setEnabled(idx, false);
