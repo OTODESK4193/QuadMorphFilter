@@ -93,8 +93,7 @@ private:
     float lastLfo5Mod = 0.5f;                  // LFO5 modulation スムージング（P4）
 
     // ===== Envelope Follower =====
-    float peakValue = 0.0f;            // Current peak value
-    float lastPeakValue = 0.0f;        // Previous peak for delta calculation
+    float envFollowEnvelopeValue = 0.0f;  // Attack/Release で平滑化された入力レベル
     double envFollowerSampleRate = 0.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(QuadMorphFilterAudioProcessor)

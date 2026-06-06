@@ -1,6 +1,3 @@
-// ==========================================
-// PluginProcessor.cpp
-// ==========================================
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include <iostream>
@@ -84,7 +81,7 @@ QuadMorphFilterAudioProcessor::createParameterLayout()
         layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ id + "rateSync", 1 }, "LFO5 Rate Sync", syncRates, 5));
         layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "rateFree", 1 }, "LFO5 Rate Free", juce::NormalisableRange<float>(0.01f, 20.0f, 0.001f, 0.2f), 1.0f));
         layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "min", 1 }, "LFO5 Min", juce::NormalisableRange<float>(0.0f, 100.0f, 0.1f), 0.0f));
-        layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "max", 1 }, "LFO5 Max", juce::NormalisableRange<float>(0.0f, 100.0f, 0.1f), 100.0f));
+        layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ id + "max", 1 }, "Lfo5 Max", juce::NormalisableRange<float>(0.0f, 100.0f, 0.1f), 100.0f));
     }
 
     // ===== Envelope Follower =====
@@ -132,7 +129,7 @@ QuadMorphFilterAudioProcessor::createParameterLayout()
         juce::StringArray{ "Abs", "Rel", "Zone" }, 0));
 
     const juce::StringArray modSrcs = { "Off", "+X", "+Y", "-X", "-Y" };
-    const int defaults[4] = { 0, 0, 0, 0 };  // Default: All Off
+    const int defaults[4] = { 0, 0, 0, 0 };
     int fi = 0;
     for (const auto& s : suffixes)
     {
@@ -176,8 +173,7 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
     currentGainReduction[1] = 1.0f;
 
     envFollowerSampleRate = sampleRate;
-    peakValue = 0.0f;
-    lastPeakValue = 0.0f;
+    envFollowEnvelopeValue = 0.0f;
 
     lastDryWet = juce::jlimit(0.0f, 1.0f, apvts.getRawParameterValue("dryWet")->load() / 100.0f);
     lastMasterGainLinear = juce::Decibels::decibelsToGain(apvts.getRawParameterValue("masterGain")->load());
@@ -297,6 +293,56 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         filterD.setOsMode(osMode);
     }
 
+    // ===== Envelope Follower：Attack/Release で平滑化 =====
+    float envFollowCutoffNormA = apvts.getRawParameterValue("cutoffA")->load();
+    bool envFollowEnabled = apvts.getRawParameterValue("envFollowen")->load() > 0.5f;
+
+    if (envFollowEnabled)
+    {
+        // ===== Step 1: ブロック内のピーク値を計算 =====
+        float maxInputLevel = 0.0f;
+        for (int i = 0; i < numSamples; ++i)
+        {
+            float inputLevel = 0.0f;
+            for (int ch = 0; ch < numChannels; ++ch)
+            {
+                inputLevel = std::max(inputLevel, std::abs(buffer.getSample(ch, i)));
+            }
+            maxInputLevel = std::max(maxInputLevel, inputLevel);
+        }
+
+        // ===== Step 2: Attack/Release で平滑化（パラメータ連動に修正） =====
+        const float attackTimeMs = apvts.getRawParameterValue("envFollowattack")->load();
+        const float releaseTimeMs = apvts.getRawParameterValue("envFollowrelease")->load();
+        const float attackTime = std::max(0.001f, attackTimeMs * 0.001f);   // 秒換算
+        const float releaseTime = std::max(0.001f, releaseTimeMs * 0.001f); // 秒換算
+
+        const float attackCoeff = std::exp(-numSamples / (attackTime * expectedSampleRate));
+        const float releaseCoeff = std::exp(-numSamples / (releaseTime * expectedSampleRate));
+
+        if (maxInputLevel > envFollowEnvelopeValue)
+            envFollowEnvelopeValue = attackCoeff * envFollowEnvelopeValue + (1.0f - attackCoeff) * maxInputLevel;
+        else
+            envFollowEnvelopeValue = releaseCoeff * envFollowEnvelopeValue + (1.0f - releaseCoeff) * maxInputLevel;
+
+        // ===== Step 3: 平滑化された値で Cutoff を計算（単位空間ミスマッチの安全な修正） =====
+        auto* cutoffAParam = apvts.getParameter("cutoffA");
+        if (cutoffAParam != nullptr)
+        {
+            float rawNormalizedCutoff = cutoffAParam->getValue(); // 0.0 ~ 1.0 の正規化空間
+            float depthPercent = apvts.getRawParameterValue("envFollowdepth")->load() / 100.0f;
+            bool invert = apvts.getRawParameterValue("envFollowinvert")->load() > 0.5f;
+
+            float envMod = invert ? (1.0f - envFollowEnvelopeValue) : envFollowEnvelopeValue;
+
+            // 正規化空間（0.0〜1.0）の枠組みで正しく増減・幅をコントロール
+            float modulatedNormalized = rawNormalizedCutoff + (envMod * depthPercent * (1.0f - rawNormalizedCutoff));
+
+            // 最後にフィルターが要求する正しい実数Hz空間（20〜20000Hz）にマッピング
+            envFollowCutoffNormA = cutoffAParam->convertFrom0to1(juce::jlimit(0.0f, 1.0f, modulatedNormalized));
+        }
+    }
+
     auto readModSrc = [&](const juce::String& paramId) -> int {
         return juce::jlimit(0, 4, juce::roundToInt(apvts.getRawParameterValue(paramId)->load()));
         };
@@ -311,6 +357,13 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             const int  resModIdx = resSrc > 0 ? resSrc - 1 : 0;
 
             float baseCutoff = apvts.getRawParameterValue("cutoff" + s)->load();
+
+            // ===== FilterA に Envelope Follower を適用 =====
+            if (s == "A")
+            {
+                baseCutoff = envFollowCutoffNormA;
+            }
+
             float baseRes = apvts.getRawParameterValue("res" + s)->load();
 
             float fc = lfoCutOn ? MorphEngine::applyFrequencyMod(baseCutoff, cM[cutModIdx]) : baseCutoff;
@@ -328,37 +381,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             f.setType(juce::roundToInt(apvts.getRawParameterValue("type" + s)->load()));
             f.setSlope(juce::roundToInt(apvts.getRawParameterValue("slope" + s)->load()));
         };
-
-    // ===== Envelope Follower：毎サンプル入力レベルでCutoffを変調 =====
-    bool envFollowEnabled = apvts.getRawParameterValue("envFollowen")->load() > 0.5f;
-
-    if (envFollowEnabled)
-    {
-        float baseCutoff = apvts.getRawParameterValue("cutoffA")->load();
-        float depthPercent = apvts.getRawParameterValue("envFollowdepth")->load() / 100.0f;
-        bool invert = apvts.getRawParameterValue("envFollowinvert")->load() > 0.5f;
-
-        // ===== 毎サンプル処理 =====
-        for (int i = 0; i < numSamples; ++i)
-        {
-            // ===== 全チャンネルの入力レベルを取得（絶対値の最大値） =====
-            float inputLevel = 0.0f;
-            for (int ch = 0; ch < numChannels; ++ch)
-            {
-                inputLevel = std::max(inputLevel, std::abs(buffer.getSample(ch, i)));
-            }
-
-            // ===== Invert処理 =====
-            float envMod = invert ? (1.0f - inputLevel) : inputLevel;
-
-            // ===== Cutoffを計算 =====
-            float modifiedCutoff = baseCutoff + (envMod * depthPercent * (1.0f - baseCutoff));
-            modifiedCutoff = juce::jlimit(0.0f, 1.0f, modifiedCutoff);
-
-            // ===== Cutoffパラメーターを毎サンプル更新 =====
-            apvts.getParameter("cutoffA")->setValue(modifiedCutoff);
-        }
-    }
 
     updateTpt(filterA, "A", 0);
     updateTpt(filterB, "B", 1);
@@ -442,7 +464,7 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     buffer.clear();
 
     // =========================================================================
-    // ★真の解決：オーディオバッファのマルチチャンネルスタックポインタキャッシュ
+    // オーディオバッファのマルチチャンネルスタックポインタキャッシュ
     // =========================================================================
     float* outPtrs[2] = { nullptr, nullptr };
     const float* dryPtrs[2] = { nullptr, nullptr };
@@ -462,12 +484,10 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     }
 
     // =========================================================================
-    // ★サンプルループを「外側」に変更
-    // これにより、L/Rが寸分の狂いもなく全く同一のスムージング位相で処理されます。
+    // サンプルループ
     // =========================================================================
     for (int i = 0; i < numSamples; ++i)
     {
-        // 1回だけ共通のスムージング計算を進める（あなたの数式・アルゴリズムを完全維持）
         float dryWetDiff = currentDryWetNormalized - lastDryWet;
         lastDryWet += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, dryWetDiff);
 
@@ -484,13 +504,10 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         lastMorphX += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, morphXDiff);
         lastMorphY += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, morphYDiff);
 
-        // ===== 有効フィルター数をカウント =====
         int enabledCount = (enA ? 1 : 0) + (enB ? 1 : 0) + (enC ? 1 : 0) + (enD ? 1 : 0);
 
-        // 毎サンプル wMix 再計算（既存のMorphアルゴリズムを完全維持）
         std::array<float, 4> wMix_current;
 
-        // ===== 有効フィルター数が1以下の場合、モーフィング無効（LFO1効果なし） =====
         if (enabledCount <= 1)
         {
             wMix_current = { enA ? 1.0f : 0.0f, enB ? 1.0f : 0.0f,
@@ -526,16 +543,14 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             }
         }
 
-        // ===== LFO5 modulation スムージング：あなたのオリジナルの挙動へ完全復元 =====
         float dryWetSmoothed = lastDryWet;
         if (lfo5Enabled)
         {
             float lfo5Diff = lfo5Mod - lastLfo5Mod;
             lastLfo5Mod += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, lfo5Diff);
-            dryWetSmoothed = lastLfo5Mod;  // LFO5有効時は期待通りこの変調値が出力されます
+            dryWetSmoothed = lastLfo5Mod;
         }
 
-        // 正しい Equal Power Crossfade とスムージングされた線形ゲインのロード
         float w_rad = dryWetSmoothed * juce::MathConstants<float>::pi * 0.5f;
         float dry_amp = juce::dsp::FastMathApproximations::cos(w_rad);
         float wet_amp = juce::dsp::FastMathApproximations::sin(w_rad);
@@ -543,7 +558,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         float gainLinear = lastMasterGainLinear;
         float ceilingLinear = lastCeilingLinear;
 
-        // 内側でチャンネルループを回す（左右のゲインの同期を完全担保）
         for (int ch = 0; ch < numChannels; ++ch)
         {
             float wet = 0.0f;
