@@ -175,7 +175,7 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
     currentGainReduction[1] = 1.0f;
 
     envFollowerSampleRate = sampleRate;
-    envelopeValue = 0.0f;
+    envelopeValue = 1.0f;
     attackCoeff = 0.0f;
     releaseCoeff = 0.0f;
 
@@ -337,12 +337,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     // ===== Envelope Follower =====
     if (apvts.getRawParameterValue("envFollowen")->load() > 0.5f)
     {
-        float attackMs = apvts.getRawParameterValue("envFollowattack")->load();
-        float releaseMs = apvts.getRawParameterValue("envFollowrelease")->load();
-
-        attackCoeff = std::exp(-numSamples / (attackMs * 0.001f * (float)envFollowerSampleRate));
-        releaseCoeff = std::exp(-numSamples / (releaseMs * 0.001f * (float)envFollowerSampleRate));
-
         float peakValue = 0.0f;
         for (int ch = 0; ch < numChannels; ++ch)
         {
@@ -352,17 +346,34 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         }
         peakValue = juce::jlimit(0.0f, 1.0f, peakValue);
 
+        // ===== 入力信号の ENV に追従（固定 Attack/Release で平滑化） =====
+        // Attack と Release を非常に短く設定して、envelopeValue が peakValue に素早く追従
+        float attackCoeff = std::exp(-numSamples / (1.0f * 0.001f * (float)envFollowerSampleRate));
+        float releaseCoeff = std::exp(-numSamples / (1.0f * 0.001f * (float)envFollowerSampleRate));
+
         if (peakValue > envelopeValue)
             envelopeValue = attackCoeff * envelopeValue + (1.0f - attackCoeff) * peakValue;
         else
             envelopeValue = releaseCoeff * envelopeValue + (1.0f - releaseCoeff) * peakValue;
 
+        // ===== 前フレームの envelopeValue との差分を計算（変化幅を抽出） =====
+        float envelopeDelta = envelopeValue - lastEnvelopeValue;
+        lastEnvelopeValue = envelopeValue;
+
+        // ===== 増加中（立ち上がり）のみを抽出 =====
+        float envMod = std::max(0.0f, envelopeDelta);
+
+        // ===== Invert：減衰を強調（立ち上がりを反転） =====
         bool invert = apvts.getRawParameterValue("envFollowinvert")->load() > 0.5f;
-        float envMod = invert ? (1.0f - envelopeValue) : envelopeValue;
+        if (invert)
+        {
+            envMod = 1.0f - std::min(1.0f, envMod);
+        }
 
         float depthPercent = apvts.getRawParameterValue("envFollowdepth")->load() / 100.0f;
-        float baseCutoff = apvts.getRawParameterValue("cutoffA")->load();
-        float modulatedCutoff = baseCutoff * std::pow(2.0f, (envMod - 0.5f) * 8.0f * depthPercent);
+
+        // ===== 毎ブロック 1 回だけ Cutoff を設定 =====
+        float modulatedCutoff = 20.0f * std::pow(1000.0f, envMod * depthPercent);
         filterA.setCutoff(juce::jlimit(20.0f, 20000.0f, modulatedCutoff));
     }
 

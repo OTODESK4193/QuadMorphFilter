@@ -94,6 +94,7 @@ private:
 
     // ===== Envelope Follower =====
     float envelopeValue = 0.0f;        // Current envelope (0.0-1.0)
+    float lastEnvelopeValue = 0.0f;    // Previous envelope for delta calculation
     float attackCoeff = 0.0f;          // Attack coefficient
     float releaseCoeff = 0.0f;         // Release coefficient
     double envFollowerSampleRate = 0.0;

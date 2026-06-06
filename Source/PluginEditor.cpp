@@ -281,25 +281,7 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
     envFollower.invAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         audioProcessor.apvts, "envFollowinvert", envFollower.invertButton);
 
-    envFollower.attackLabel.setText("Attack", juce::dontSendNotification);
-    envFollower.attackLabel.setJustificationType(juce::Justification::centredRight);
-    addAndMakeVisible(envFollower.attackLabel);
-    envFollower.attackSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    envFollower.attackSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
-    envFollower.attackSlider.setTextValueSuffix(" ms");
-    addAndMakeVisible(envFollower.attackSlider);
-    envFollower.attAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        audioProcessor.apvts, "envFollowattack", envFollower.attackSlider);
-
-    envFollower.releaseLabel.setText("Release", juce::dontSendNotification);
-    envFollower.releaseLabel.setJustificationType(juce::Justification::centredRight);
-    addAndMakeVisible(envFollower.releaseLabel);
-    envFollower.releaseSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    envFollower.releaseSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
-    envFollower.releaseSlider.setTextValueSuffix(" ms");
-    addAndMakeVisible(envFollower.releaseSlider);
-    envFollower.relAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        audioProcessor.apvts, "envFollowrelease", envFollower.releaseSlider);
+    // ===== Attack/Release パラメータは廃止 =====
 
     envFollower.depthLabel.setText("Depth", juce::dontSendNotification);
     envFollower.depthLabel.setJustificationType(juce::Justification::centredRight);
