@@ -452,8 +452,6 @@ Auto-modulate filter parameters based on input signal amplitude:
 | Parameter | Role |
 |---|---|
 | **Enable** | On/Off |
-| **Attack** | Response speed on signal rise (ms) |
-| **Release** | Response speed on signal fall (ms) |
 | **Depth** | Modulation amount (0–100%) |
 | **Invert** | Reverse envelope polarity |
 
@@ -665,7 +663,7 @@ Wet mix oscillation control.
 - LFO2: Billiard, Sync On, Rate = 1/16
 - LFO3: Lemniscate, Sync Off, Rate 0.7 Hz, Min=1, Max=8
 - Morph Blend: Radial
-- Envelope Follower: On, Depth 50%, Attack 50ms, Release 500ms
+- Envelope Follower: On, Depth 50%
 
 **Result:** Living, chaotic sound. Never the same twice.
 

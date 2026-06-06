@@ -85,7 +85,7 @@ A comprehensive, handcrafted collection spanning 6 distinct filter architecture 
 ### 🔊 Professional Audio Features
 
 * **Oversampling (4 modes):** Off / Auto / 2× / 4× — crucial for Moog and TB-303 models to suppress aliasing under high resonance.
-* **Envelope Follower:** Sidechain-style input tracking with independent Attack, Release, Depth, and Invert controls.
+* **Envelope Follower:** Sidechain-style input tracking with Depth and Invert controls.
 * **Dry/Wet Mix:** Smooth linear interpolation of wet/dry blend (τ = 50 ms) eliminates zipper noise under automation.
 * **Master Output Gain:** Professional-grade gain staging (-36 to +24 dB).
 * **Limiter Ceiling:** Transparent RMS-tracking limiter with adjustable ceiling threshold.
@@ -259,8 +259,6 @@ Control the minimum and maximum mix level of the wet signal via LFO5:
 | Parameter | Range | Default | Description |
 |---|---|---|---|
 | Envelope Follower Enable | On/Off | Off | Activate input envelope tracking |
-| Envelope Attack | 1 – 500 ms | 10 ms | Envelope follower attack time |
-| Envelope Release | 1 – 500 ms | 100 ms | Envelope follower release time |
 | Envelope Depth | 0 – 100% | 50% | Envelope follower modulation amount |
 | Envelope Invert | On/Off | Off | Invert envelope polarity |
 
