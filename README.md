@@ -32,8 +32,8 @@
 
 Morph up to **4 different filters simultaneously** with equal-power blending, control them via 19 LFO waveforms, record your own XY patterns, and explore infinite sonic territories — all in real time with extreme audio stability.
 
-👉 **[Watch the Demo Video (動作デモ動画はこちら！)](https://youtu.be/REPLACE-WITH-YOUR-VIDEO-ID)**
-
+👉 **[Watch the Demo Video (動作デモ動画（概要編）はこちら！)](https://youtu.be/DlfUTYyS-48)**
+👉 **[Watch the Demo Video (動作デモ動画（応用編）はこちら！)](https://youtu.be/du0M7cGGnPc)**
 
 ## Key Features
 
