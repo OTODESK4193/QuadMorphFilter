@@ -32,8 +32,23 @@
 
 Morph up to **4 different filters simultaneously** with equal-power blending, control them via 19 LFO waveforms, record your own XY patterns, and explore infinite sonic territories — all in real time with extreme audio stability.
 
-👉 **[Watch the Demo Video (動作デモ動画（概要編）はこちら！)](https://youtu.be/DlfUTYyS-48)**
-👉 **[Watch the Demo Video (動作デモ動画（応用編）はこちら！)](https://youtu.be/du0M7cGGnPc)**
+## 🎬 Demo Videos
+
+<p align="center">
+  <b>Introduction (概要編)</b><br>
+  <a href="https://youtu.be/DlfUTYyS-48">
+    <img src="https://img.youtube.com/vi/DlfUTYyS-48/maxresdefault.jpg" 
+         alt="Quad Morph Filter - Introduction" width="640" height="360">
+  </a>
+</p>
+
+<p align="center">
+  <b>Advanced Techniques (応用編)</b><br>
+  <a href="https://youtu.be/du0M7cGGnPc">
+    <img src="https://img.youtube.com/vi/du0M7cGGnPc/maxresdefault.jpg" 
+         alt="Quad Morph Filter - Advanced Techniques" width="640" height="360">
+  </a>
+</p>
 
 ## Key Features
 
