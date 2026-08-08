@@ -146,7 +146,8 @@ QuadMorphFilterAudioProcessor::createParameterLayout()
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{ "colorTheme", 1 }, "GUI Theme",
         juce::StringArray{ "Midnight", "Sakura", "Ocean", "Forest", "Sunset",
-                           "Mono", "Neon", "Vaporwave", "Amber", "Arctic" }, 0,
+                           "Mono", "Neon", "Vaporwave", "Amber", "Arctic" },
+        6,   // 既定は Neon
         juce::AudioParameterChoiceAttributes().withAutomatable(false)));
 
     return layout;

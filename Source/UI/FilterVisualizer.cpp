@@ -633,9 +633,15 @@ void FilterVisualizer::drawLegend(juce::Graphics& g, juce::Rectangle<float> r) c
     for (const auto& s : snap) if (s.enabled) ++shown;
     if (shown == 0) return;
 
-    const float itemW = 62.0f;
+    const float itemW = 80.0f;
     float x = r.getRight() - itemW * (float)shown;
-    const float y = r.getY() + 2.0f;
+    const float y = r.getY() + 1.0f;
+
+    // 見出し
+    g.setFont(juce::Font(juce::FontOptions(9.0f, juce::Font::bold)));
+    g.setColour(QMColors::textDim.withAlpha(0.7f));
+    g.drawText("MORPH MIX", (int)x - 74, (int)y, 68, 12,
+               juce::Justification::centredRight, false);
 
     g.setFont(juce::Font(juce::FontOptions(9.5f, juce::Font::bold)));
 
@@ -647,18 +653,25 @@ void FilterVisualizer::drawLegend(juce::Graphics& g, juce::Rectangle<float> r) c
         const auto col = QMColors::filterColour(i);
         const float wgt = juce::jlimit(0.0f, 1.0f, s.weight);
 
-        // 名前
-        g.setColour(col.withAlpha(0.45f + 0.55f * wgt));
-        g.drawText(juce::String(kSuffix[i]), (int)x, (int)y, 12, 11,
+        // 色チップ + 名前
+        g.setColour(col.withAlpha(0.35f + 0.65f * wgt));
+        g.fillRoundedRectangle(x, y + 2.0f, 3.0f, 8.0f, 1.5f);
+        g.drawText(juce::String(kSuffix[i]), (int)x + 6, (int)y, 10, 12,
                    juce::Justification::left, false);
 
         // 比率バー
-        const float bx = x + 13.0f;
-        const float bw = itemW - 22.0f;
-        g.setColour(QMColors::text.withAlpha(0.08f));
-        g.fillRoundedRectangle(bx, y + 3.0f, bw, 4.0f, 2.0f);
-        g.setColour(col.withAlpha(0.85f));
-        g.fillRoundedRectangle(bx, y + 3.0f, juce::jmax(1.0f, bw * wgt), 4.0f, 2.0f);
+        const float bx = x + 18.0f;
+        const float bw = 34.0f;
+        g.setColour(QMColors::text.withAlpha(0.09f));
+        g.fillRoundedRectangle(bx, y + 4.0f, bw, 4.0f, 2.0f);
+        g.setColour(col.withAlpha(0.9f));
+        g.fillRoundedRectangle(bx, y + 4.0f, juce::jmax(1.5f, bw * wgt), 4.0f, 2.0f);
+
+        // 比率の数値
+        g.setColour(QMColors::textDim.withAlpha(0.55f + 0.45f * wgt));
+        g.drawText(juce::String(juce::roundToInt(wgt * 100.0f)) + "%",
+                   (int)bx + (int)bw + 3, (int)y, 24, 12,
+                   juce::Justification::left, false);
 
         x += itemW;
     }
@@ -742,39 +755,26 @@ void FilterVisualizer::paint(juce::Graphics& g)
         }
     };
 
-    // ---- 個別カーブ（淡く）----
-    for (int i = 0; i < 4; ++i)
-    {
-        const auto& s = snap[(size_t)i];
-        if (!s.enabled) continue;
-
-        buildPath(curvePath[(size_t)i], mag[(size_t)i]);
-
-        const auto col = QMColors::filterColour(i);
-        const float a = 0.18f + 0.42f * juce::jlimit(0.0f, 1.0f, s.weight);
-
-        g.setColour(col.withAlpha(a * 0.35f));
-        g.strokePath(curvePath[(size_t)i], juce::PathStrokeType(3.6f,
-            juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-        g.setColour(col.withAlpha(a));
-        g.strokePath(curvePath[(size_t)i], juce::PathStrokeType(1.3f,
-            juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-
-        // カットオフ位置のマーカー
-        const float cx = freqToX(s.cutoff, plot);
-        g.setColour(col.withAlpha(0.10f + 0.25f * juce::jlimit(0.0f, 1.0f, s.weight)));
-        g.drawVerticalLine((int)cx, plot.getY(), plot.getBottom());
-    }
-
-    // ---- 合成カーブ（主役）----
     const bool anyEnabled = std::any_of(snap.begin(), snap.end(),
                                         [](const Snapshot& s) { return s.enabled; });
 
-    if (anyEnabled)
+    if (!anyEnabled)
     {
-        buildPath(sumPath, magSum);
+        g.setColour(QMColors::textDim.withAlpha(0.55f));
+        g.setFont(juce::Font(juce::FontOptions(14.0f, juce::Font::bold)));
+        g.drawText("ALL FILTERS BYPASSED", plot, juce::Justification::centred, false);
+        drawLegend(g, bounds.reduced(12.0f, 8.0f));
+        return;
+    }
 
-        // 下方向グラデーション塗り
+    buildPath(sumPath, magSum);
+
+    // ======================================================================
+    // 1) 合成カーブの下をグラデーションで塗る
+    //    塗りの色は「いま鳴っているフィルターの色をモーフ比率で混ぜた色」。
+    //    どのフィルターが主役かが、カーブを読まなくても色で分かる。
+    // ======================================================================
+    {
         fillPath.clear();
         fillPath.preallocateSpace(numPts * 3 + 16);
         fillPath.addPath(sumPath);
@@ -782,32 +782,140 @@ void FilterVisualizer::paint(juce::Graphics& g)
         fillPath.lineTo(plot.getX(), plot.getBottom());
         fillPath.closeSubPath();
 
-        juce::ColourGradient grad(QMColors::accentMorph.withAlpha(0.26f),
-                                  plot.getX(), plot.getY(),
-                                  QMColors::accentMorph.withAlpha(0.0f),
-                                  plot.getX(), plot.getBottom(), false);
-        grad.addColour(0.55, QMColors::accentFilter.withAlpha(0.09f));
+        const auto blend = blendedMorphColour();
+
+        juce::ColourGradient grad(blend.withAlpha(0.30f), plot.getX(), plot.getY(),
+                                  blend.withAlpha(0.0f), plot.getX(), plot.getBottom(), false);
+        grad.addColour(0.6, blend.withAlpha(0.07f));
 
         g.saveState();
         g.reduceClipRegion(plot.getSmallestIntegerContainer());
         g.setGradientFill(grad);
         g.fillPath(fillPath);
         g.restoreState();
+    }
 
-        // グロー + 主線
-        g.setColour(QMColors::text.withAlpha(0.13f));
-        g.strokePath(sumPath, juce::PathStrokeType(6.5f,
-            juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-        g.setColour(QMColors::text.withAlpha(0.95f));
-        g.strokePath(sumPath, juce::PathStrokeType(2.0f,
-            juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    }
-    else
+    // ======================================================================
+    // 2) 個別カーブ
+    //    地図の道路と同じ「ケーシング」方式：まず背景色で少し太く描き、
+    //    その上に本体色を重ねる。線が交差しても手前／奥がはっきり分かれる。
+    //    モーフ比率の小さい順に描くので、主役のカーブが必ず一番上に来る。
+    // ======================================================================
     {
-        g.setColour(QMColors::textDim.withAlpha(0.55f));
-        g.setFont(juce::Font(juce::FontOptions(14.0f, juce::Font::bold)));
-        g.drawText("ALL FILTERS BYPASSED", plot, juce::Justification::centred, false);
+        std::array<int, 4> order{ 0, 1, 2, 3 };
+        std::sort(order.begin(), order.end(), [this](int a, int b)
+        {
+            return snap[(size_t)a].weight < snap[(size_t)b].weight;
+        });
+
+        for (int k = 0; k < 4; ++k)
+        {
+            const int i = order[(size_t)k];
+            const auto& s = snap[(size_t)i];
+            if (!s.enabled) continue;
+
+            buildPath(curvePath[(size_t)i], mag[(size_t)i]);
+
+            const auto col = QMColors::filterColour(i);
+            const float w = juce::jlimit(0.0f, 1.0f, s.weight);
+
+            // ケーシング（背景色で縁取り）
+            g.setColour(QMColors::well.withAlpha(0.70f));
+            g.strokePath(curvePath[(size_t)i], juce::PathStrokeType(3.4f,
+                juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+            // 本体（比率が高いほど濃く・太く）
+            g.setColour(col.withAlpha(0.34f + 0.61f * w));
+            g.strokePath(curvePath[(size_t)i], juce::PathStrokeType(1.3f + 1.0f * w,
+                juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
     }
+
+    // ======================================================================
+    // 3) 合成カーブ（主役）
+    //    こちらもケーシングを敷いてから明るい線を重ねる。
+    // ======================================================================
+    g.setColour(QMColors::well.withAlpha(0.85f));
+    g.strokePath(sumPath, juce::PathStrokeType(6.0f,
+        juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.setColour(QMColors::text.withAlpha(0.20f));
+    g.strokePath(sumPath, juce::PathStrokeType(5.0f,
+        juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.setColour(QMColors::text);
+    g.strokePath(sumPath, juce::PathStrokeType(2.2f,
+        juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+    // ======================================================================
+    // 4) カットオフ位置マーカー
+    //    縦線は薄く、下端の三角＋文字だけをはっきり描く。
+    //    LFO が掛かっていると三角がそのまま動くので、変調量が一目で分かる。
+    // ======================================================================
+    drawCutoffMarkers(g, plot);
 
     drawLegend(g, bounds.reduced(12.0f, 8.0f));
+}
+
+// ==========================================================================
+// モーフ比率で混ぜたフィルター色（塗りに使う）
+// ==========================================================================
+juce::Colour FilterVisualizer::blendedMorphColour() const
+{
+    float r = 0.0f, gr = 0.0f, b = 0.0f, wsum = 0.0f;
+
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto& s = snap[(size_t)i];
+        if (!s.enabled) continue;
+
+        const float w = juce::jmax(0.02f, juce::jlimit(0.0f, 1.0f, s.weight));
+        const auto c = QMColors::filterColour(i);
+        r += c.getFloatRed() * w;
+        gr += c.getFloatGreen() * w;
+        b += c.getFloatBlue() * w;
+        wsum += w;
+    }
+
+    if (wsum < 1.0e-4f) return QMColors::accentMorph;
+
+    return juce::Colour::fromFloatRGBA(juce::jlimit(0.0f, 1.0f, r / wsum),
+                                       juce::jlimit(0.0f, 1.0f, gr / wsum),
+                                       juce::jlimit(0.0f, 1.0f, b / wsum), 1.0f);
+}
+
+// ==========================================================================
+// カットオフ位置マーカー
+// ==========================================================================
+void FilterVisualizer::drawCutoffMarkers(juce::Graphics& g, juce::Rectangle<float> r) const
+{
+    g.setFont(juce::Font(juce::FontOptions(9.0f, juce::Font::bold)));
+
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto& s = snap[(size_t)i];
+        if (!s.enabled) continue;
+
+        const auto col = QMColors::filterColour(i);
+        const float w = juce::jlimit(0.0f, 1.0f, s.weight);
+        const float cx = juce::jlimit(r.getX() + 6.0f, r.getRight() - 6.0f, freqToX(s.cutoff, r));
+
+        // 縦のガイド（かなり薄く）
+        g.setColour(col.withAlpha(0.05f + 0.13f * w));
+        g.drawVerticalLine((int)cx, r.getY() + 5.0f, r.getBottom());
+
+        // 上端の三角マーカー（周波数目盛りと重ならないよう上に置く）
+        juce::Path tri;
+        tri.addTriangle(cx - 4.5f, r.getY(), cx + 4.5f, r.getY(), cx, r.getY() + 6.0f);
+        g.setColour(QMColors::well);
+        g.fillPath(tri);
+        g.setColour(col.withAlpha(0.45f + 0.55f * w));
+        g.fillPath(tri);
+
+        // フィルター名（主役級のときだけ。常時出すと上端がうるさくなる）
+        if (w > 0.18f)
+        {
+            g.setColour(col.withAlpha(0.35f + 0.65f * w));
+            g.drawText(kSuffix[i], (int)cx - 8, (int)r.getY() + 7, 16, 11,
+                       juce::Justification::centred, false);
+        }
+    }
 }

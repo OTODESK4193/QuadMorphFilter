@@ -92,20 +92,20 @@ void FilterPanel::setupGroup(Group& g, int index, const juce::String& s)
 
     // ---- Cutoff / Res（バー型スライダー：名前と値はバー内に描かれる）----
     auto setupBar = [&](juce::Slider& sl, const juce::String& name, QMUI::Unit unit,
-                        const juce::String& paramId,
+                        juce::Colour col, const juce::String& paramId,
                         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& att)
     {
         sl.setSliderStyle(juce::Slider::LinearHorizontal);
         sl.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
         sl.setName(name);
         sl.getProperties().set("qmUnit", (int)unit);
-        sl.setColour(juce::Slider::thumbColourId, accent);
+        sl.setColour(juce::Slider::thumbColourId, col);
         addAndMakeVisible(sl);
         att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
             processor.apvts, paramId, sl);
     };
-    setupBar(g.cutoff, "Cut", QMUI::Unit::Hz, "cutoff" + s, g.cAtt);
-    setupBar(g.res, "Res", QMUI::Unit::Raw, "res" + s, g.rAtt);
+    setupBar(g.cutoff, "Cut", QMUI::Unit::Hz, accent, "cutoff" + s, g.cAtt);
+    setupBar(g.res, "Res", QMUI::Unit::Raw, QMColors::filterResColour(index), "res" + s, g.rAtt);
 
     // ---- LFO 割り当て（クリックのたびに Off→+X→+Y→-X→-Y をサイクル）----
     auto setupSrc = [&](juce::TextButton& b, const juce::String& paramId, juce::Colour col,
@@ -338,7 +338,7 @@ void FilterPanel::refreshTheme()
         g.enableButton.setColour(juce::TextButton::textColourOnId, accent);
         g.enableButton.setColour(juce::TextButton::textColourOffId, QMColors::textDim);
         g.cutoff.setColour(juce::Slider::thumbColourId, accent);
-        g.res.setColour(juce::Slider::thumbColourId, accent);
+        g.res.setColour(juce::Slider::thumbColourId, QMColors::filterResColour(i));
 
         g.lfoCutBtn.setColour(juce::TextButton::textColourOnId, QMColors::lfoColour(1));
         g.lfoCutBtn.setColour(juce::TextButton::textColourOffId, QMColors::textDim);

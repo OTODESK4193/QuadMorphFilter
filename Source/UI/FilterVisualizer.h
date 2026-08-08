@@ -47,6 +47,10 @@ private:
 
     void drawGrid(juce::Graphics& g, juce::Rectangle<float> r) const;
     void drawLegend(juce::Graphics& g, juce::Rectangle<float> r) const;
+    void drawCutoffMarkers(juce::Graphics& g, juce::Rectangle<float> r) const;
+
+    /** いま有効なフィルターの色を、モーフ比率で混ぜた色。合成カーブの塗りに使う。 */
+    juce::Colour blendedMorphColour() const;
 
     QuadMorphFilterAudioProcessor& processor;
 
