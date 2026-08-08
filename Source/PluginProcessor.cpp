@@ -140,6 +140,15 @@ QuadMorphFilterAudioProcessor::createParameterLayout()
         ++fi;
     }
 
+    // ===== V1.1.0: GUI カラーテーマ =====
+    // 表示専用（オーディオ処理には一切関与しない）。
+    // ホストのオートメーション一覧を汚さないよう withAutomatable(false) を付ける。
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ "colorTheme", 1 }, "GUI Theme",
+        juce::StringArray{ "Midnight", "Sakura", "Ocean", "Forest", "Sunset",
+                           "Mono", "Neon", "Vaporwave", "Amber", "Arctic" }, 0,
+        juce::AudioParameterChoiceAttributes().withAutomatable(false)));
+
     return layout;
 }
 

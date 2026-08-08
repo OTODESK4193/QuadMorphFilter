@@ -1,6 +1,6 @@
 # Quad Morph Filter
 
-![Release](https://img.shields.io/badge/release-v1.0.0-blue)
+![Release](https://img.shields.io/badge/release-v1.1.0-blue)
 ![License](https://img.shields.io/badge/license-AGPLv3-green)
 ![JUCE](https://img.shields.io/badge/JUCE-8.0.x-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%2064bit-lightgrey)
@@ -106,13 +106,19 @@ A comprehensive, handcrafted collection spanning 6 distinct filter architecture 
 * **Limiter Ceiling:** Transparent RMS-tracking limiter with adjustable ceiling threshold.
 * **Automatic Gain Compensation (AGC):** Moog and TB-303 models dynamically scale output to maintain perceived loudness under resonance boost.
 
-### 🎨 Pro UI & Visualization
+### 🎨 Pro UI & Visualization  *(rebuilt in V1.1.0)*
 
-* **Ableton Live Medium-Dark Theme:** Seamlessly integrated dark aesthetic matching professional production environments.
-* **Real-Time Frequency Response Graph:** 1024-point FFT display with 0 dB reference line, dB grid, and frequency markers (100 Hz, 1 kHz, 10 kHz).
-* **E-Button (Background Randomizer):** Click to randomize GUI background color; right-click to reset to default.
+* **Tabbed Layout — FILTER / MOD / OUT:** Everything used to be crammed into one screen. Controls are now grouped by purpose, which frees a large amount of vertical space for the response curve.
+* **Large Filter Response Display:** Each of A/B/C/D is drawn as its own translucent curve (opacity follows the current morph weight), with the composite response on top as a glowing main line over a gradient fill. Cutoff positions are marked per filter.
+* **Compressed dB Axis:** Above 0 dB the axis is square-root compressed, so +70 dB resonance peaks no longer flatten against the ceiling while the passband stays readable.
+* **10 Color Themes:** Midnight / Sakura / Ocean / Forest / Sunset / Mono / Neon / Vaporwave / Amber / Arctic, switchable from the header and saved with the preset.
+* **Resizable Window:** Drag the bottom-right corner. The whole UI is scaled by an affine transform at a fixed aspect ratio, so nothing reflows or breaks (70 % – 160 %).
+* **Inline Bar Sliders:** Parameter name and value are drawn inside the bar itself. No separate labels or text boxes, so each control gets far more usable width — and the value units (Hz / dB / % / ° / s) are formatted per parameter.
+* **LFO→Cut / LFO→Res Assignment Inline:** The per-filter modulation routing now lives on the filter's own row instead of a separate matrix.
 * **LFO Tab Navigation:** Visual tabs to select which LFO is being edited or recorded — prevents accidental overwrites.
 * **Parameter Smoothing:** All slider changes are interpolated to eliminate clicks and pops.
+
+> **Removed in V1.1.0:** the *E-Button* background randomizer. Its role is taken over by the proper 10-theme selector in the header.
 
 ##
 <img src="Source/Assets/Screenshot2.jpg" width="600">
@@ -276,6 +282,29 @@ Control the minimum and maximum mix level of the wet signal via LFO5:
 | Envelope Follower Enable | On/Off | Off | Activate input envelope tracking |
 | Envelope Depth | 0 – 100% | 50% | Envelope follower modulation amount |
 | Envelope Invert | On/Off | Off | Invert envelope polarity |
+| GUI Theme | 10 themes | Midnight | Color theme (display only, not automatable) |
+
+
+## Changelog
+
+### V1.1.0
+
+**GUI overhaul. DSP and audio behaviour are unchanged — every filter model, LFO and parameter ID is identical to V1.0.0, so existing projects and presets load exactly as before.**
+
+* Tabbed layout (FILTER / MOD / OUT) replaces the single crowded page.
+* Filter response display enlarged and redrawn: per-filter translucent curves weighted by morph amount, composite curve with glow and gradient fill, per-filter cutoff markers, refined grid.
+* dB axis is now compressed above 0 dB so high-resonance peaks stay on screen.
+* 10 selectable color themes, stored in the plugin state (`colorTheme`).
+* Window is resizable at a fixed aspect ratio (70 % – 160 %).
+* Sliders redesigned: name and value are rendered inside the bar with per-parameter units.
+* Per-filter LFO→Cut / LFO→Res assignment moved onto each filter row.
+* `LookAndFeel::setDefaultLookAndFeel` replaced with a per-editor `setLookAndFeel`, so multiple instances no longer overwrite each other's appearance.
+* Frequency-response computation now reads parameters once per frame instead of once per pixel per filter (large drop in UI CPU usage).
+* Removed the E-Button background randomizer (superseded by the theme selector).
+
+### V1.0.0
+
+* Initial release — 28 filter models, XY morphing engine, 5 LFOs, envelope follower.
 
 
 ## Installation

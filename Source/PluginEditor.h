@@ -1,135 +1,96 @@
 // ==========================================
-// PluginEditor.h
+// PluginEditor.h   （V1.1.0 全面改訂）
+//
+// ・論理サイズ 1000 x 700 の ContentComponent を
+//   juce::AffineTransform でスケーリングしてリサイズに対応する
+//   （アスペクト比固定なのでレイアウト崩れが起きない）
+// ・FILTER / MOD / OUT の 3 タブ構成
+// ・上部はフィルターカーブ（大）と XY パッドを常時表示
 // ==========================================
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <array>
 #include <memory>
+
 #include "PluginProcessor.h"
+#include "UI/ColorPalette.h"
 #include "UI/QuadMorphLookAndFeel.h"
 #include "UI/FilterVisualizer.h"
 #include "UI/XYPadComponent.h"
+#include "UI/FilterPanel.h"
+#include "UI/ModPanel.h"
+#include "UI/OutPanel.h"
 
-class QuadMorphFilterAudioProcessorEditor : public juce::AudioProcessorEditor,
-                                             private juce::Timer
+class QuadMorphFilterAudioProcessorEditor : public juce::AudioProcessorEditor
 {
 public:
     explicit QuadMorphFilterAudioProcessorEditor(QuadMorphFilterAudioProcessor&);
     ~QuadMorphFilterAudioProcessorEditor() override;
 
-    void paint(juce::Graphics&) override;
+    void paint(juce::Graphics& g) override;
     void resized() override;
-    void setGuiBackgroundColour(juce::Colour newColour);
 
 private:
+    // 論理座標（この寸法で全レイアウトを組み、表示時に拡大縮小する）
+    static constexpr int kBaseW = 1000;
+    static constexpr int kBaseH = 700;
+
+    // ======================================================================
+    //  ContentComponent
+    // ======================================================================
+    struct Content : public juce::Component,
+                     private juce::Timer
+    {
+        Content(QuadMorphFilterAudioProcessor& p, QuadMorphLookAndFeel& lnf);
+        ~Content() override;
+
+        void paint(juce::Graphics& g) override;
+        void resized() override;
+
+    private:
+        enum Tab { TabFilter = 0, TabMod, TabOut };
+        static constexpr int kNumTabs = 3;
+
+        void setActiveTab(int tab);
+        void styleTabs();
+        void applyTheme(int themeIndex);
+        static void repaintAll(juce::Component* c);
+        void timerCallback() override;
+
+        QuadMorphFilterAudioProcessor& processor;
+        QuadMorphLookAndFeel& laf;
+
+        FilterVisualizer visualizer;
+        XYPadComponent   xyPad;
+
+        std::array<juce::TextButton, (size_t)kNumTabs> tabButtons;
+        int activeTab = TabFilter;
+
+        FilterPanel filterPanel;
+        ModPanel    modPanel;
+        OutPanel    outPanel;
+
+        juce::ComboBox themeCombo;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> themeAtt;
+        int lastThemeIndex = -1;
+
+        juce::Rectangle<int> headerArea, tabStripArea;
+
+        // ツールチップ。最後に宣言＝最初に破棄されるので、
+        // 参照先のコンポーネントより長生きすることがない。
+        juce::TooltipWindow tooltip { this, 900 };
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Content)
+    };
+
     QuadMorphFilterAudioProcessor& audioProcessor;
-    QuadMorphLookAndFeel customLookAndFeel;
-    FilterVisualizer     visualizer;
-    XYPadComponent       xyPad;
 
-    struct FilterGroup {
-        juce::TextButton enableButton;
-        juce::ComboBox   model, type, slope;
-        juce::Label      cutoffLabel, resLabel;
-        juce::Slider     cutoff, res;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>   eAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>   cAtt, rAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mAtt, tAtt, slAtt;
-    };
-    FilterGroup groupA, groupB, groupC, groupD;
-
-    struct LfoGroup {
-        juce::TextButton enableButton, stepMode, syncToggle;
-        juce::ComboBox   wave, rateSync;
-        juce::Slider     rateFree, minSlider, maxSlider;
-        juce::Slider     phaseSlider, fadeSlider, spreadSlider;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>   eAtt, sAtt, syAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>   rfAtt, minAtt, maxAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>   phaseAtt, fadeAtt, spreadAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> wAtt, rsAtt, bAtt;
-    };
-    LfoGroup lfos[3];
-
-    // ===== LFO4: Rate Modulation 専用 =====
-    struct LFO4Group {
-        juce::TextButton enableButton, stepMode, syncToggle;
-        juce::ComboBox   wave, rateSync;
-        juce::Slider     rateFree, depthSlider;
-        juce::Label      depthLabel;
-        // ===== アサイン先ボタン =====
-        juce::TextButton assignLFO1, assignLFO2, assignLFO3;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>   eAtt, sAtt, syAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>   rfAtt, depthAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> wAtt, rsAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>   assignAtt1, assignAtt2, assignAtt3;
-    };
-    LFO4Group lfo4;
-
-    // ===== LFO5: Dry/Wet Range Modulation 専用 =====
-    struct LFO5Group {
-        juce::TextButton enableButton, stepMode, syncToggle;
-        juce::ComboBox   wave, rateSync;
-        juce::Slider     rateFree, minSlider, maxSlider;
-        juce::Label      minLabel, maxLabel;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>   eAtt, sAtt, syAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>   rfAtt, minAtt, maxAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> wAtt, rsAtt;
-    };
-    LFO5Group lfo5;
-
-    // ===== Envelope Follower =====
-    struct EnvelopeFollowerGroup {
-        juce::TextButton enableButton;
-        juce::TextButton invertButton;
-        juce::Label      attackLabel, releaseLabel, depthLabel;
-        juce::Slider     attackSlider, releaseSlider, depthSlider;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>   eAtt, invAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>   attAtt, relAtt, depthAtt;
-    };
-    EnvelopeFollowerGroup envFollower;
-
-    juce::Label  masterGainLabel, dryWetLabel, ceilingLabel;
-    juce::Slider masterGainSlider, dryWetSlider, ceilingSlider;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mgAtt, dwAtt, clAtt;
-
-    // ===== 【新規追加】ここに挿入 =====
-    juce::Label    osModeLabel;
-    juce::ComboBox osModeCombo;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> osModeAtt;
-
-
-    // ===== Morph ブレンド / Cutoff アルゴリズム 選択コンボ =====
-    juce::Label    morphBlendLabel;
-    juce::ComboBox morphBlendCombo;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> morphBlendAtt;
-
-    juce::Label    cutoffAlgoLabel;
-    juce::ComboBox cutoffAlgoCombo;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> cutoffAlgoAtt;
-
-    // ===== LFO Cut/Res per-filter サイクルボタン (A/B/C/D) =====
-    // Off → +X → +Y → -X → -Y → Off を押すたびにサイクル
-    // AudioParameterChoice (5択) を使用。ButtonAttachment は使用しない。
-    juce::Label      lfoCutLabel;
-    juce::TextButton lfoCutBtn[4];
-
-    juce::Label      lfoResLabel;
-    juce::TextButton lfoResBtn[4];
-
-    // ===== LFO セクションタイトル行 =====
-    // LFO | Wave | Step | Sync | Rate | Min | Max | Phase | Fade | Spread
-    juce::Label lfoTitleLabels[10];
-
-    // ===== 既存コード: private セクション末尾 =====
-    void setupFilterGroup(FilterGroup& g, juce::String s, juce::String name);
-    void setupLfoGroup(LfoGroup& g, int index, juce::String name);
-    void refreshFilterGroupControls(FilterGroup& g, const juce::String& suffix, int modelIdx);
-
-    // ===== LFO Cut/Res ボタン外観の定期同期 (30Hz) =====
-    void timerCallback() override;
-    void updateLfoCutResButtons();
-
-    // ===== GUI Background Color =====
-    juce::Colour guiBgColour = juce::Colour(0xff1a1a1a);
+    // ---- 破棄順序に注意 ----
+    // メンバは宣言の逆順で破棄されるため、content より後ろに置いた laf /
+    // constrainer が先に消えることはない（CLAUDE.md §3）。
+    QuadMorphLookAndFeel laf;
+    juce::ComponentBoundsConstrainer constrainer;
+    Content content;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(QuadMorphFilterAudioProcessorEditor)
 };

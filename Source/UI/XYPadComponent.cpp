@@ -16,6 +16,7 @@
 //   旧実装: px/getWidth() を使用していたため、ラベル位置で 88-99% 止まりだった。
 // ==========================================
 #include "XYPadComponent.h"
+#include "ColorPalette.h"
 #include "../PluginProcessor.h"
 
 // ────────────────────────────────────────
@@ -113,27 +114,50 @@ void XYPadComponent::paint(juce::Graphics& g)
 
     // ===== 背景と枠 =====
     auto b = getLocalBounds().toFloat();
-    g.setColour(juce::Colour(0xff2a2a2a));
+    g.setColour(QMColors::well);
     g.fillRoundedRectangle(b, 8.0f);
-    g.setColour(juce::Colour(0xff444444));
-    g.drawRoundedRectangle(b, 8.0f, 1.5f);
+    g.setColour(QMColors::panelLine.withAlpha(0.5f));
+    g.drawRoundedRectangle(b.reduced(0.5f), 8.0f, 1.0f);
 
     // ===== タブ領域の背景 =====
-    g.setColour(juce::Colour(0xff1a1a1a));
+    g.setColour(QMColors::bg);
     g.fillRect(0.0f, 0.0f, w, TAB_HEIGHT);
-    g.setColour(juce::Colour(0xff333333));
+    g.setColour(QMColors::panelLine.withAlpha(0.4f));
     g.drawLine(0.0f, TAB_HEIGHT, w, TAB_HEIGHT, 1.0f);
 
     // ===== タブボタンを描画 =====
     drawTabs(g);
 
+    // ===== モーフ領域の薄いガイド（十字と外周）=====
+    {
+        const float iL = 20.0f, iR = w - 20.0f;
+        const float iT = TAB_HEIGHT + 15.0f, iB = h - 15.0f;
+        g.setColour(QMColors::grid);
+        g.drawRect(iL, iT, iR - iL, iB - iT, 1.0f);
+        g.drawVerticalLine((int)((iL + iR) * 0.5f), iT, iB);
+        g.drawHorizontalLine((int)((iT + iB) * 0.5f), iL, iR);
+    }
+
     // コーナーラベル (中心がコーナー 100% 点、タブ下に移動)
-    g.setColour(juce::Colours::white.withAlpha(0.3f));
-    g.setFont(14.0f);
-    g.drawText("A", 10,         (int)TAB_HEIGHT + 10, 20, 20, juce::Justification::centred);
-    g.drawText("B", (int)w-30,  (int)TAB_HEIGHT + 10, 20, 20, juce::Justification::centred);
-    g.drawText("C", 10,         (int)h-30,             20, 20, juce::Justification::centred);
-    g.drawText("D", (int)w-30,  (int)h-30,             20, 20, juce::Justification::centred);
+    // 各フィルターのアクセント色で表示し、無効なフィルターは沈める。
+    {
+        static const char* const corner[4] = { "A", "B", "C", "D" };
+        const juce::Point<int> pos[4] = {
+            { 10,          (int)TAB_HEIGHT + 10 },
+            { (int)w - 30, (int)TAB_HEIGHT + 10 },
+            { 10,          (int)h - 30 },
+            { (int)w - 30, (int)h - 30 }
+        };
+
+        g.setFont(juce::Font(juce::FontOptions(13.0f, juce::Font::bold)));
+        for (int i = 0; i < 4; ++i)
+        {
+            const bool on = processor.apvts.getRawParameterValue(
+                juce::String("enable") + corner[i])->load() > 0.5f;
+            g.setColour(QMColors::filterColour(i).withAlpha(on ? 0.85f : 0.22f));
+            g.drawText(corner[i], pos[i].x, pos[i].y, 20, 20, juce::Justification::centred);
+        }
+    }
 
     // ===== Recording グリッド描画（selectedLfoTab のみ） =====
     bool anyRecordingActive = false;
@@ -154,10 +178,8 @@ void XYPadComponent::paint(juce::Graphics& g)
     }
 
     // ===== 非Recording時：選択タブのLFOのみ表示 =====
-    juce::Colour colors[] = {
-        juce::Colour(0xff00bcd4),
-        juce::Colour(0xffff66dd),
-        juce::Colour(0xffff9900)
+    const juce::Colour colors[3] = {
+        QMColors::lfoColour(0), QMColors::lfoColour(1), QMColors::lfoColour(2)
     };
 
     const int i = selectedLfoTab;
@@ -197,7 +219,7 @@ void XYPadComponent::paint(juce::Graphics& g)
             g.setColour(colors[i]);
             g.fillEllipse(px.x - 6.0f, px.y - 6.0f, 12.0f, 12.0f);
         }
-        g.setColour(juce::Colours::white);
+        g.setColour(QMColors::text.withAlpha(0.9f));
         g.drawEllipse(px.x - 8.0f, px.y - 8.0f, 16.0f, 16.0f, 1.0f);
     }
 }
@@ -389,46 +411,42 @@ void XYPadComponent::drawTabs(juce::Graphics& g)
         bool isSelected = (i == selectedLfoTab);
         bool isRecording = recording[i];
 
+        const auto accent = QMColors::lfoColour(i);
+
         // タブ背景
         if (isSelected)
-        {
-            g.setColour(juce::Colour(0xff2a2a2a));  // 選択中は明るく
-        }
+            g.setColour(QMColors::well);                        // 選択中は明るく
         else if (isRecordingNow() && !isRecording)
-        {
-            g.setColour(juce::Colour(0xff0d0d0d).withAlpha(0.5f));  // 他は暗くグレーアウト
-        }
+            g.setColour(QMColors::bg.darker(0.4f));              // 他は沈める
         else
-        {
-            g.setColour(juce::Colour(0xff1a1a1a));  // 通常
-        }
+            g.setColour(QMColors::bg);
         g.fillRect(px, 0.0f, tabW, TAB_HEIGHT);
 
         // タブ境界
-        g.setColour(juce::Colour(0xff444444));
-        if (i < 2) g.drawLine(px + tabW, 0.0f, px + tabW, TAB_HEIGHT, 1.0f);
+        g.setColour(QMColors::panelLine.withAlpha(0.35f));
+        if (i < 2) g.drawLine(px + tabW, 6.0f, px + tabW, TAB_HEIGHT - 6.0f, 1.0f);
 
         // タブテキスト
         juce::String tabLabel = "LFO " + juce::String(i + 1);
         if (isRecording)
-            tabLabel += " REC";
+            tabLabel += "  REC";
 
-        juce::Colour textColor = juce::Colours::white;
+        juce::Colour textColor = isSelected ? accent : QMColors::textDim;
         if (isRecordingNow() && !isRecording)
-            textColor = juce::Colours::grey.withAlpha(0.4f);
+            textColor = QMColors::textDim.withAlpha(0.35f);
         else if (isRecording)
-            textColor = juce::Colours::red;
+            textColor = QMColors::rose;
 
         g.setColour(textColor);
-        g.setFont(13.0f);
+        g.setFont(juce::Font(juce::FontOptions(12.0f, juce::Font::bold)));
         g.drawText(tabLabel, (int)px, 0, (int)tabW, (int)TAB_HEIGHT,
                    juce::Justification::centred);
 
         // 選択中のタブに下線
         if (isSelected)
         {
-            g.setColour(juce::Colours::cyan);
-            g.fillRect(px, TAB_HEIGHT - 2.0f, tabW, 2.0f);
+            g.setColour(accent);
+            g.fillRoundedRectangle(px + 10.0f, TAB_HEIGHT - 2.5f, tabW - 20.0f, 2.5f, 1.25f);
         }
     }
 }
@@ -565,15 +583,15 @@ void XYPadComponent::paintRecordingGrid(juce::Graphics& g)
 
     // 背景
     auto b = getLocalBounds().toFloat();
-    g.setColour(juce::Colour(0xff1E272E));
+    g.setColour(QMColors::well);
     g.fillRoundedRectangle(b, 8.0f);
-    g.setColour(juce::Colour(0xffD5DDE5));
-    g.drawRoundedRectangle(b, 8.0f, 1.5f);
+    g.setColour(QMColors::rose.withAlpha(0.55f));   // 録音中は縁を強調
+    g.drawRoundedRectangle(b.reduced(0.5f), 8.0f, 1.5f);
 
     // タブ領域を描画（paintRecordingGrid内でも必要）
-    g.setColour(juce::Colour(0xff1a1a1a));
+    g.setColour(QMColors::bg);
     g.fillRect(0.0f, 0.0f, w, TAB_HEIGHT);
-    g.setColour(juce::Colour(0xff333333));
+    g.setColour(QMColors::panelLine.withAlpha(0.4f));
     g.drawLine(0.0f, TAB_HEIGHT, w, TAB_HEIGHT, 1.0f);
     drawTabs(g);
 
@@ -585,10 +603,8 @@ void XYPadComponent::paintRecordingGrid(juce::Graphics& g)
     const float gridStartX = 20.0f;
 
     // selectedLfoTab のLFOのグリッドのみ描画
-    juce::Colour lfoColors[] = {
-        juce::Colour(0xff00D2D3),  // LFO 1
-        juce::Colour(0xffFF9FF3),  // LFO 2
-        juce::Colour(0xffFEECA1)   // LFO 3
+    const juce::Colour lfoColors[3] = {
+        QMColors::lfoColour(0), QMColors::lfoColour(1), QMColors::lfoColour(2)
     };
 
     const int lfo = selectedLfoTab;
@@ -601,7 +617,7 @@ void XYPadComponent::paintRecordingGrid(juce::Graphics& g)
             float px = gridStartX + x * cellW;
             float py = gridStartY + y * cellH;
 
-            g.setColour(juce::Colour(0xff444444));
+            g.setColour(QMColors::grid);
             g.drawRect(px, py, cellW, cellH, 0.5f);
 
             if (pixelMap[lfo][y * GRID_SIZE + x] > 128)

@@ -1,6 +1,6 @@
 # ===== 既存コード（冒頭付近）=====
 cmake_minimum_required(VERSION 3.22)
-project(QuadMorphFilter VERSION 1.0.0)
+project(QuadMorphFilter VERSION 1.1.0)
 
 # ===== 【新規追加】ここに挿入 =====
 include(FetchContent)
@@ -22,7 +22,7 @@ add_compile_definitions(JUCE_VST3_CAN_REPLACE_VST2=0)
 
 # 1. CMakeバージョンをアップ（JUCE8.0推奨）
 cmake_minimum_required(VERSION 3.24)
-project(QuadMorphFilter VERSION 1.0.0)
+project(QuadMorphFilter VERSION 1.1.0)
 
 # 2. C++20の有効化
 set(CMAKE_CXX_STANDARD 20)
@@ -83,7 +83,22 @@ target_sources(QuadMorphFilter
         Source/UI/FilterVisualizer.h
         Source/UI/XYPadComponent.cpp
         Source/UI/XYPadComponent.h
+
+        # ===== V1.1.0 GUI 刷新で追加 =====
+        Source/UI/ColorPalette.h
+        Source/UI/UiCommon.h
+        Source/UI/FilterPanel.cpp
+        Source/UI/FilterPanel.h
+        Source/UI/ModPanel.cpp
+        Source/UI/ModPanel.h
+        Source/UI/OutPanel.cpp
+        Source/UI/OutPanel.h
  "Source/DSP/FilterA_SVF_SIMD.h" "Source/DSP/FilterA_SVF_SIMD.cpp" "Source/DSP/TptFilterState.h" "Source/DSP/TptFilter/SVF/TptFilter_SVF.h" "Source/DSP/TptFilter/SVF/TptFilter_SVF.cpp" "Source/DSP/TptFilter/Ladder/TptFilter_Ladder.h" "Source/DSP/TptFilter/Ladder/TptFilter_Ladder.cpp" "Source/DSP/TptFilter/AnalogEmulation/TptFilter_AnalogEmulation.h" "Source/DSP/TptFilter/AnalogEmulation/TptFilter_AnalogEmulation.cpp" "Source/DSP/TptFilter/DigitalPrecision/TptFilter_DigitalPrecision.h" "Source/DSP/TptFilter/DigitalPrecision/TptFilter_DigitalPrecision.cpp" "Source/DSP/TptFilter/Spectral/TptFilter_Spectral.h" "Source/DSP/TptFilter/Spectral/TptFilter_Spectral.cpp" "Source/DSP/TptFilter/Experimental/TptFilter_Experimental.h" "Source/DSP/TptFilter/Experimental/TptFilter_Experimental.cpp" "Source/DSP/ModelCapabilities.h")
+
+# 5-b. バージョン文字列を GUI から参照できるようにする
+target_compile_definitions(QuadMorphFilter
+    PRIVATE
+        QUADMORPH_VERSION="${PROJECT_VERSION}")
 
 # 6. 使用するJUCEモジュールのリンク（問題のTARGETを削除しました）
 target_link_libraries(QuadMorphFilter

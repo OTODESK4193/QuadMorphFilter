@@ -1,1216 +1,276 @@
-﻿// ==========================================
-// PluginEditor.cpp
+// ==========================================
+// PluginEditor.cpp   （V1.1.0 全面改訂）
 // ==========================================
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
-#include "DSP/ModelCapabilities.h"
+#include "UI/UiCommon.h"
 
-QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
-    QuadMorphFilterAudioProcessor& p)
-    : AudioProcessorEditor(&p), audioProcessor(p), visualizer(p), xyPad(p)
+#ifndef QUADMORPH_VERSION
+ #define QUADMORPH_VERSION "1.1.0"
+#endif
+
+namespace
 {
-    juce::LookAndFeel::setDefaultLookAndFeel(&customLookAndFeel);
+    constexpr int kMargin = QMUI::kMargin;
+
+    constexpr int kHeaderY = 4;
+    constexpr int kHeaderH = 36;
+
+    constexpr int kTopY = 44;
+    constexpr int kTopH = 348;
+
+    constexpr int kTabY = 398;
+    constexpr int kTabH = 28;
+    constexpr int kTabW = 112;
+    constexpr int kTabStep = 116;
+
+    constexpr int kPanelY = 430;
+    constexpr int kPanelH = 264;
+
+    constexpr int kXYPadW = 308;
+
+    const char* const kTabNames[] = { "FILTER", "MOD", "OUT" };
+}
+
+// ==========================================================================
+//  Content
+// ==========================================================================
+QuadMorphFilterAudioProcessorEditor::Content::Content(QuadMorphFilterAudioProcessor& p,
+                                                      QuadMorphLookAndFeel& lnf)
+    : processor(p),
+      laf(lnf),
+      visualizer(p),
+      xyPad(p),
+      filterPanel(p),
+      modPanel(p),
+      outPanel(p)
+{
+    // ---- テーマを先に確定させてから子を構築済みの色で塗り直す ----
+    lastThemeIndex = (int)processor.apvts.getRawParameterValue("colorTheme")->load();
+    QMColors::setTheme(lastThemeIndex);
+    laf.refreshColours();
 
     addAndMakeVisible(visualizer);
-    visualizer.setEditorPointer(this);  // Set editor pointer for background color notification
     addAndMakeVisible(xyPad);
 
-    setupFilterGroup(groupA, "A", "A");
-    setupFilterGroup(groupB, "B", "B");
-    setupFilterGroup(groupC, "C", "C");
-    setupFilterGroup(groupD, "D", "D");
-
-    setupLfoGroup(lfos[0], 1, "LFO 1 (Morph)");
-    setupLfoGroup(lfos[1], 2, "LFO 2 (Cutoff)");
-    setupLfoGroup(lfos[2], 3, "LFO 3 (Reso)");
-
-    auto setupMaster = [&](juce::Label& l, juce::Slider& sl, juce::String txt,
-        juce::String id,
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& att)
-        {
-            l.setText(txt, juce::dontSendNotification);
-            l.setJustificationType(juce::Justification::centredRight);
-            addAndMakeVisible(l);
-            sl.setSliderStyle(juce::Slider::LinearHorizontal);
-            sl.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
-            sl.setColour(juce::Slider::thumbColourId, juce::Colour(0xffff9900));
-            addAndMakeVisible(sl);
-            att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-                audioProcessor.apvts, id, sl);
-        };
-    setupMaster(masterGainLabel, masterGainSlider, "Out Gain", "masterGain", mgAtt);
-    setupMaster(dryWetLabel, dryWetSlider, "Dry/Wet", "dryWet", dwAtt);
-    setupMaster(ceilingLabel, ceilingSlider, "Limit Ceil", "limiterCeiling", clAtt);
-
-    osModeLabel.setText("OS", juce::dontSendNotification);
-    osModeLabel.setJustificationType(juce::Justification::centredRight);
-    addAndMakeVisible(osModeLabel);
-    osModeCombo.addItemList({ "Off", "Auto", "2x", "4x" }, 1);
-    addAndMakeVisible(osModeCombo);
-    osModeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "osMode", osModeCombo);
-
-    // ── Morph ブレンドモード コンボ ──
-    morphBlendLabel.setText("Blend", juce::dontSendNotification);
-    morphBlendLabel.setJustificationType(juce::Justification::centredRight);
-    addAndMakeVisible(morphBlendLabel);
-    morphBlendCombo.addItemList({ "EqPwr", "Linear", "Smooth", "Radial" }, 1);
-    addAndMakeVisible(morphBlendCombo);
-    morphBlendAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "morphBlend", morphBlendCombo);
-
-    // ── Cutoff アルゴリズム コンボ ──
-    cutoffAlgoLabel.setText("Algo", juce::dontSendNotification);
-    cutoffAlgoLabel.setJustificationType(juce::Justification::centredRight);
-    addAndMakeVisible(cutoffAlgoLabel);
-    cutoffAlgoCombo.addItemList({ "Abs", "Rel", "Zone" }, 1);
-    addAndMakeVisible(cutoffAlgoCombo);
-    cutoffAlgoAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "cutoffAlgo", cutoffAlgoCombo);
-
-    lfoCutLabel.setText("LFO Cut", juce::dontSendNotification);
-    lfoCutLabel.setJustificationType(juce::Justification::centredRight);
-    addAndMakeVisible(lfoCutLabel);
-
-    lfoResLabel.setText("LFO Res", juce::dontSendNotification);
-    lfoResLabel.setJustificationType(juce::Justification::centredRight);
-    addAndMakeVisible(lfoResLabel);
-
-    // ===== LFO Cut/Res サイクルボタン =====
-    // クリックのたびに Off→+X→+Y→-X→-Y→Off をサイクル
+    // ---- タブ ----
+    for (int i = 0; i < kNumTabs; ++i)
     {
-        const juce::String cutParamIds[4] = { "lfoCutSrcA", "lfoCutSrcB", "lfoCutSrcC", "lfoCutSrcD" };
-        const juce::String resParamIds[4] = { "lfoResSrcA", "lfoResSrcB", "lfoResSrcC", "lfoResSrcD" };
-
-        for (int i = 0; i < 4; ++i)
-        {
-            // Cut ボタン
-            lfoCutBtn[i].setButtonText("Off");           // 初期テキスト。タイマーで更新
-            lfoCutBtn[i].setClickingTogglesState(false); // 手動でトグル状態を管理
-            lfoCutBtn[i].setColour(juce::TextButton::textColourOnId, juce::Colour(0xff00bcd4));
-            addAndMakeVisible(lfoCutBtn[i]);
-
-            lfoCutBtn[i].onClick = [this, paramId = cutParamIds[i]]()
-            {
-                if (auto* p = dynamic_cast<juce::AudioParameterChoice*>(
-                        audioProcessor.apvts.getParameter(paramId)))
-                {
-                    int next = (p->getIndex() + 1) % 5;  // 0→1→2→3→4→0
-                    p->setValueNotifyingHost(p->convertTo0to1((float)next));
-                }
-                updateLfoCutResButtons();  // 即時表示更新（タイマー待ちなし）
-            };
-
-            // Res ボタン
-            lfoResBtn[i].setButtonText("Off");
-            lfoResBtn[i].setClickingTogglesState(false);
-            lfoResBtn[i].setColour(juce::TextButton::textColourOnId, juce::Colour(0xffff9900));
-            addAndMakeVisible(lfoResBtn[i]);
-
-            lfoResBtn[i].onClick = [this, paramId = resParamIds[i]]()
-            {
-                if (auto* p = dynamic_cast<juce::AudioParameterChoice*>(
-                        audioProcessor.apvts.getParameter(paramId)))
-                {
-                    int next = (p->getIndex() + 1) % 5;
-                    p->setValueNotifyingHost(p->convertTo0to1((float)next));
-                }
-                updateLfoCutResButtons();  // 即時表示更新
-            };
-        }
+        auto& b = tabButtons[(size_t)i];
+        b.setButtonText(kTabNames[i]);
+        b.setClickingTogglesState(false);          // 見た目は手動で管理する
+        b.getProperties().set("qmTab", true);
+        b.onClick = [this, i] { setActiveTab(i); };
+        addAndMakeVisible(b);
     }
 
-    // ボタン外観の初期反映 + 30Hz 同期タイマー開始
-    updateLfoCutResButtons();
-    startTimerHz(30);
+    addAndMakeVisible(filterPanel);
+    addChildComponent(modPanel);
+    addChildComponent(outPanel);
 
-    // ===== LFO タイトルラベル =====
-    static const char* const titleTexts[] = {
-        "LFO", "Wave", "Step", "Sync", "Rate", "Min", "Max", "Phase", "Fade", "Spread"
+    // ---- テーマ選択 ----
+    themeCombo.addItemList(QMColors::getThemeNames(), 1);
+    themeCombo.setTooltip("GUI color theme");
+    addAndMakeVisible(themeCombo);
+    themeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        processor.apvts, "colorTheme", themeCombo);
+
+    // ComboBoxAttachment は Listener 経由なので、onChange は自由に使える。
+    themeCombo.onChange = [this]
+    {
+        const int idx = themeCombo.getSelectedItemIndex();
+        if (idx >= 0 && idx != lastThemeIndex) applyTheme(idx);
     };
-    for (int j = 0; j < 10; ++j)
+
+    setActiveTab(TabFilter);
+    applyTheme(lastThemeIndex);
+
+    // プリセット読み込みなどでテーマが変わったときの取りこぼしを拾う
+    startTimerHz(8);
+}
+
+QuadMorphFilterAudioProcessorEditor::Content::~Content()
+{
+    stopTimer();   // Timer は必ずデストラクタ最優先で停止（CLAUDE.md §3）
+}
+
+// ==========================================================================
+void QuadMorphFilterAudioProcessorEditor::Content::timerCallback()
+{
+    const int idx = (int)processor.apvts.getRawParameterValue("colorTheme")->load();
+    if (idx != lastThemeIndex)
+        applyTheme(idx);
+}
+
+// ==========================================================================
+void QuadMorphFilterAudioProcessorEditor::Content::repaintAll(juce::Component* c)
+{
+    if (c == nullptr) return;
+    c->repaint();
+    for (auto* child : c->getChildren())
+        repaintAll(child);
+}
+
+void QuadMorphFilterAudioProcessorEditor::Content::applyTheme(int themeIndex)
+{
+    lastThemeIndex = juce::jlimit(0, QMColors::kNumThemes - 1, themeIndex);
+
+    QMColors::setTheme(lastThemeIndex);
+    laf.refreshColours();
+
+    filterPanel.refreshTheme();
+    modPanel.refreshTheme();
+    outPanel.refreshTheme();
+
+    styleTabs();
+    repaintAll(this);
+}
+
+// ==========================================================================
+void QuadMorphFilterAudioProcessorEditor::Content::styleTabs()
+{
+    for (int i = 0; i < kNumTabs; ++i)
     {
-        lfoTitleLabels[j].setText(titleTexts[j], juce::dontSendNotification);
-        lfoTitleLabels[j].setJustificationType(juce::Justification::centred);
-        lfoTitleLabels[j].setFont(juce::Font(10.0f, juce::Font::bold));
-        lfoTitleLabels[j].setColour(juce::Label::textColourId, juce::Colour(0xffcccccc));  // ライトグレー (暗い背景に対応)
-        addAndMakeVisible(lfoTitleLabels[j]);
+        auto& b = tabButtons[(size_t)i];
+        b.setToggleState(i == activeTab, juce::dontSendNotification);
+        b.setColour(juce::TextButton::textColourOnId, QMColors::tabColour(i));
+        b.setColour(juce::TextButton::textColourOffId, QMColors::textDim);
+        b.repaint();
+    }
+}
+
+void QuadMorphFilterAudioProcessorEditor::Content::setActiveTab(int tab)
+{
+    activeTab = juce::jlimit(0, kNumTabs - 1, tab);
+
+    filterPanel.setVisible(activeTab == TabFilter);
+    modPanel.setVisible(activeTab == TabMod);
+    outPanel.setVisible(activeTab == TabOut);
+
+    styleTabs();
+    repaint(0, kTabY, getWidth(), kTabH + 4);
+}
+
+// ==========================================================================
+void QuadMorphFilterAudioProcessorEditor::Content::resized()
+{
+    const int w = getWidth();
+
+    headerArea = { kMargin, kHeaderY, w - kMargin * 2, kHeaderH };
+    themeCombo.setBounds(w - kMargin - 118, kHeaderY + 7, 118, 22);
+
+    // ---- 上部: フィルターカーブ（大）+ XY パッド ----
+    const int visW = w - kMargin * 2 - kXYPadW - 12;
+    visualizer.setBounds(kMargin, kTopY, visW, kTopH);
+    xyPad.setBounds(kMargin + visW + 12, kTopY, kXYPadW, kTopH);
+
+    // ---- タブ ----
+    tabStripArea = { 0, kTabY, w, kTabH };
+    for (int i = 0; i < kNumTabs; ++i)
+        tabButtons[(size_t)i].setBounds(kMargin + i * kTabStep, kTabY, kTabW, kTabH);
+
+    // ---- パネル ----
+    const auto panelBounds = juce::Rectangle<int>(0, kPanelY, w, kPanelH);
+    filterPanel.setBounds(panelBounds);
+    modPanel.setBounds(panelBounds);
+    outPanel.setBounds(panelBounds);
+}
+
+// ==========================================================================
+void QuadMorphFilterAudioProcessorEditor::Content::paint(juce::Graphics& g)
+{
+    // 複数インスタンスがそれぞれ別テーマを選んでいると、
+    // カラーテーブル（表示専用のグローバル）が他方に書き換えられていることがある。
+    // 子コンポーネントは親のあとに描画されるので、ここで自分のテーマへ戻しておけば
+    // このインスタンス全体が正しい配色で描かれる。
+    if (QMColors::currentTheme != lastThemeIndex)
+        QMColors::setTheme(lastThemeIndex);
+
+    g.fillAll(QMColors::bg);
+
+    // ---- ヘッダー ----
+    {
+        auto r = headerArea;
+
+        // 左端のアクセントバー
+        g.setGradientFill(juce::ColourGradient(
+            QMColors::accentMorph, (float)r.getX(), (float)r.getY() + 6.0f,
+            QMColors::accentOut, (float)r.getX(), (float)r.getBottom() - 6.0f, false));
+        g.fillRoundedRectangle((float)r.getX(), (float)r.getY() + 6.0f, 3.0f,
+                               (float)r.getHeight() - 12.0f, 1.5f);
+
+        // タイトル
+        g.setFont(juce::Font(juce::FontOptions(20.0f, juce::Font::bold)));
+        juce::ColourGradient titleGrad(QMColors::accentMorph, (float)r.getX() + 12.0f,
+                                       (float)r.getY(),
+                                       QMColors::accentOut, (float)r.getX() + 300.0f,
+                                       (float)r.getBottom(), false);
+        titleGrad.addColour(0.5, QMColors::accentFilter);
+        g.setGradientFill(titleGrad);
+        g.drawText("QUAD-MORPH FILTER", r.getX() + 12, r.getY(), 300, r.getHeight(),
+                   juce::Justification::centredLeft, false);
+
+        // サブタイトル
+        g.setColour(QMColors::textDim);
+        g.setFont(juce::Font(juce::FontOptions(10.5f, juce::Font::bold)));
+        g.drawText("OTODESK   /   28 Filter Models   /   V" QUADMORPH_VERSION,
+                   r.getX() + 322, r.getY(), 380, r.getHeight(),
+                   juce::Justification::centredLeft, false);
+
+        // 下境界
+        g.setColour(QMColors::panelLine.withAlpha(0.35f));
+        g.fillRect(r.getX(), r.getBottom(), r.getWidth(), 1);
     }
 
-    // ===== LFO4 セットアップ =====
-    lfo4.enableButton.setButtonText("LFO4");
-    lfo4.enableButton.setClickingTogglesState(true);
-    addAndMakeVisible(lfo4.enableButton);
-    lfo4.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.apvts, "lfo4en", lfo4.enableButton);
+    // ---- タブ帯の下線 ----
+    g.setColour(QMColors::panelLine.withAlpha(0.30f));
+    g.fillRect(kMargin, kTabY + kTabH, getWidth() - kMargin * 2, 1);
+}
 
-    lfo4.wave.addItemList({ "Sine", "Triangle", "Square", "Saw", "Random", "Billiard", "SmoothNoise" }, 1);
-    addAndMakeVisible(lfo4.wave);
-    lfo4.wAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "lfo4wave", lfo4.wave);
+// ==========================================================================
+//  Editor
+// ==========================================================================
+QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
+    QuadMorphFilterAudioProcessor& p)
+    : AudioProcessorEditor(&p),
+      audioProcessor(p),
+      content(p, laf)
+{
+    setOpaque(true);
 
-    lfo4.stepMode.setButtonText("Step");
-    lfo4.stepMode.setClickingTogglesState(true);
-    addAndMakeVisible(lfo4.stepMode);
-    lfo4.sAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.apvts, "lfo4step", lfo4.stepMode);
+    // LookAndFeel はこのエディタにだけ適用する（子は自動的に継承する）。
+    // setDefaultLookAndFeel はプロセス全体を書き換えるため、
+    // 複数インスタンス時に他のウィンドウを巻き込む危険がある。
+    setLookAndFeel(&laf);
 
-    lfo4.syncToggle.setButtonText("Sync");
-    lfo4.syncToggle.setClickingTogglesState(true);
-    lfo4.syncToggle.onClick = [this] { resized(); };
-    addAndMakeVisible(lfo4.syncToggle);
-    lfo4.syAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.apvts, "lfo4sync", lfo4.syncToggle);
+    addAndMakeVisible(content);
 
-    lfo4.rateSync.addItemList({
-        "8/1", "4/1", "2/1", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64",
-        "1/1D", "1/2D", "1/4D", "1/8D", "1/16D", "1/32D",
-        "1/1T", "1/2T", "1/4T", "1/8T", "1/16T", "1/32T" }, 1);
-    addAndMakeVisible(lfo4.rateSync);
-    lfo4.rsAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "lfo4rateSync", lfo4.rateSync);
+    // ---- リサイズ（アスペクト比固定）----
+    constrainer.setFixedAspectRatio((double)kBaseW / (double)kBaseH);
+    constrainer.setMinimumSize(kBaseW * 7 / 10, kBaseH * 7 / 10);
+    constrainer.setMaximumSize(kBaseW * 8 / 5, kBaseH * 8 / 5);
+    setConstrainer(&constrainer);
+    setResizable(true, true);
 
-    lfo4.rateFree.setSliderStyle(juce::Slider::LinearHorizontal);
-    lfo4.rateFree.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
-    lfo4.rateFree.setTextValueSuffix(" Hz");
-    addAndMakeVisible(lfo4.rateFree);
-    lfo4.rfAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        audioProcessor.apvts, "lfo4rateFree", lfo4.rateFree);
-
-    lfo4.depthLabel.setText("Depth", juce::dontSendNotification);
-    lfo4.depthLabel.setJustificationType(juce::Justification::centredRight);
-    addAndMakeVisible(lfo4.depthLabel);
-    lfo4.depthSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    lfo4.depthSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
-    lfo4.depthSlider.setColour(juce::Slider::thumbColourId, juce::Colour(0xffff9900));
-    addAndMakeVisible(lfo4.depthSlider);
-    lfo4.depthAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        audioProcessor.apvts, "lfo4depth", lfo4.depthSlider);
-
-    // ===== LFO4 アサイン先ボタン =====
-    lfo4.assignLFO1.setButtonText("LFO1");
-    lfo4.assignLFO1.setClickingTogglesState(true);
-    addAndMakeVisible(lfo4.assignLFO1);
-    lfo4.assignAtt1 = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.apvts, "lfo4assignA", lfo4.assignLFO1);
-
-    lfo4.assignLFO2.setButtonText("LFO2");
-    lfo4.assignLFO2.setClickingTogglesState(true);
-    addAndMakeVisible(lfo4.assignLFO2);
-    lfo4.assignAtt2 = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.apvts, "lfo4assignB", lfo4.assignLFO2);
-
-    lfo4.assignLFO3.setButtonText("LFO3");
-    lfo4.assignLFO3.setClickingTogglesState(true);
-    addAndMakeVisible(lfo4.assignLFO3);
-    lfo4.assignAtt3 = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.apvts, "lfo4assignC", lfo4.assignLFO3);
-
-    // ===== LFO5 セットアップ (Dry/Wet Range Modulation) =====
-    lfo5.enableButton.setButtonText("LFO5");
-    lfo5.enableButton.setClickingTogglesState(true);
-    addAndMakeVisible(lfo5.enableButton);
-    lfo5.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.apvts, "lfo5en", lfo5.enableButton);
-
-    lfo5.wave.addItemList({ "Sine", "Triangle", "Square", "Saw", "Random", "Billiard", "SmoothNoise" }, 1);
-    addAndMakeVisible(lfo5.wave);
-    lfo5.wAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "lfo5wave", lfo5.wave);
-
-    lfo5.stepMode.setButtonText("Step");
-    lfo5.stepMode.setClickingTogglesState(true);
-    addAndMakeVisible(lfo5.stepMode);
-    lfo5.sAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.apvts, "lfo5step", lfo5.stepMode);
-
-    lfo5.syncToggle.setButtonText("Sync");
-    lfo5.syncToggle.setClickingTogglesState(true);
-    lfo5.syncToggle.onClick = [this] { resized(); };
-    addAndMakeVisible(lfo5.syncToggle);
-    lfo5.syAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.apvts, "lfo5sync", lfo5.syncToggle);
-
-    lfo5.rateSync.addItemList({
-        "8/1", "4/1", "2/1", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64",
-        "1/1D", "1/2D", "1/4D", "1/8D", "1/16D", "1/32D",
-        "1/1T", "1/2T", "1/4T", "1/8T", "1/16T", "1/32T" }, 1);
-    addAndMakeVisible(lfo5.rateSync);
-    lfo5.rsAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "lfo5rateSync", lfo5.rateSync);
-
-    lfo5.rateFree.setSliderStyle(juce::Slider::LinearHorizontal);
-    lfo5.rateFree.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
-    lfo5.rateFree.setTextValueSuffix(" Hz");
-    addAndMakeVisible(lfo5.rateFree);
-    lfo5.rfAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        audioProcessor.apvts, "lfo5rateFree", lfo5.rateFree);
-
-    lfo5.minLabel.setText("Min", juce::dontSendNotification);
-    lfo5.minLabel.setJustificationType(juce::Justification::centredRight);
-    addAndMakeVisible(lfo5.minLabel);
-    lfo5.minSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    lfo5.minSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 50, 20);
-    lfo5.minSlider.setTextValueSuffix(" %");
-    lfo5.minSlider.setColour(juce::Slider::thumbColourId, juce::Colour(0xff00ff00));
-    addAndMakeVisible(lfo5.minSlider);
-    lfo5.minAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        audioProcessor.apvts, "lfo5min", lfo5.minSlider);
-
-    lfo5.maxLabel.setText("Max", juce::dontSendNotification);
-    lfo5.maxLabel.setJustificationType(juce::Justification::centredRight);
-    addAndMakeVisible(lfo5.maxLabel);
-    lfo5.maxSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    lfo5.maxSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 50, 20);
-    lfo5.maxSlider.setTextValueSuffix(" %");
-    lfo5.maxSlider.setColour(juce::Slider::thumbColourId, juce::Colour(0xff00ff00));
-    addAndMakeVisible(lfo5.maxSlider);
-    lfo5.maxAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        audioProcessor.apvts, "lfo5max", lfo5.maxSlider);
-
-    // ===== Envelope Follower セットアップ =====
-    envFollower.enableButton.setButtonText("EnvFollow");
-    envFollower.enableButton.setClickingTogglesState(true);
-    addAndMakeVisible(envFollower.enableButton);
-    envFollower.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.apvts, "envFollowen", envFollower.enableButton);
-
-    envFollower.invertButton.setButtonText("Invert");
-    envFollower.invertButton.setClickingTogglesState(true);
-    addAndMakeVisible(envFollower.invertButton);
-    envFollower.invAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.apvts, "envFollowinvert", envFollower.invertButton);
-
-    // ===== Attack/Release パラメータは廃止 =====
-
-    envFollower.depthLabel.setText("Depth", juce::dontSendNotification);
-    envFollower.depthLabel.setJustificationType(juce::Justification::centredRight);
-    addAndMakeVisible(envFollower.depthLabel);
-    envFollower.depthSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    envFollower.depthSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 20);
-    envFollower.depthSlider.setTextValueSuffix(" %");
-    envFollower.depthSlider.setColour(juce::Slider::thumbColourId, juce::Colour(0xffff9900));
-    addAndMakeVisible(envFollower.depthSlider);
-    envFollower.depthAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        audioProcessor.apvts, "envFollowdepth", envFollower.depthSlider);
-
-    setSize(1000, 700);   // LFO タイトル行分 (+20px)
+    setSize(kBaseW, kBaseH);
 }
 
 QuadMorphFilterAudioProcessorEditor::~QuadMorphFilterAudioProcessorEditor()
 {
-    stopTimer();  // Timer は必ずデストラクタ最優先で停止
-    juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
+    // 参照を先に切ってから各メンバの破棄に入る（COM 参照カウント事故の予防）
+    setConstrainer(nullptr);
+    setLookAndFeel(nullptr);
 }
 
 void QuadMorphFilterAudioProcessorEditor::paint(juce::Graphics& g)
 {
-    g.fillAll(guiBgColour);
-}
-
-// ==========================================
-// LFO Cut/Res ボタン外観の同期
-// ==========================================
-void QuadMorphFilterAudioProcessorEditor::timerCallback()
-{
-    updateLfoCutResButtons();
-}
-
-void QuadMorphFilterAudioProcessorEditor::updateLfoCutResButtons()
-{
-    // 5択ラベル: 0=Off, 1=+X, 2=+Y, 3=-X, 4=-Y
-    static const char* const labels[] = { "Off", "+X", "+Y", "-X", "-Y" };
-    const juce::String filterLetters[] = { "A", "B", "C", "D" };
-
-    for (int i = 0; i < 4; ++i)
-    {
-        // AudioParameterChoice (5択) normalized → index: round(raw * 4)
-        // AudioParameterChoice は getRawParameterValue がインデックス値をそのまま返す
-        // (0=Off, 1=+X, 2=+Y, 3=-X, 4=-Y) → * 4.0f は不要
-        int cutState = juce::jlimit(0, 4, juce::roundToInt(
-            audioProcessor.apvts.getRawParameterValue("lfoCutSrc" + filterLetters[i])->load()));
-        int resState = juce::jlimit(0, 4, juce::roundToInt(
-            audioProcessor.apvts.getRawParameterValue("lfoResSrc" + filterLetters[i])->load()));
-
-        lfoCutBtn[i].setButtonText(labels[cutState]);
-        // setToggleState で ON/OFF の視覚状態を手動制御 (setClickingTogglesState=false のため)
-        lfoCutBtn[i].setToggleState(cutState > 0, juce::dontSendNotification);
-
-        lfoResBtn[i].setButtonText(labels[resState]);
-        lfoResBtn[i].setToggleState(resState > 0, juce::dontSendNotification);
-    }
-}
-
-// ==========================================
-// GUI Background Color
-// ==========================================
-void QuadMorphFilterAudioProcessorEditor::setGuiBackgroundColour(juce::Colour newColour)
-{
-    guiBgColour = newColour;
-    repaint();
-}
-
-// ==========================================
-void QuadMorphFilterAudioProcessorEditor::refreshFilterGroupControls(
-    FilterGroup& g, const juce::String& suffix, int modelIdx)
-{
-    auto [maxSlope, hasLP, hasBP, hasHP, hasNotch] = getModelCaps(modelIdx);
-
-    if (modelIdx == 2)
-    {
-        // ── TB-303: ComboBoxAttachment を破棄し直接書き込みに切り替え ──
-        // ComboBoxAttachment はコンボ再構築後に内部マッピングがずれ、
-        // "Accent: High"（position 2）が slopeIdx=2 として伝わらない問題を回避。
-        g.slAtt.reset();
-
-        g.slope.clear(juce::dontSendNotification);
-        g.slope.addItem("Off",  1);   // position 0 → slopeIdx 0 (Accent: Off)
-        g.slope.addItem("Low",  2);   // position 1 → slopeIdx 1 (Accent: Low)
-        g.slope.addItem("High", 3);   // position 2 → slopeIdx 2 (Accent: High)
-
-        // 現在の APVTS 値を読んでコンボに反映（選択をリセットしない）
-        const int curAccent = juce::roundToInt(
-            audioProcessor.apvts.getRawParameterValue("slope" + suffix)->load());
-        g.slope.setSelectedId(juce::jlimit(1, 3, curAccent + 1),
-                              juce::dontSendNotification);
-
-        // getSelectedItemIndex()（0 基準）をそのまま slopeIdx として APVTS へ書き込む
-        g.slope.onChange = [this, &g, sfx = suffix]()
-        {
-            const int idx = g.slope.getSelectedItemIndex(); // 0=Off, 1=Low, 2=High
-            if (auto* p = audioProcessor.apvts.getParameter("slope" + sfx))
-                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
-        };
-    }
-    else if (modelIdx == 4)
-    {
-        // ── Bitcrush/SRR: Slope → フィルターステージ数 (Stages) ──
-        // 数値の意味は通常 SVF と同じ（1/2/4/8段）だが、
-        // Bitcrush 文脈では "Stages" と呼ぶ方が直感的。
-        g.slAtt.reset();
-
-        g.slope.clear(juce::dontSendNotification);
-        g.slope.addItem("1x", 1);
-        g.slope.addItem("2x", 2);
-        g.slope.addItem("4x", 3);
-        g.slope.addItem("8x", 4);
-
-        const int curStages = juce::roundToInt(
-            audioProcessor.apvts.getRawParameterValue("slope" + suffix)->load());
-        g.slope.setSelectedId(juce::jlimit(1, 4, curStages + 1),
-                              juce::dontSendNotification);
-
-        g.slope.onChange = [this, &g, sfx = suffix]()
-        {
-            const int idx = g.slope.getSelectedItemIndex();
-            if (auto* p = audioProcessor.apvts.getParameter("slope" + sfx))
-                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
-        };
-    }
-    else if (modelIdx == 6)
-    {
-        // ── Comb Filter: Slope → カスケード段数 (Cascade) ──
-        // 多段カスケードでコームの密度が上がり、フィジカルモデリング的な
-        // 複雑なエコーパターンになる。"Cascade" の方が意味が伝わりやすい。
-        g.slAtt.reset();
-
-        g.slope.clear(juce::dontSendNotification);
-        g.slope.addItem("1x", 1);
-        g.slope.addItem("2x", 2);
-        g.slope.addItem("4x", 3);
-        g.slope.addItem("8x", 4);
-
-        const int curCascade = juce::roundToInt(
-            audioProcessor.apvts.getRawParameterValue("slope" + suffix)->load());
-        g.slope.setSelectedId(juce::jlimit(1, 4, curCascade + 1),
-                              juce::dontSendNotification);
-
-        g.slope.onChange = [this, &g, sfx = suffix]()
-        {
-            const int idx = g.slope.getSelectedItemIndex();
-            if (auto* p = audioProcessor.apvts.getParameter("slope" + sfx))
-                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
-        };
-    }
-    else if (modelIdx == 9)
-    {
-        // ── Wavefolder: Slope → カスケード段数 (1x / 2x / 4x / 8x) ──
-        // TB-303 / Vactrol と同じくアタッチメントを破棄して直接 onChange で書き込む。
-        // slopeIdx 0=1段, 1=2段, 2=4段, 3=8段 のマッピングは既存 Slope と同一。
-        g.slAtt.reset();
-
-        g.slope.clear(juce::dontSendNotification);
-        g.slope.addItem("1x", 1);   // slopeIdx 0 → 1 fold
-        g.slope.addItem("2x", 2);   // slopeIdx 1 → 2 folds cascade
-        g.slope.addItem("4x", 3);   // slopeIdx 2 → 4 folds cascade
-        g.slope.addItem("8x", 4);   // slopeIdx 3 → 8 folds cascade
-
-        const int curFolds = juce::roundToInt(
-            audioProcessor.apvts.getRawParameterValue("slope" + suffix)->load());
-        g.slope.setSelectedId(juce::jlimit(1, 4, curFolds + 1),
-                              juce::dontSendNotification);
-
-        g.slope.onChange = [this, &g, sfx = suffix]()
-        {
-            const int idx = g.slope.getSelectedItemIndex(); // 0=1x, 1=2x, 2=4x, 3=8x
-            if (auto* p = audioProcessor.apvts.getParameter("slope" + sfx))
-                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
-        };
-    }
-    else if (modelIdx == 23)
-    {
-        // ── Waveguide: Slope → 反射段数 (1x / 2x / 4x / 8x) ──
-        // 多段反射でリバーブ的な音場密度が増す。combBuffer を流用（Model 6 と排他使用）。
-        g.slAtt.reset();
-
-        g.slope.clear(juce::dontSendNotification);
-        g.slope.addItem("1x", 1);
-        g.slope.addItem("2x", 2);
-        g.slope.addItem("4x", 3);
-        g.slope.addItem("8x", 4);
-
-        const int curRefl = juce::roundToInt(
-            audioProcessor.apvts.getRawParameterValue("slope" + suffix)->load());
-        g.slope.setSelectedId(juce::jlimit(1, 4, curRefl + 1),
-                              juce::dontSendNotification);
-
-        g.slope.onChange = [this, &g, sfx = suffix]()
-        {
-            const int idx = g.slope.getSelectedItemIndex();
-            if (auto* p = audioProcessor.apvts.getParameter("slope" + sfx))
-                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
-        };
-    }
-    else if (modelIdx == 10)
-    {
-        // ── FDN Reverb: Slope → 空間キャラクター (Room/Hall/Cave/Plate) ──
-        // slopeIdx がそのまま DSP の presets[] インデックスに対応。
-        g.slAtt.reset();
-
-        g.slope.clear(juce::dontSendNotification);
-        g.slope.addItem("Room",  1);   // slopeIdx 0: 20ms, 明るい, 軽い拡散
-        g.slope.addItem("Hall",  2);   // slopeIdx 1: 60ms, 中程度
-        g.slope.addItem("Cave",  3);   // slopeIdx 2: 120ms, 暗い, 重い拡散
-        g.slope.addItem("Plate", 4);   // slopeIdx 3: 30ms, 非常に明るい, 最大拡散
-
-        const int curRoom = juce::roundToInt(
-            audioProcessor.apvts.getRawParameterValue("slope" + suffix)->load());
-        g.slope.setSelectedId(juce::jlimit(1, 4, curRoom + 1),
-                              juce::dontSendNotification);
-
-        g.slope.onChange = [this, &g, sfx = suffix]()
-        {
-            const int idx = g.slope.getSelectedItemIndex();
-            if (auto* p = audioProcessor.apvts.getParameter("slope" + sfx))
-                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
-        };
-    }
-    else if (modelIdx == 21)
-    {
-        // ── Vactrol LPG: Slope → アタック時間 (At_Lo=1ms / At_Mid=5ms / At_Hi=20ms) ──
-        // TB-303 と同じく ComboBoxAttachment を破棄して直接 onChange ハンドラで書き込む。
-        g.slAtt.reset();
-
-        g.slope.clear(juce::dontSendNotification);
-        g.slope.addItem("Fast", 1);   // slopeIdx 0 → 1ms  (高速応答)
-        g.slope.addItem("Mid",  2);   // slopeIdx 1 → 5ms  (標準 Vactrol)
-        g.slope.addItem("Slow", 3);   // slopeIdx 2 → 20ms (なめらかなスウェル)
-
-        const int curAtk = juce::roundToInt(
-            audioProcessor.apvts.getRawParameterValue("slope" + suffix)->load());
-        g.slope.setSelectedId(juce::jlimit(1, 3, curAtk + 1),
-                              juce::dontSendNotification);
-
-        g.slope.onChange = [this, &g, sfx = suffix]()
-        {
-            const int idx = g.slope.getSelectedItemIndex(); // 0=Lo, 1=Mid, 2=Hi
-            if (auto* p = audioProcessor.apvts.getParameter("slope" + sfx))
-                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
-        };
-    }
-    else
-    {
-        // ── 非 TB-303: TB-303 用ハンドラを解除 ──
-        g.slope.onChange = nullptr;
-
-        // ── モデル切替のたびにスロープコンボを再構築 ──
-        // setItemEnabled だけでは ComboBoxAttachment の sendInitialUpdate と競合し
-        // 無効化が確実に反映されない場合がある。アタッチメントを先に破棄してから
-        // アイテムを再構成し、最後にアタッチメントを再生成することで順序を確定する。
-        const int curSlopeRaw = juce::roundToInt(
-            audioProcessor.apvts.getRawParameterValue("slope" + suffix)->load());
-        const int clampedSlope = juce::jlimit(0, maxSlope, curSlopeRaw);
-
-        g.slAtt.reset();  // 先にアタッチメントを破棄（removeListener）
-        g.slope.clear(juce::dontSendNotification);
-        g.slope.addItem("12dB", 1);
-        g.slope.addItem("24dB", 2);
-        g.slope.addItem("48dB", 3);
-        g.slope.addItem("96dB", 4);
-
-        // maxSlope を超えるアイテムを無効化（アタッチメント生成前に設定）
-        for (int i = 1; i <= 4; ++i)
-            g.slope.setItemEnabled(i, (i - 1) <= maxSlope);
-
-        // アタッチメント再生成（sendInitialUpdate は setItemEnabled 後に発火）
-        g.slAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-            audioProcessor.apvts, "slope" + suffix, g.slope);
-
-        // clamped 値で選択を確定（通知なし：アタッチメントが同期済みのため）
-        g.slope.setSelectedId(clampedSlope + 1, juce::dontSendNotification);
-
-        // APVTS 値がクランプにより変化した場合のみ書き戻す
-        if (curSlopeRaw != clampedSlope)
-        {
-            if (auto* p = audioProcessor.apvts.getParameter("slope" + suffix))
-                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(clampedSlope)));
-        }
-    }
-
-    g.type.setItemEnabled(1, hasLP);
-    g.type.setItemEnabled(2, hasBP);
-    g.type.setItemEnabled(3, hasHP);
-    g.type.setItemEnabled(4, hasNotch);
-
-    // ── Type コンボのラベルをモデルに応じて切り替え ──
-    // Model 22 (Modal Resonator): 音楽的な LP/BP/HP/Notch 分類ではなく
-    // 「どう混ぜるか」の操作モードなので Type0〜3 と表示する。
-    // アイテム ID（1〜4）は APVTS マッピングに使用するため変えない。
-    if (modelIdx == 23)
-    {
-        // Waveguide: Type0=Wet (共鳴音のみ), Type1=Mix (励振+共鳴ブレンド)
-        // HP/Notch は ModelCapabilities で無効化済み → デフォルトテキストに戻しておく
-        g.type.changeItemText(1, "Wet");
-        g.type.changeItemText(2, "Mix");
-        g.type.changeItemText(3, "HP");
-        g.type.changeItemText(4, "Notch");
-    }
-    else if (modelIdx == 10)
-    {
-        // FDN Reverb: SVF プリフィルターのキャラクター選択
-        g.type.changeItemText(1, "Dark");   // LP → 低域のみ FDN へ → 暖かい残響
-        g.type.changeItemText(2, "Mid");    // BP → 中域のみ FDN へ → ボーカル残響
-        g.type.changeItemText(3, "Air");    // HP → 高域のみ FDN へ → 金属的エアー
-        g.type.changeItemText(4, "Open");   // Notch → 全帯域 FDN へ → 標準リバーブ
-    }
-    else if (modelIdx == 8)
-    {
-        // Phaser: フィードバック極性の2択
-        // LP(+FB) = 正帰還 → 暖かく深いフェイザー音
-        // BP(-FB) = 負帰還 → 薄くコールドなフェイザー音
-        // HP/Notch は ModelCapabilities で無効化済み → デフォルトテキストに戻す
-        g.type.changeItemText(1, "+FB");
-        g.type.changeItemText(2, "-FB");
-        g.type.changeItemText(3, "HP");
-        g.type.changeItemText(4, "Notch");
-    }
-    else if (modelIdx == 11)
-    {
-        // Phase Shift: 段間周波数スプレッドパターン選択
-        g.type.changeItemText(1, "Lin");    // 線形分散
-        g.type.changeItemText(2, "Log");    // 対数分散（旧実装）
-        g.type.changeItemText(3, "Mirror"); // 鏡像分散
-        g.type.changeItemText(4, "Rand");   // 固定疑似乱数分散
-    }
-    else if (modelIdx == 24)
-    {
-        // Bode Freq Shifter: 上側帯域 / 下側帯域 の2択
-        // HP/Notch は ModelCapabilities で無効化済み → デフォルトテキストに戻す
-        g.type.changeItemText(1, "Up");     // LP = 上側帯域 (A*cos - B*sin)
-        g.type.changeItemText(2, "Down");   // BP = 下側帯域 (A*cos + B*sin)
-        g.type.changeItemText(3, "HP");
-        g.type.changeItemText(4, "Notch");
-    }
-    else if (modelIdx == 26)
-    {
-        // Phased Array: 出力ミックスモード
-        // LP/HP が有効 (ModelCapabilities 維持), Blend=LP, Wet=HP
-        g.type.changeItemText(1, "Blend");  // LP = ドライ + mixedPhase
-        g.type.changeItemText(2, "BP");     // BP: 無効 (デフォルト表記に戻す)
-        g.type.changeItemText(3, "Wet");    // HP = mixedPhase のみ
-        g.type.changeItemText(4, "Notch");  // Notch: 無効
-    }
-    else if (modelIdx == 22)
-    {
-        // Modal Resonator: 混合モードとして Type0〜3 で表示
-        g.type.changeItemText(1, "Type0");
-        g.type.changeItemText(2, "Type1");
-        g.type.changeItemText(3, "Type2");
-        g.type.changeItemText(4, "Type3");
-    }
-    else if (modelIdx == 4)
-    {
-        // Bitcrush/SRR: SVF はトーン整形フィルターとして機能するため
-        // LP/HP/BP/Notch ではなくキャラクター名で表示する
-        g.type.changeItemText(1, "Warm");    // LP  = 低域を保護した温かいクラッシュ
-        g.type.changeItemText(2, "Focus");   // BP  = 帯域を絞ったクラッシュ
-        g.type.changeItemText(3, "Bright");  // HP  = 高域成分を際立たせるクラッシュ
-        g.type.changeItemText(4, "Hollow");  // Notch = ノッチ周波数を除いてクラッシュ
-    }
-    else if (modelIdx == 6)
-    {
-        // Comb Filter: LP/HP/BP/Notch は動作と一致しないため専用ラベルに変更
-        // Type 0 = フィードバック正帰還 (Warm)
-        // Type 1 = フィードバック負帰還 (Metal/フランジャー)
-        // Type 2 = フィードフォワード正帰還 (Comb ノッチ)
-        // Type 3 = フィードフォワード負帰還 (Phase/反転コーム)
-        g.type.changeItemText(1, "Warm");
-        g.type.changeItemText(2, "Metal");
-        g.type.changeItemText(3, "Comb");
-        g.type.changeItemText(4, "Phase");
-    }
-    else
-    {
-        g.type.changeItemText(1, "LP");
-        g.type.changeItemText(2, "BP");
-        g.type.changeItemText(3, "HP");
-        g.type.changeItemText(4, "Notch");
-    }
-
-    int curType = g.type.getSelectedId();
-    bool typeOk = (curType == 1 && hasLP)
-        || (curType == 2 && hasBP)
-        || (curType == 3 && hasHP)
-        || (curType == 4 && hasNotch);
-
-    if (!typeOk)
-    {
-        int fallback = hasLP ? 1 : hasBP ? 2 : hasHP ? 3 : 4;
-        g.type.setSelectedId(fallback, juce::sendNotification);
-        if (auto* p = audioProcessor.apvts.getParameter("type" + suffix))
-            p->setValueNotifyingHost(p->convertTo0to1((float)(fallback - 1)));
-    }
-
-    if (modelIdx == 10)
-    {
-        // FDN Reverb: Cutoff = プリフィルター周波数 (Dark/Mid/Air/Open の帯域)
-        //             Res    = フィードバック量 = テール長 → "Decay"
-        g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
-        g.resLabel.setText("Decay",       juce::dontSendNotification);
-    }
-    else if (modelIdx == 8)
-    {
-        // Phaser: Cutoff = AP ノッチ中心周波数 → "Freq", Res = フィードバック量 → "Depth"
-        g.cutoffLabel.setText("Freq",     juce::dontSendNotification);
-        g.resLabel.setText("Depth",       juce::dontSendNotification);
-    }
-    else if (modelIdx == 11)
-    {
-        // Phase Shift: Cutoff = 段スプレッド中心周波数 → "Center", Res = スプレッド幅 → "Spread"
-        g.cutoffLabel.setText("Center",   juce::dontSendNotification);
-        g.resLabel.setText("Spread",      juce::dontSendNotification);
-    }
-    else if (modelIdx == 24)
-    {
-        // Bode Freq Shifter: Cutoff = 周波数シフト量 (-1000〜+1000Hz) → "Shift"
-        //                    Res    = フィードバック量 → "Fdbk"
-        g.cutoffLabel.setText("Shift",    juce::dontSendNotification);
-        g.resLabel.setText("Fdbk",        juce::dontSendNotification);
-    }
-    else if (modelIdx == 25)
-    {
-        // Z-Plane 2D Morph: Cutoff = 2D 空間 X 軸 → "X"
-        //                   Res    = 2D 空間 Y 軸 → "Y"
-        g.cutoffLabel.setText("X",        juce::dontSendNotification);
-        g.resLabel.setText("Y",           juce::dontSendNotification);
-    }
-    else if (modelIdx == 26)
-    {
-        // Phased Array: Cutoff = AP ノッチ周波数 → "Freq"
-        //               Res    = フィードバック深度 → "Depth"
-        g.cutoffLabel.setText("Freq",     juce::dontSendNotification);
-        g.resLabel.setText("Depth",       juce::dontSendNotification);
-    }
-    else if (modelIdx == 4)
-    {
-        // Bitcrush/SRR: Cutoff = SRR 周波数 → "Rate", Res = SVF 色味 → "Color"
-        g.cutoffLabel.setText("Rate",     juce::dontSendNotification);
-        g.resLabel.setText("Color",       juce::dontSendNotification);
-    }
-    else if (modelIdx == 6)
-    {
-        // Comb Filter: Cutoff = 基音周波数 → "Freq", Res = フィードバック係数 → "Feedback"
-        g.cutoffLabel.setText("Freq",     juce::dontSendNotification);
-        g.resLabel.setText("FB",           juce::dontSendNotification);
-    }
-    else if (modelIdx == 7)
-    {
-        // MS-20: Cutoff はそのまま, Res = 実機パネル刻印 "Peak" に合わせる
-        g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
-        g.resLabel.setText("Peak",        juce::dontSendNotification);
-    }
-    else if (modelIdx == 9)
-    {
-        // Wavefolder: Res = フォールド深度（Drive）
-        g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
-        g.resLabel.setText("Drive",       juce::dontSendNotification);
-    }
-    else if (modelIdx == 17)
-    {
-        // Butterworth: Reso = Q 倍率（カットオフ付近のピーク量）
-        g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
-        g.resLabel.setText("Peak",        juce::dontSendNotification);
-    }
-    else if (modelIdx == 18)
-    {
-        // Chebyshev: Reso = パスバンドリップル量
-        g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
-        g.resLabel.setText("Ripple",      juce::dontSendNotification);
-    }
-    else if (modelIdx == 19)
-    {
-        // Bessel: Reso = 位相線形度（低=線形, 高=急峻）
-        g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
-        g.resLabel.setText("Phase",       juce::dontSendNotification);
-    }
-    else if (modelIdx == 20)
-    {
-        // Elliptic: Reso = ストップバンドノッチ位置（低=Wide, 高=Steep）
-        g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
-        g.resLabel.setText("Stop",        juce::dontSendNotification);
-    }
-    else if (modelIdx == 21)
-    {
-        // Vactrol LPG: Cutoff=開口量, Res=リリース時間
-        g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
-        g.resLabel.setText("Rel",         juce::dontSendNotification);
-    }
-    else if (modelIdx == 23)
-    {
-        // Waveguide: Cutoff = 共鳴ピッチ（遅延長）→ "Tune"
-        //            Res    = フィードバック量 = 音の持続時間 → "Decay"
-        g.cutoffLabel.setText("Tune",     juce::dontSendNotification);
-        g.resLabel.setText("Decay",       juce::dontSendNotification);
-    }
-    else
-    {
-        g.cutoffLabel.setText("Cut",      juce::dontSendNotification);
-        g.resLabel.setText("Res",         juce::dontSendNotification);
-    }
-}
-
-void QuadMorphFilterAudioProcessorEditor::setupFilterGroup(FilterGroup& g,
-    juce::String s,
-    juce::String name)
-{
-    g.enableButton.setButtonText(name);
-    g.enableButton.setClickingTogglesState(true);
-    g.enableButton.setColour(juce::TextButton::textColourOnId, juce::Colour(0xff00ACC1));
-    addAndMakeVisible(g.enableButton);
-    g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.apvts, "enable" + s, g.enableButton);
-
-    // モデル名: 括弧を削除しコンパクト化（全28モデル、ID=1〜28に対応）
-    g.model.addItemList({
-        "Clean SVF",    "Moog Ladder",  "TB-303",       "Oberheim SEM", "Bitcrush",
-        "Vowel Filter", "Comb Filter",  "MS-20",        "Phaser",       "Wavefolder",
-        "FDN Reverb",   "Phase Shift",
-        "CEM3320",      "SSM2040",      "CS-80",        "Roland Jupiter", "EDP Wasp",
-        "Butterworth",  "Chebyshev",    "Bessel",       "Elliptic",
-        "Vactrol LPG",  "Modal Res",    "Waveguide",    "Bode Shifter",
-        "2D Morph",     "Phased Array", "Nyquist AA"
-        }, 1);
-    addAndMakeVisible(g.model);
-    g.mAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "model" + s, g.model);
-
-    g.type.addItemList({ "LP", "BP", "HP", "Notch" }, 1);
-    addAndMakeVisible(g.type);
-    g.tAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "type" + s, g.type);
-
-    g.slope.addItemList({ "12dB", "24dB", "48dB", "96dB" }, 1);
-    addAndMakeVisible(g.slope);
-    g.slAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "slope" + s, g.slope);
-
-    auto setup = [&](juce::Label& l, juce::Slider& sl, juce::String txt, juce::String id,
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& att)
-        {
-            l.setText(txt, juce::dontSendNotification);
-            addAndMakeVisible(l);
-            sl.setSliderStyle(juce::Slider::LinearHorizontal);
-            sl.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 50, 18);
-            sl.setColour(juce::Slider::thumbColourId, juce::Colour(0xff00ACC1));
-            addAndMakeVisible(sl);
-            att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-                audioProcessor.apvts, id + s, sl);
-        };
-    setup(g.cutoffLabel, g.cutoff, "Cut", "cutoff", g.cAtt);
-    setup(g.resLabel, g.res, "Res", "res", g.rAtt);
-
-    g.model.onChange = [this, &g, s]()
-        {
-            int modelIdx = g.model.getSelectedId() - 1;
-            refreshFilterGroupControls(g, s, modelIdx);
-        };
-
-    int initialModel = (int)audioProcessor.apvts.getRawParameterValue("model" + s)->load();
-    refreshFilterGroupControls(g, s, initialModel);
-}
-
-void QuadMorphFilterAudioProcessorEditor::setupLfoGroup(LfoGroup& g, int idx, juce::String name)
-{
-    juce::String id = "lfo" + juce::String(idx);
-    juce::Colour lfoCols[] = {
-        juce::Colour(0xff00D2D3),
-        juce::Colour(0xffFF9FF3),
-        juce::Colour(0xffFEECA1)
-    };
-
-    g.enableButton.setButtonText(name);
-    g.enableButton.setClickingTogglesState(true);
-    g.enableButton.setColour(juce::TextButton::textColourOnId, lfoCols[idx - 1]);
-    addAndMakeVisible(g.enableButton);
-    g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.apvts, id + "en", g.enableButton);
-
-    g.wave.addItemList({
-        "Sine", "SAW", "Pulse", "Random 1", "Random 2", "Noise", "Recording",
-        "Smooth Noise", "Spirograph", "Harmonic Swarm", "3D Torus Knot",
-        "Lissajous", "Spiral", "Star", "Rose", "Lemniscate", "Billiard",
-        "Polygon", "Attractor Orbit"
-        }, 1);
-    addAndMakeVisible(g.wave);
-    g.wAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, id + "wave", g.wave);
-
-    g.stepMode.setButtonText("Step");
-    g.stepMode.setClickingTogglesState(true);
-    g.stepMode.setColour(juce::TextButton::textColourOnId, lfoCols[idx - 1]);
-    addAndMakeVisible(g.stepMode);
-    g.sAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.apvts, id + "step", g.stepMode);
-
-    g.syncToggle.setButtonText("Sync");
-    g.syncToggle.setClickingTogglesState(true);
-    g.syncToggle.setColour(juce::TextButton::textColourOnId, lfoCols[idx - 1]);
-    g.syncToggle.onClick = [this] { resized(); };
-    addAndMakeVisible(g.syncToggle);
-    g.syAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.apvts, id + "sync", g.syncToggle);
-
-    g.rateSync.addItemList({
-        "8/1", "4/1", "2/1", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64",
-        "1/1D", "1/2D", "1/4D", "1/8D", "1/16D", "1/32D",
-        "1/1T", "1/2T", "1/4T", "1/8T", "1/16T", "1/32T"
-        }, 1);
-    addAndMakeVisible(g.rateSync);
-    g.rsAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, id + "rateSync", g.rateSync);
-
-    auto setupSlider = [&](juce::Slider& sl,
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& att,
-        juce::String paramId)
-        {
-            sl.setSliderStyle(juce::Slider::LinearHorizontal);
-            sl.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 45, 18);
-            sl.setColour(juce::Slider::thumbColourId, lfoCols[idx - 1]);
-            addAndMakeVisible(sl);
-            att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-                audioProcessor.apvts, paramId, sl);
-        };
-    setupSlider(g.rateFree,   g.rfAtt,    id + "rateFree");
-    setupSlider(g.minSlider,  g.minAtt,   id + "min");
-    setupSlider(g.maxSlider,  g.maxAtt,   id + "max");
-
-    // ===== 新規: Phase Offset / Fade-in =====
-    g.phaseSlider.setTextValueSuffix(juce::String::fromUTF8("\xc2\xb0"));
-    setupSlider(g.phaseSlider, g.phaseAtt, id + "phase");
-
-    g.fadeSlider.setTextValueSuffix("s");
-    setupSlider(g.fadeSlider, g.fadeAtt, id + "fade");
-
-    g.spreadSlider.setTextValueSuffix(juce::String::fromUTF8("\xc2\xb0"));
-    setupSlider(g.spreadSlider, g.spreadAtt, id + "spread");
+    // Content が全面を塗るので、リサイズ途中の残像だけ潰しておく
+    g.fillAll(QMColors::bg);
 }
 
 void QuadMorphFilterAudioProcessorEditor::resized()
 {
-    const int pad = 15;
-    auto b = getLocalBounds().reduced(pad);
-    const int totalW = b.getWidth();
-
-    const int visW = (int)(totalW * 0.7f);
-    const int rightX = b.getX() + visW;
-    const int rightW = b.getRight() - rightX;
-
-    {
-        auto top = b.removeFromTop(300);
-        visualizer.setBounds(top.removeFromLeft(visW).reduced(5));
-        xyPad.setBounds(top.reduced(5));
-    }
-    b.removeFromTop(4);
-
-    {
-        int ctrlY = b.getY();
-        const int rowH = 24;
-        const int gap = 2;
-
-        {
-            auto area = juce::Rectangle<int>(rightX, ctrlY, rightW, rowH).reduced(4, 1);
-            osModeLabel.setBounds(area.removeFromLeft(24).reduced(0, 1));
-            osModeCombo.setBounds(area.removeFromLeft(80));
-            ctrlY += rowH + gap;
-        }
-
-        {
-            auto area = juce::Rectangle<int>(rightX, ctrlY, rightW, rowH).reduced(4, 1);
-            lfoCutLabel.setBounds(area.removeFromLeft(52).reduced(0, 1));
-            int bw = area.getWidth() / 4;
-            for (int i = 0; i < 4; ++i)
-                lfoCutBtn[i].setBounds(area.removeFromLeft(bw).reduced(2, 1));
-            ctrlY += rowH + gap;
-        }
-
-        {
-            auto area = juce::Rectangle<int>(rightX, ctrlY, rightW, rowH).reduced(4, 1);
-            lfoResLabel.setBounds(area.removeFromLeft(52).reduced(0, 1));
-            int bw = area.getWidth() / 4;
-            for (int i = 0; i < 4; ++i)
-                lfoResBtn[i].setBounds(area.removeFromLeft(bw).reduced(2, 1));
-            ctrlY += rowH + gap;
-        }
-
-        {
-            // ── Row 4: Blend (Morph) + Algo (Cutoff) ──
-            // Mode/OS と同レイアウト: 左半分 = Blend、右半分 = Algo
-            auto area = juce::Rectangle<int>(rightX, ctrlY, rightW, rowH).reduced(4, 1);
-            auto leftHalf = area.removeFromLeft(area.getWidth() / 2 - 4);
-            morphBlendLabel.setBounds(leftHalf.removeFromLeft(42).reduced(0, 1));
-            morphBlendCombo.setBounds(leftHalf);
-            area.removeFromLeft(8);
-            cutoffAlgoLabel.setBounds(area.removeFromLeft(30).reduced(0, 1));
-            cutoffAlgoCombo.setBounds(area);
-        }
-    }
-
-    // ── フィルター行レイアウト（等幅スライダー設計）──
-    //
-    // Cutoff・Reso スライダーを等幅にするため、固定消費を除いた残り幅を 2 等分する。
-    //
-    //   固定消費: enable(28) + model(145) + type(68) + slope(80)
-    //             + cutoffLabel(34) + gap(4) + resLabel(55)  = 414px
-    //
-    //   type  68px: "Hollow"/"Bright" (6文字) まで表示可能
-    //   cutoffLabel 34px: "Rate"/"Freq" (4文字) が余裕で表示可能
-    //   resLabel 55px: 最長 "Ripple" (6文字) まで — "Feedback"→"FB"、"Stopband"→"Stop" に省略
-    //
-    //   sliderAreaW = (visW - 10 - 414) / 2
-    //   行全体 = 414 + 2*sliderAreaW = visW - 10 → FilterVisualizer 右端に揃う
-
-    const int fixedConsumed = 28 + 145 + 68 + 80 + 34 + 4 + 55;   // = 414
-    const int sliderAreaW   = std::max(80, (visW - 10 - fixedConsumed) / 2);
-
-    for (auto* g : { &groupA, &groupB, &groupC, &groupD })
-    {
-        auto r = b.removeFromTop(28).reduced(5, 2);
-
-        g->enableButton.setBounds(r.removeFromLeft(28).reduced(0, 2));
-        g->model.setBounds(r.removeFromLeft(145).reduced(2, 2));
-        g->type.setBounds(r.removeFromLeft(68).reduced(2, 2));   // 55→68: "Hollow"対応
-        g->slope.setBounds(r.removeFromLeft(80).reduced(2, 2));
-
-        // Cutoff: label(34) + slider(sliderAreaW)
-        auto cutArea = r.removeFromLeft(34 + sliderAreaW).reduced(2, 0);
-        g->cutoffLabel.setBounds(cutArea.removeFromLeft(34));
-        g->cutoff.setBounds(cutArea);
-
-        r.removeFromLeft(4);
-
-        // Reso: label(55) + slider(sliderAreaW) — Cutoff と同じ幅
-        auto resArea = r.removeFromLeft(55 + sliderAreaW).reduced(2, 0);
-        g->resLabel.setBounds(resArea.removeFromLeft(55));
-        g->res.setBounds(resArea);
-    }
-    b.removeFromTop(6);
-
-    // ===== LFO セクション タイトル行 =====
-    {
-        auto tr = b.removeFromTop(16).reduced(5, 0);
-
-        // LFO コントロール行と同じ幅配分でラベルを配置
-        lfoTitleLabels[0].setBounds(tr.removeFromLeft(100));  // LFO
-        lfoTitleLabels[1].setBounds(tr.removeFromLeft(120));  // Wave
-        lfoTitleLabels[2].setBounds(tr.removeFromLeft(50));   // Step
-        lfoTitleLabels[3].setBounds(tr.removeFromLeft(50));   // Sync
-
-        auto tw = tr.getWidth();
-        auto ts = tw / 6;
-        lfoTitleLabels[4].setBounds(tr.removeFromLeft(ts));   // Rate
-        lfoTitleLabels[5].setBounds(tr.removeFromLeft(ts));   // Min
-        lfoTitleLabels[6].setBounds(tr.removeFromLeft(ts));   // Max
-        lfoTitleLabels[7].setBounds(tr.removeFromLeft(ts));   // Phase
-        lfoTitleLabels[8].setBounds(tr.removeFromLeft(ts));   // Fade
-        lfoTitleLabels[9].setBounds(tr);                      // Spread
-    }
-
-    for (int i = 0; i < 3; ++i)
-    {
-        auto r = b.removeFromTop(28).reduced(5, 2);
-
-        lfos[i].enableButton.setBounds(r.removeFromLeft(100).reduced(0, 2));
-        lfos[i].wave.setBounds(r.removeFromLeft(120).withSizeKeepingCentre(115, 20));
-        lfos[i].stepMode.setBounds(r.removeFromLeft(50).reduced(2, 2));
-        lfos[i].syncToggle.setBounds(r.removeFromLeft(50).reduced(2, 2));
-
-        // 残り幅を Rate / Min / Max / Phase / Fade / Spread の 6 等分
-        auto remainW    = r.getWidth();
-        auto slotW      = remainW / 6;
-        auto rateArea   = r.removeFromLeft(slotW);
-        auto minArea    = r.removeFromLeft(slotW);
-        auto maxArea    = r.removeFromLeft(slotW);
-        auto phaseArea  = r.removeFromLeft(slotW);
-        auto fadeArea   = r.removeFromLeft(slotW);
-        auto spreadArea = r;
-
-        bool isSynced = audioProcessor.apvts.getRawParameterValue(
-            "lfo" + juce::String(i + 1) + "sync")->load() > 0.5f;
-        if (isSynced) {
-            lfos[i].rateSync.setBounds(
-                rateArea.withSizeKeepingCentre(rateArea.getWidth() - 5, 20));
-            lfos[i].rateFree.setVisible(false);
-            lfos[i].rateSync.setVisible(true);
-        }
-        else {
-            lfos[i].rateFree.setBounds(rateArea.reduced(2, 5));
-            lfos[i].rateFree.setVisible(true);
-            lfos[i].rateSync.setVisible(false);
-        }
-        lfos[i].minSlider.setBounds(minArea.reduced(2, 5));
-        lfos[i].maxSlider.setBounds(maxArea.reduced(2, 5));
-        lfos[i].phaseSlider.setBounds(phaseArea.reduced(2, 5));
-        lfos[i].fadeSlider.setBounds(fadeArea.reduced(2, 5));
-        lfos[i].spreadSlider.setBounds(spreadArea.reduced(2, 5));
-    }
-
-    // ===== LFO4 セクション（LFO1/2/3 アサイン先ボタンと同一行）=====
-    b.removeFromTop(8);
-    {
-        auto r = b.removeFromTop(28).reduced(5, 2);
-
-        lfo4.enableButton.setBounds(r.removeFromLeft(100).reduced(0, 2));
-        lfo4.wave.setBounds(r.removeFromLeft(120).withSizeKeepingCentre(115, 20));
-        lfo4.stepMode.setBounds(r.removeFromLeft(50).reduced(2, 2));
-        lfo4.syncToggle.setBounds(r.removeFromLeft(50).reduced(2, 2));
-
-        // 残り幅を Rate / Depth / [LFO1] [LFO2] [LFO3] で配置（均等配置）
-        auto remainW = r.getWidth();
-
-        // Rate (ComboBox/Slider): 25% ★ 均等
-        auto rateArea = r.removeFromLeft(remainW * 0.25f);
-        bool isSynced = audioProcessor.apvts.getRawParameterValue("lfo4sync")->load() > 0.5f;
-        if (isSynced) {
-            lfo4.rateSync.setBounds(rateArea.withSizeKeepingCentre(rateArea.getWidth() - 5, 20));
-            lfo4.rateFree.setVisible(false);
-            lfo4.rateSync.setVisible(true);
-        }
-        else {
-            lfo4.rateFree.setBounds(rateArea.reduced(2, 5));
-            lfo4.rateFree.setVisible(true);
-            lfo4.rateSync.setVisible(false);
-        }
-
-        // Depth (Label + Slider): 35% ★ Label 45px を引いても Rate と同じ長さになる
-        auto depthArea = r.removeFromLeft(remainW * 0.35f);
-        auto depthLabelArea = depthArea.removeFromLeft(45);
-        lfo4.depthLabel.setBounds(depthLabelArea);
-        lfo4.depthSlider.setBounds(depthArea.reduced(2, 5));
-
-        // LFO1/2/3 ボタン（残り 40% を 3 分割 → 各 ~13.3%）
-        auto buttonSlotW = r.getWidth() / 3;
-        lfo4.assignLFO1.setBounds(r.removeFromLeft(buttonSlotW).reduced(2, 2));
-        lfo4.assignLFO2.setBounds(r.removeFromLeft(buttonSlotW).reduced(2, 2));
-        lfo4.assignLFO3.setBounds(r.removeFromLeft(buttonSlotW).reduced(2, 2));
-    }
-
-    b.removeFromTop(6);
-
-    // ===== LFO5 セクション (Dry/Wet Range Modulation) - 一行配置 =====
-    {
-        auto r = b.removeFromTop(28).reduced(5, 2);
-
-        lfo5.enableButton.setBounds(r.removeFromLeft(100).reduced(0, 2));
-        lfo5.wave.setBounds(r.removeFromLeft(100).withSizeKeepingCentre(95, 20));
-        lfo5.stepMode.setBounds(r.removeFromLeft(50).reduced(2, 2));
-        lfo5.syncToggle.setBounds(r.removeFromLeft(50).reduced(2, 2));
-
-        // 残り幅を Rate / Min / Max で均等配置
-        auto remainW = r.getWidth();
-        auto slotW = remainW / 3;
-
-        // Rate
-        auto rateArea = r.removeFromLeft(slotW);
-        bool isSynced = audioProcessor.apvts.getRawParameterValue("lfo5sync")->load() > 0.5f;
-        if (isSynced) {
-            lfo5.rateSync.setBounds(rateArea.withSizeKeepingCentre(rateArea.getWidth() - 5, 20));
-            lfo5.rateFree.setVisible(false);
-            lfo5.rateSync.setVisible(true);
-        }
-        else {
-            lfo5.rateFree.setBounds(rateArea.reduced(2, 5));
-            lfo5.rateFree.setVisible(true);
-            lfo5.rateSync.setVisible(false);
-        }
-
-        // Min
-        auto minArea = r.removeFromLeft(slotW);
-        auto minLabelArea = minArea.removeFromLeft(35);
-        lfo5.minLabel.setBounds(minLabelArea);
-        lfo5.minSlider.setBounds(minArea.reduced(2, 5));
-
-        // Max
-        auto maxArea = r;
-        auto maxLabelArea = maxArea.removeFromLeft(35);
-        lfo5.maxLabel.setBounds(maxLabelArea);
-        lfo5.maxSlider.setBounds(maxArea.reduced(2, 5));
-    }
-
-    b.removeFromTop(6);
-
-    // ===== Envelope Follower セクション =====
-    {
-        auto r = b.removeFromTop(28).reduced(5, 2);
-
-        // Enable ボタン
-        envFollower.enableButton.setBounds(r.removeFromLeft(100).reduced(0, 2));
-
-        // Invert ボタン
-        envFollower.invertButton.setBounds(r.removeFromLeft(80).reduced(2, 2));
-
-        // Attack, Release, Depth スライダー (3等分)
-        auto remainW = r.getWidth();
-        auto slotW = remainW / 3;
-
-        // Attack
-        auto attArea = r.removeFromLeft(slotW);
-        envFollower.attackLabel.setBounds(attArea.removeFromLeft(50));
-        envFollower.attackSlider.setBounds(attArea.reduced(2, 5));
-
-        // Release
-        auto relArea = r.removeFromLeft(slotW);
-        envFollower.releaseLabel.setBounds(relArea.removeFromLeft(60));
-        envFollower.releaseSlider.setBounds(relArea.reduced(2, 5));
-
-        // Depth
-        auto depArea = r;
-        envFollower.depthLabel.setBounds(depArea.removeFromLeft(50));
-        envFollower.depthSlider.setBounds(depArea.reduced(2, 5));
-    }
-
-    b.removeFromTop(8);
-
-    auto masterArea = b.removeFromTop(28).reduced(5, 2);
-    auto cellW = masterArea.getWidth() / 3;
-
-    auto gainRect = masterArea.removeFromLeft(cellW);
-    masterGainLabel.setBounds(gainRect.removeFromLeft(60));
-    masterGainSlider.setBounds(gainRect);
-
-    auto dwRect = masterArea.removeFromLeft(cellW);
-    dryWetLabel.setBounds(dwRect.removeFromLeft(60));
-    dryWetSlider.setBounds(dwRect);
-
-    ceilingLabel.setBounds(masterArea.removeFromLeft(60));
-    ceilingSlider.setBounds(masterArea);
+    const float scale = (float)getWidth() / (float)kBaseW;
+    content.setTransform(juce::AffineTransform::scale(scale));
+    content.setBounds(0, 0, kBaseW, kBaseH);
 }
