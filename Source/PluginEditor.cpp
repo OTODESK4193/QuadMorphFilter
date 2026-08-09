@@ -436,9 +436,17 @@ void QuadMorphFilterAudioProcessorEditor::Content::paint(juce::Graphics& g)
         // サブタイトル
         g.setColour(QMColors::textDim);
         g.setFont(juce::Font(juce::FontOptions(10.5f, juce::Font::bold)));
-        g.drawText("OTODESK   /   28 Filter Models   /   V" QUADMORPH_VERSION,
-                   r.getX() + 322, r.getY(), 300, r.getHeight(),
-                   juce::Justification::centredLeft, false);
+        // 【V1.1.0】バージョン表記はここから外した（CONFIG タブに出している）。
+        // ◀ ボタンと重なるうえ、常時見えている必要のない情報のため。
+        // 幅もプリセット送りの手前で止めて、絶対に重ならないようにする。
+        {
+            const int subX = r.getX() + 322;
+            const int subW = juce::jmax(0, prevBtn.getX() - 10 - subX);
+
+            g.drawText("OTODESK   /   28 Filter Models",
+                       subX, r.getY(), subW, r.getHeight(),
+                       juce::Justification::centredLeft, false);
+        }
 
         // ---- 現在のプリセット名（◀ ▶ の間）----
         if (!presetNameArea.isEmpty())

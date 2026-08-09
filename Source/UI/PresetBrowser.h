@@ -59,9 +59,18 @@ public:
             b.setColour(juce::TextButton::buttonOnColourId, on);
             b.setColour(juce::TextButton::textColourOffId, QMColors::text);
         };
+        addAndMakeVisible(randomBtn); randomBtn.setButtonText("Random"); styleBtn(randomBtn, QMColors::peach);
         addAndMakeVisible(saveBtn);  saveBtn.setButtonText("Save");   styleBtn(saveBtn, QMColors::accentMorph);
         addAndMakeVisible(initBtn);  initBtn.setButtonText("Init");   styleBtn(initBtn, QMColors::accentFilter);
         addAndMakeVisible(closeBtn); closeBtn.setButtonText("Close"); styleBtn(closeBtn, QMColors::rose);
+
+        // ヘッダーの RANDOM は「新しいパッチを作る」ボタン。
+        // こちらは「今見えている一覧から 1 つ選んで読む」ボタンで別物。
+        randomBtn.setTooltip("Load a random preset from the list you are currently viewing. "
+                             "Category, subcategory and search filters all apply, so you can "
+                             "shuffle within just one category.");
+
+        randomBtn.onClick = [this] { pickRandomPreset(); };
         saveBtn.onClick = [this] { doSave(); };
         initBtn.onClick = [this] { if (onInit) onInit(); };
         closeBtn.onClick = [this] { if (onClose) onClose(); };
@@ -91,10 +100,13 @@ public:
         auto bottom = area.removeFromBottom(30);
         area.removeFromBottom(4);
 
+        // 右から Close / Init / Save / Random。
+        // Random を Save の左に置き、その分だけ名前欄を詰める。
         closeBtn.setBounds(bottom.removeFromRight(62).reduced(2));
-        initBtn.setBounds(bottom.removeFromRight(62).reduced(2));
-        saveBtn.setBounds(bottom.removeFromRight(62).reduced(2));
-        subBox.setBounds(bottom.removeFromRight(160).reduced(2));
+        initBtn.setBounds(bottom.removeFromRight(56).reduced(2));
+        saveBtn.setBounds(bottom.removeFromRight(56).reduced(2));
+        randomBtn.setBounds(bottom.removeFromRight(72).reduced(2));
+        subBox.setBounds(bottom.removeFromRight(150).reduced(2));
         nameBox.setBounds(bottom.reduced(2));
 
         const int w = area.getWidth() / 5;
@@ -124,7 +136,8 @@ private:
     juce::File rootDir;
     juce::ListBox catList{ "cat", nullptr }, subList{ "sub", nullptr }, fileList{ "file", nullptr };
     juce::TextEditor searchBox, nameBox, subBox;
-    juce::TextButton saveBtn, initBtn, closeBtn;
+    juce::TextButton randomBtn, saveBtn, initBtn, closeBtn;
+    juce::Random rng;        // ランダム選択用
 
     juce::StringArray categories, subCategories, favorites, pendingRemovals;
     int selCat = 0, selSub = 0;
@@ -275,6 +288,60 @@ private:
 
         if (row >= 0) fileList.scrollToEnsureRowIsOnscreen(row);
         fileList.repaint();
+    }
+
+    // ------------------------------------------------------------------
+    // pickRandomPreset
+    // いま一覧に出ているものから 1 つ選んで読み込む。
+    //
+    //  ・カテゴリ / サブカテゴリ / 検索の絞り込みをそのまま尊重するので、
+    //    「Ambient & Space の中だけでシャッフル」といった使い方ができる。
+    //  ・Factory と User が混在していれば両方が対象になる。
+    //  ・直前と同じものは避ける（1 件しかないときを除く）。
+    // ------------------------------------------------------------------
+    void pickRandomPreset()
+    {
+        const int fc = factoryRowCount();
+        const int total = fc + currentList.size();
+        if (total <= 0) return;
+
+        // 直前と同じ行を引いたら 1 回だけ引き直す。
+        // ループで回すと候補が 1 件のとき無限に回るため、試行は 2 回まで。
+        auto currentRow = [this, fc]() -> int
+        {
+            if (currentFactoryIndex >= 0)
+            {
+                for (int i = 0; i < fc; ++i)
+                    if (factoryCur.getReference(i).index == currentFactoryIndex) return i;
+            }
+            else if (currentFile != juce::File())
+            {
+                for (int i = 0; i < currentList.size(); ++i)
+                    if (currentList.getReference(i).file == currentFile) return fc + i;
+            }
+            return -1;
+        }();
+
+        int row = rng.nextInt(total);
+        if (total > 1 && row == currentRow)
+            row = (row + 1 + rng.nextInt(total - 1)) % total;
+
+        if (row < fc)
+        {
+            auto& fi = factoryCur.getReference(row);
+            currentFactoryIndex = fi.index;
+            currentFile = juce::File();
+            if (onLoadFactory) onLoadFactory(fi.index);
+        }
+        else
+        {
+            auto& it = currentList.getReference(row - fc);
+            currentFile = it.file;
+            currentFactoryIndex = -1;
+            if (onLoad) onLoad(it.file);
+        }
+
+        revealCurrent();
     }
 
     void doSave()

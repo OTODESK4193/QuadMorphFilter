@@ -42,9 +42,12 @@ namespace
 
     constexpr int kNumCharacters = (int)(sizeof(kCharacters) / sizeof(kCharacters[0]));
 
-    // ---- 実用的な同期刻み（2小節 〜 16分）----
-    // 極端に遅い／速い刻みは避ける。
-    const int kUsefulSyncRates[] = { 2, 3, 4, 5, 6, 7 };
+    // ---- 実用的な同期刻み ----
+    //   0="8/1"(32拍) 1="4/1"(16拍) 2="2/1"(8拍) 3="1/1"(1小節)
+    //   4="1/2"(2拍)  5="1/4"(1拍)
+    // フィルターのモーフは 1〜8 小節かけて動くくらいが心地よい。
+    // 8分・16分は忙しすぎて「常に揺れている」だけの音になりやすいので外す。
+    const int kUsefulSyncRates[] = { 0, 1, 2, 3, 4, 5 };
     constexpr int kNumSyncRates = (int)(sizeof(kUsefulSyncRates) / sizeof(kUsefulSyncRates[0]));
 
     // ---- 落ち着いた 2D 波形（Morph 用）----
@@ -200,7 +203,7 @@ void randomise(QuadMorphFilterAudioProcessor& proc, juce::Random& rng)
         setParam(proc, "lfo4en", on ? 1.0f : 0.0f);
         setParam(proc, "lfo4wave", 0.0f);
         setParam(proc, "lfo4sync", 1.0f);
-        setParam(proc, "lfo4rateSync", 2.0f);
+        setParam(proc, "lfo4rateSync", 0.0f);   // 8/1。レート変調はゆっくりが自然
         setParam(proc, "lfo4depth", on ? randRange(rng, 0.5f, 1.5f) : 0.0f);
         setParam(proc, "lfo4assignA", 1.0f);
         setParam(proc, "lfo4assignB", rng.nextFloat() < 0.4f ? 1.0f : 0.0f);
