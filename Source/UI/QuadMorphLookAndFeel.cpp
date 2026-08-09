@@ -289,6 +289,23 @@ void QuadMorphLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y,
     g.setColour(QMColors::text);
     g.fillPath(pointer);
 
+    // 4.5) 中央に数値
+    //   ノブの下に数値行を置くと縦に嵩んでパネルからはみ出すため、
+    //   空いている中心に描く。変調中は実際に効いている値を出す。
+    {
+        const double shown = modOn
+            ? (double)props.getWithDefault("qmModValue", slider.getValue())
+            : slider.getValue();
+
+        g.setColour(modOn ? accent.brighter(0.45f) : QMColors::text);
+        g.setFont(QMFonts::mono(juce::jlimit(9.5f, 13.0f, radius * 0.42f), true));
+        g.drawText(QMUI::formatValue(shown, QMUI::unitOf(slider)),
+                   juce::Rectangle<float>(cx - radius, cy - radius * 0.45f,
+                                          radius * 2.0f, radius * 0.9f)
+                       .getSmallestIntegerContainer(),
+                   juce::Justification::centred, false);
+    }
+
     // 5) 変調後の現在位置ドット
     if (modOn && slider.isEnabled())
     {

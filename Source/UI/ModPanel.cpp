@@ -289,10 +289,14 @@ void ModPanel::updateRateModIndicators()
         auto& grp = lfos[(size_t)i];
         const juce::String id = "lfo" + juce::String(i + 1);
 
+        // 変調表示を出す条件は 3 つとも満たすこと。
+        //   ・その LFO 自体が有効
+        //   ・LFO4 が有効
+        //   ・LFO4 のアサイン先になっている
+        // どれか欠けていれば変調は掛かっていないので帯も数値も出さない。
         const bool enabled = apvts.getRawParameterValue(id + "en")->load() > 0.5f;
-        const bool modOn = enabled && processor.isRateModulated(i)
-                                   && (processor.getLfo4RateMod() != 1.0f
-                                       || apvts.getRawParameterValue("lfo4en")->load() > 0.5f);
+        const bool lfo4On = apvts.getRawParameterValue("lfo4en")->load() > 0.5f;
+        const bool modOn = enabled && lfo4On && processor.isRateModulated(i);
 
         const float rateHz = processor.getEffectiveLfoRate(i);
         const bool synced = isSynced(id + "sync");

@@ -21,10 +21,11 @@ namespace
     constexpr int kGapM = 8;
 
     // ---- OUTPUT セクションのノブ ----
+    // パネルの高さ（264px）に収まるよう寸法を詰めてある。
+    // 数値はノブ中央に描くので、下に数値行を確保する必要はない。
     constexpr int kKnobW = 118;   // 列幅
-    constexpr int kKnobD = 66;    // ノブ直径
-    constexpr int kLabelH = 14;   // 上の名前
-    constexpr int kValueH = 16;   // 下の数値
+    constexpr int kKnobD = 58;    // ノブ直径
+    constexpr int kLabelH = 12;   // 上の名前
     constexpr int kKnobGap = 22;  // 列間
 
     // 0=Off, 1=+X, 2=+Y, 3=-X, 4=-Y
@@ -201,7 +202,7 @@ void FilterPanel::updateLfo5Indicator()
         props.set("qmModNorm", (double)live);
         props.set("qmModValue", (double)(live * 100.0f));
         dryWetSlider.repaint();
-        repaint(dryWetSlot.value);   // 下の数値表示も追随させる
+        repaint(dryWetSlot.label);   // 名前の色（変調中はアクセント）も追随させる
     }
 }
 
@@ -558,8 +559,14 @@ void FilterPanel::updateModulationIndicators()
     auto raw = [&apvts](const juce::String& id) { return apvts.getRawParameterValue(id)->load(); };
 
     // LFO2 = Cutoff 変調 / LFO3 = Reso 変調
-    const bool cutIsRand1 = ((int)raw("lfo2wave") == 3) && (raw("lfo2en") > 0.5f);
-    const bool resIsRand1 = ((int)raw("lfo3wave") == 3) && (raw("lfo3en") > 0.5f);
+    // 【V1.1.0 修正】LFO 自体が OFF のときは変調が掛かっていないので
+    // 範囲表示も出さない。以前は割り当て（+X 等）だけを見ていたため、
+    // LFO を止めても帯が残って「動かない変調表示」になっていた。
+    const bool lfo2On = raw("lfo2en") > 0.5f;
+    const bool lfo3On = raw("lfo3en") > 0.5f;
+
+    const bool cutIsRand1 = ((int)raw("lfo2wave") == 3) && lfo2On;
+    const bool resIsRand1 = ((int)raw("lfo3wave") == 3) && lfo3On;
 
     const auto cM = MorphEngine::computeModulation(
         processor.getLfoPos(1), processor.getLfoMod4(1), cutIsRand1);
@@ -613,9 +620,9 @@ void FilterPanel::updateModulationIndicators()
             }
         };
 
-        applyTo(grp.cutoff, "cutoff" + s, cutSrc,
+        applyTo(grp.cutoff, "cutoff" + s, lfo2On ? cutSrc : 0,
                 cM[(size_t)juce::jmax(0, cutSrc - 1)], 4.0f, 20.0f, 20000.0f);
-        applyTo(grp.res, "res" + s, resSrc,
+        applyTo(grp.res, "res" + s, lfo3On ? resSrc : 0,
                 rM[(size_t)juce::jmax(0, resSrc - 1)], 2.0f, 0.1f, 10.0f);
     }
 }
@@ -732,12 +739,12 @@ void FilterPanel::resized()
     // OUTPUT セクション（旧 OUT タブから移設）
     //   左にノブ 3 つ、右の余白に Info 欄を置く。
     // ======================================================================
-    area.removeFromTop(12);
+    area.removeFromTop(4);
     outHeaderArea = area.removeFromTop(QMUI::kHeadH);
-    area.removeFromTop(8);
+    area.removeFromTop(4);
 
     auto outRow = area.removeFromTop(juce::jmax(0,
-        juce::jmin(kLabelH + kKnobD + kValueH + 6, area.getHeight())));
+        juce::jmin(kLabelH + kKnobD + 2, area.getHeight())));
 
     auto knobArea = outRow.removeFromLeft(kKnobW * 3 + kKnobGap * 2);
 
@@ -745,9 +752,7 @@ void FilterPanel::resized()
     {
         auto col = knobArea.removeFromLeft(kKnobW);
         slot.label = col.removeFromTop(kLabelH);
-        slot.knob = col.removeFromTop(kKnobD);
-        col.removeFromTop(4);
-        slot.value = col.removeFromTop(juce::jmax(0, juce::jmin(kValueH, col.getHeight())));
+        slot.knob = col;
 
         s.setBounds(slot.knob.withSizeKeepingCentre(kKnobD, kKnobD));
         knobArea.removeFromLeft(kKnobGap);
@@ -847,19 +852,11 @@ void FilterPanel::paint(juce::Graphics& g)
 void FilterPanel::paintKnobText(juce::Graphics& g, const KnobSlot& slot,
                                 const juce::Slider& s, juce::Colour accent) const
 {
-    g.setColour(QMColors::textDim);
+    // 数値はノブ中央（QuadMorphLookAndFeel::drawRotarySlider）が描くので、
+    // ここでは上の名前だけ。変調中は名前もアクセント色にして状態を示す。
+    const bool modOn = (bool)s.getProperties().getWithDefault("qmModOn", false);
+
+    g.setColour(modOn ? accent.withAlpha(0.95f) : QMColors::textDim);
     g.setFont(juce::Font(juce::FontOptions(10.0f, juce::Font::bold)));
     g.drawText(s.getName(), slot.label, juce::Justification::centred, false);
-
-    // 変調中は実際に効いている値を出す（LookAndFeel 側と同じ考え方）
-    const auto& props = s.getProperties();
-    const bool modOn = (bool)props.getWithDefault("qmModOn", false);
-    const double shown = modOn
-        ? (double)props.getWithDefault("qmModValue", s.getValue())
-        : s.getValue();
-
-    g.setColour(modOn ? accent.brighter(0.4f) : QMColors::text);
-    g.setFont(QMFonts::mono(12.0f, true));
-    g.drawText(QMUI::formatValue(shown, QMUI::unitOf(s)),
-               slot.value, juce::Justification::centred, false);
 }

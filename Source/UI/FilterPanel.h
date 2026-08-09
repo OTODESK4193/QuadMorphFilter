@@ -71,10 +71,10 @@ private:
 
     void timerCallback() override;
 
-    /** 出力ノブ 1 つ分（名前・ノブ・数値）の矩形 */
+    /** 出力ノブ 1 つ分の矩形（数値はノブ中央に描くので 2 つで足りる） */
     struct KnobSlot
     {
-        juce::Rectangle<int> label, knob, value;
+        juce::Rectangle<int> label, knob;
     };
 
     void styleKnob(juce::Slider& s, const juce::String& name, QMUI::Unit unit,
