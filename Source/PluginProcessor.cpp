@@ -169,7 +169,6 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
 
     lfoEngine.prepare(sampleRate);
     lfo5Engine.prepare(sampleRate);
-    svfQuad.prepare(sampleRate, samplesPerBlock);
     filterA.prepare(sampleRate, samplesPerBlock, 2);
     filterB.prepare(sampleRate, samplesPerBlock, 2);
     filterC.prepare(sampleRate, samplesPerBlock, 2);
@@ -405,9 +404,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     updateTpt(filterC, "C", 2);
     updateTpt(filterD, "D", 3);
 
-    for (int idx = 0; idx < 4; ++idx)
-        svfQuad.setEnabled(idx, false);
-
     bool enA = apvts.getRawParameterValue("enableA")->load() > 0.5f;
     bool enB = apvts.getRawParameterValue("enableB")->load() > 0.5f;
     bool enC = apvts.getRawParameterValue("enableC")->load() > 0.5f;
@@ -463,7 +459,11 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     int modelC = (int)apvts.getRawParameterValue("modelC")->load();
     int modelD = (int)apvts.getRawParameterValue("modelD")->load();
 
-    svfQuad.processBuffer(buffer, filterBuffers);
+    // 【V1.1.0 削除】旧 svfQuad.processBuffer(buffer, filterBuffers);
+    //   svfQuad は 4 インスタンスとも常時 disabled で出力を clear() するだけであり、
+    //   直後の procTptIfNeeded() が同じ filterBuffers を必ず上書き（または clear）する。
+    //   完全な冗長処理だったためオーディオパスから除去した。
+    //   Clean SVF を将来モデルとして復活させる場合は FilterA_SVF_SIMD を再統合すること。
 
     auto procTptIfNeeded = [&](juce::AudioBuffer<float>& dst,
         TptFilter& tpt, int model, bool enabled)

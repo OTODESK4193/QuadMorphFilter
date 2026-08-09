@@ -61,6 +61,16 @@ private:
     float processSample(int channel, float x);
     void  updateCoefficients();
 
+    // ===== SR 依存タイムコンスタント係数の更新 =====
+    // AGC (rmsCoef / agcCoef) と MS-20 DC ブロッカー (ms20DcAlpha) は
+    // processSample() の内部で使われるため、オーバーサンプリング有効時は
+    // 「OS 後のレート」を基準に計算しなければ時定数がずれる。
+    // lastCoeffRate によるガードで、レートが実際に変化したときだけ
+    // std::exp() を再計算する（ブロック毎の無駄な超越関数呼び出しを回避）。
+    // 動的確保・ロック・システムコールを含まないためオーディオスレッドから呼んで安全。
+    void   updateRateDependentCoeffs(double effectiveRate);
+    double lastCoeffRate = 0.0;
+
     int  getAutoOsFactor(int modelIdx) const;
     void rebuildOversampler(int newFactor);
 

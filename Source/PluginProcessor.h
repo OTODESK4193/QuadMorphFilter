@@ -6,7 +6,6 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h> // FastMathApproximations 等のために必須
 #include "DSP/TptFilter.h"
-#include "DSP/FilterA_SVF_SIMD.h"
 #include "DSP/LfoEngine.h"
 #include "DSP/Lfo5Engine.h"
 #include "DSP/MorphEngine.h"
@@ -70,10 +69,12 @@ private:
     LfoEngine lfoEngine;
     Lfo5Engine lfo5Engine;
 
-    // ===== Clean SVF 4インスタンス（SIMD並列処理）=====
-    FilterA_SVF_SIMD svfQuad;
+    // ===== 【V1.1.0 削除】FilterA_SVF_SIMD svfQuad =====
+    //   全 4 インスタンスが常時 disabled であり、出力は直後の TptFilter 処理に
+    //   必ず上書きされていた（実質デッドコード）ためメンバごと除去。
+    //   ソースファイル自体は Source/DSP/FilterA_SVF_SIMD.* に温存してある。
 
-    // その他27モデル用
+    // 27モデル用
     TptFilter filterA, filterB, filterC, filterD;
 
     std::array<juce::AudioBuffer<float>, 4> filterBuffers;

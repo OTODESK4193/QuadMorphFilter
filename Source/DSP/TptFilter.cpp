@@ -34,12 +34,10 @@ void TptFilter::prepare(double newSampleRate, int samplesPerBlock, int numChanne
     resonance.reset(state.sampleRate, 0.01);
     state.smoothedDigitalCutoff = cutoff.getCurrentValue();
 
-    // ===== AGC SR 依存係数の計算 =====
-    // τ_rms ≈ 4.5ms、τ_agc ≈ 45ms を SR によらず一定に保つ。
-    // exp(-1/(τ·SR)) でデジタルフィルター係数に変換。
-    // oversampler 使用時は OS 済み SR でなく元 SR を使用（AGC は最終出力段で動作）。
-    state.rmsCoef = 1.0f - std::exp(-1.0f / (0.0045f * (float)newSampleRate));
-    state.agcCoef = 1.0f - std::exp(-1.0f / (0.045f  * (float)newSampleRate));
+    // ===== SR 依存タイムコンスタント係数の初期化 =====
+    // OS 無効時のレートで初期化する。OS 有効時は process() 側で再計算される。
+    lastCoeffRate = 0.0;          // 強制的に再計算させる
+    updateRateDependentCoeffs(newSampleRate);
 
     if (oversampler != nullptr)
     {
@@ -48,6 +46,36 @@ void TptFilter::prepare(double newSampleRate, int samplesPerBlock, int numChanne
     }
 
     reset();
+}
+
+// ==========================================
+// updateRateDependentCoeffs
+// SR に依存するタイムコンスタント係数をまとめて更新する。
+// prepare() と process()（OS 分岐の直前）の両方から呼ばれ、
+// 実効サンプルレートが変わったときだけ再計算する。
+// ==========================================
+void TptFilter::updateRateDependentCoeffs(double effectiveRate)
+{
+    if (effectiveRate <= 0.0 || effectiveRate == lastCoeffRate)
+        return;
+
+    lastCoeffRate = effectiveRate;
+    const float sr = (float)effectiveRate;
+
+    // ----- AGC -----
+    // τ_rms ≈ 4.5ms、τ_agc ≈ 45ms を SR によらず一定に保つ。
+    // coef = 1 - exp(-1/(τ·SR)) で 1 極 IIR の平滑係数に変換。
+    state.rmsCoef = 1.0f - std::exp(-1.0f / (0.0045f * sr));
+    state.agcCoef = 1.0f - std::exp(-1.0f / (0.045f  * sr));
+
+    // ----- MS-20 (Model 7) DC ブロッカー -----
+    // y[n] = x[n] - x[n-1] + alpha·y[n-1] の極。
+    // alpha = exp(-2π·fc/SR)、fc = 3.5Hz（実機フィードバック経路のコンデンサ相当）。
+    // 旧実装の固定値 0.9995f では SR に比例して実効カットオフが上昇し、
+    // 192kHz では約 15Hz まで持ち上がって低域が痩せていた。
+    constexpr float kMs20DcCutoffHz = 3.5f;
+    state.ms20DcAlpha = std::exp(-juce::MathConstants<float>::twoPi
+                                 * kMs20DcCutoffHz / sr);
 }
 
 // ==========================================
@@ -64,7 +92,8 @@ void TptFilter::reset()
             state.dp_s1[stage][ch] = 0.0f; state.dp_s2[stage][ch] = 0.0f;
             for (int pole = 0; pole < 4; ++pole) state.zdfState[stage][ch][pole] = 0.0f;
             state.combWriteIdx[stage][ch] = 0; state.comb_ap_state[stage][ch] = 0.0f;
-            for (int i = 0; i < 16384; ++i) state.combBuffer[stage][ch][i] = 0.0f;
+            std::fill(std::begin(state.combBuffer[stage][ch]),
+                      std::end  (state.combBuffer[stage][ch]), 0.0f);
             state.pa_s[stage][ch] = 0.0f;
         }
 
@@ -106,8 +135,6 @@ void TptFilter::reset()
         state.ap_out_prev[ch] = 0.0f;
         state.lpgEnv[ch] = 0.0f; state.bodePhase[ch] = 0.0f;
         state.bodeOutPrev[ch] = 0.0f;
-        state.wgWriteIdx[ch] = 0; state.wg_ap_state[ch] = 0.0f;
-        for (int i = 0; i < 16384; ++i) state.wgBuffer[ch][i] = 0.0f;
         for (int f = 0; f < 3; ++f) { state.form_s1[f][ch] = 0.0f; state.form_s2[f][ch] = 0.0f; }
         for (int b = 0; b < TptFilterState::numModalBands; ++b) {
             state.modal_s1[b][ch] = 0.0f; state.modal_s2[b][ch] = 0.0f;
@@ -516,6 +543,9 @@ void TptFilter::process(juce::AudioBuffer<float>& buffer)
 
     if (oversampler == nullptr || currentOsFactor == 0)
     {
+        // OS 無効: 実効レート = ホスト SR
+        updateRateDependentCoeffs(state.sampleRate);
+
         float* wp[2] = { nullptr, nullptr };
         for (int ch = 0; ch < numChannels; ++ch) wp[ch] = buffer.getWritePointer(ch);
         for (int i = 0; i < numSamples; ++i) {
@@ -535,6 +565,11 @@ void TptFilter::process(juce::AudioBuffer<float>& buffer)
     double savedRate = state.sampleRate;
     state.sampleRate = savedRate * std::pow(2.0, static_cast<double>(currentOsFactor));
     lastCutoff = -1.0f;
+
+    // OS 有効: processSample() は OS 後のレートで走るため、
+    // AGC / MS-20 DC ブロッカーの係数も OS 後レート基準に切り替える。
+    // （OS ファクター変更時にのみ std::exp が走る）
+    updateRateDependentCoeffs(state.sampleRate);
 
     for (int i = 0; i < osN; ++i) {
         if (i % 16 == 0) updateCoefficients();

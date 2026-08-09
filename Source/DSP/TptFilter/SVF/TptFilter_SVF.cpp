@@ -102,7 +102,11 @@ namespace TptFilter_SVF
         {
             const float delaySamples = (float)st.sampleRate
                 / juce::jlimit(20.0f, 20000.0f, st.smoothedDigitalCutoff);
-            const int   dInt  = (int)delaySamples;
+            // dInt はバッファ長を超えないようクランプする。
+            // 通常 SR（〜192kHz）では最大 9,600 サンプルで到達しないが、
+            // 極端な SR でも読み書きインデックスが交差しないことを保証する。
+            const int   dInt  = juce::jmin((int)delaySamples,
+                                           TptFilterState::kCombBufMask - 1);
             const float dFrac = delaySamples - (float)dInt;
             const float eta   = (1.0f - dFrac) / (1.0f + dFrac);
 
@@ -111,8 +115,9 @@ namespace TptFilter_SVF
 
             for (int stage = 0; stage < st.currentStages; ++stage)
             {
-                const int readIdx1 = (st.combWriteIdx[stage][ch] - dInt) & 16383;
-                const int readIdx2 = (readIdx1 - 1) & 16383;
+                const int readIdx1 = (st.combWriteIdx[stage][ch] - dInt)
+                                     & TptFilterState::kCombBufMask;
+                const int readIdx2 = (readIdx1 - 1) & TptFilterState::kCombBufMask;
                 const float delayed = st.combBuffer[stage][ch][readIdx2]
                     + eta * (st.combBuffer[stage][ch][readIdx1]
                         - st.comb_ap_state[stage][ch]);
@@ -128,7 +133,8 @@ namespace TptFilter_SVF
                     st.combBuffer[stage][ch][st.combWriteIdx[stage][ch]] = out;
                     combOut = out + delayed * fb;
                 }
-                st.combWriteIdx[stage][ch] = (st.combWriteIdx[stage][ch] + 1) & 16383;
+                st.combWriteIdx[stage][ch] =
+                    (st.combWriteIdx[stage][ch] + 1) & TptFilterState::kCombBufMask;
                 out = combOut;
             }
         }
@@ -136,10 +142,13 @@ namespace TptFilter_SVF
         // DC ブロッカー: 実機 MS-20 フィードバック経路のコンデンサを模倣。
         // 非対称 tanh（正側1.5×、負側0.8×）が生む DC 成分を各段で遮断し、
         // 高 Peak 値でも動作点のドリフトが起きないようにする。
-        // α = 0.9995 ≈ 3.5Hz カットオフ（44100Hz 時）
+        // α は TptFilter::updateRateDependentCoeffs() が実効サンプルレート
+        // （OS 有効時は OS 後のレート）から exp(-2π·3.5/SR) で算出する。
+        // 旧実装の 0.9995f 固定では 44.1kHz で 3.5Hz だったカットオフが
+        // 192kHz で約 15Hz まで上昇し、低域が痩せていた。
         else if (m == 7)
         {
-            constexpr float DC_ALPHA = 0.9995f;
+            const float DC_ALPHA = st.ms20DcAlpha;
             float ms_k = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 2.5f);
             for (int stage = 0; stage < st.currentStages; ++stage)
             {
@@ -286,7 +295,9 @@ namespace TptFilter_SVF
         {
             const float delaySamples = (float)st.sampleRate
                 / juce::jlimit(20.0f, 20000.0f, st.smoothedDigitalCutoff);
-            const int   dInt  = (int)delaySamples;
+            // Model 6 と同様、バッファ長を超えないようクランプする
+            const int   dInt  = juce::jmin((int)delaySamples,
+                                           TptFilterState::kCombBufMask - 1);
             const float dFrac = delaySamples - (float)dInt;
             const float eta   = (1.0f - dFrac) / (1.0f + dFrac);
             const float fb    = juce::jmap(st.currentResVal, 0.1f, 10.0f, 0.0f, 0.99f);
@@ -294,8 +305,9 @@ namespace TptFilter_SVF
             for (int stage = 0; stage < st.currentStages; ++stage)
             {
                 // ── 遅延ライン読み出し（1次 allpass 補間）──
-                const int r1 = (st.combWriteIdx[stage][ch] - dInt) & 16383;
-                const int r2 = (r1 - 1) & 16383;
+                const int r1 = (st.combWriteIdx[stage][ch] - dInt)
+                               & TptFilterState::kCombBufMask;
+                const int r2 = (r1 - 1) & TptFilterState::kCombBufMask;
                 float wgDelayed = st.combBuffer[stage][ch][r2]
                     + eta * (st.combBuffer[stage][ch][r1] - st.comb_ap_state[stage][ch]);
                 st.comb_ap_state[stage][ch] = wgDelayed;
@@ -311,7 +323,8 @@ namespace TptFilter_SVF
                 // ── 励振 + tanh 非線形サチュレーション → 遅延ラインへ書き込み ──
                 const float excitation = out + scattered * fb;
                 st.combBuffer[stage][ch][st.combWriteIdx[stage][ch]] = std::tanh(excitation);
-                st.combWriteIdx[stage][ch] = (st.combWriteIdx[stage][ch] + 1) & 16383;
+                st.combWriteIdx[stage][ch] =
+                    (st.combWriteIdx[stage][ch] + 1) & TptFilterState::kCombBufMask;
 
                 // ── Type 選択 ──
                 if (st.filterType == 0)

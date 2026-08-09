@@ -65,8 +65,25 @@ struct TptFilterState
     float form_s1[3][2] = {};
     float form_s2[3][2] = {};
 
-    // ===== Comb Filter =====
-    float combBuffer[8][2][16384] = {};
+    // ===== Comb Filter / Waveguide Mesh 共用遅延ライン =====
+    //
+    // kCombBufSize: 1 段 1 チャンネル当たりの遅延バッファ長。
+    //
+    // 【サイズ根拠】
+    //   遅延長 = SR / cutoff、cutoff の下限は 20Hz にクランプされている。
+    //     44.1kHz →  2,205 サンプル
+    //     192kHz  →  9,600 サンプル
+    //   したがって 16384 で 192kHz まで余裕がある（約 341kHz 相当までカバー）。
+    //   メモリコスト: 8 段 × 2ch × 16384 × 4 bytes = 1.0 MB/インスタンス。
+    //   これ以上の SR では書き込みインデックスと読み出し位置が交差するため、
+    //   参照側で dInt を kCombBufMask - 1 にクランプして破綻を防いでいる。
+    //
+    // Model 6 (Comb Filter) と Model 23 (Waveguide Mesh) は排他利用のため
+    // 同じバッファを共用する（専用の wgBuffer は V1.1.0 で廃止）。
+    static constexpr int kCombBufSize = 16384;
+    static constexpr int kCombBufMask = kCombBufSize - 1;
+
+    float combBuffer[8][2][kCombBufSize] = {};
     int   combWriteIdx[8][2] = {};
     float comb_ap_state[8][2] = {};
 
@@ -77,6 +94,12 @@ struct TptFilterState
     // 非対称 tanh が生む DC 成分を各段で遮断し、動作点のドリフトを防ぐ。
     float ms20_dc_x1[8][2] = {};  // 1サンプル前のフィードバック入力
     float ms20_dc_y1[8][2] = {};  // 1サンプル前の DC ブロッカー出力
+    // ms20DcAlpha: DC ブロッカーの極位置。
+    // TptFilter::updateRateDependentCoeffs() が実効 SR から算出する。
+    // 旧実装は 0.9995f 固定だったため、実効カットオフが SR に比例して動いていた
+    // （44.1kHz で 3.5Hz → 192kHz では約 15Hz まで上昇し低域が痩せる）。
+    // alpha = exp(-2π·fc/SR) で fc = 3.5Hz を SR によらず一定に保つ。
+    float ms20DcAlpha = 0.9995f;  // デフォルト = 44.1kHz 相当
 
     // ===== All-Pass Phaser =====
     float ap_s[16][2] = {};
@@ -105,10 +128,12 @@ struct TptFilterState
     float modal_s1[numModalBands][2] = {};
     float modal_s2[numModalBands][2] = {};
 
-    // ===== Waveguide Mesh =====
-    float wgBuffer[2][16384] = {};
-    int   wgWriteIdx[2] = {};
-    float wg_ap_state[2] = {};
+    // ===== Waveguide Mesh (Model 23) =====
+    // 【V1.1.0 削除】wgBuffer / wgWriteIdx / wg_ap_state
+    //   Model 23 の実装は combBuffer / combWriteIdx / comb_ap_state を流用しており、
+    //   これらの専用メンバは宣言と reset() でのクリアだけで DSP から一切参照されて
+    //   いなかった。1 インスタンス当たり 128KB（4 フィルターで 512KB）の死にメモリと
+    //   起動毎の無駄なクリアループを削減するため削除。
 
     // ===== Bode Frequency Shifter =====
     float hilbertCoeffsA[4] = { 0.4794008656f, 0.8762184935f, 0.9765975895f, 0.9974992559f };
@@ -192,9 +217,13 @@ struct TptFilterState
     float agcGain[2] = { 1.0f, 1.0f };
     // ===== 【既存コード: AGC ここまで】=====
 
-    // ===== AGC SR 依存係数 (prepare() で計算、processSample() で使用) =====
+    // ===== AGC SR 依存係数 =====
+    // TptFilter::updateRateDependentCoeffs() で計算、processSample() で使用。
     // 固定係数 0.005/0.0005 は SR によってタイムコンスタントが変わるため
     // SR から exp(-1/(τ·SR)) で計算し SR 非依存の時定数を保証する。
+    // 【V1.1.0 修正】processSample() はオーバーサンプリング有効時に OS 後の
+    // レートで走るため、prepare() 時のホスト SR ではなく「実効レート」で
+    // 計算する必要がある（旧実装では OS 時に時定数が 2〜16 倍速くなっていた）。
     // rmsCoef  : τ ≈ 4.5 ms  (RMS 追従速度)
     // agcCoef  : τ ≈ 45 ms   (AGC ゲイン平滑速度)
     float rmsCoef = 0.005f;    // デフォルト = 44.1kHz 相当
