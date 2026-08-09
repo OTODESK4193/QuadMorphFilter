@@ -66,6 +66,63 @@ public:
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
+    // =====================================================================
+    // 【V1.1.0 追加】パラメータポインタキャッシュ
+    //
+    // 旧実装は processBlock() 内で apvts.getRawParameterValue("cutoff" + s)
+    // のように juce::String を連結して ID を組み立てていた。
+    // juce::String は SSO を持たず常にヒープ確保するため、この連結だけで
+    // 1 ブロック当たり 28 回の malloc がオーディオスレッド上で発生していた
+    // （CLAUDE.md §1「動的メモリ確保の禁止」「ブロッキング・ロックの禁止」違反）。
+    // さらに getRawParameterValue() 自体が文字列キー検索であり、
+    // サンプルループ内から呼ぶと 48kHz で毎秒 19 万回の検索になっていた。
+    //
+    // 対策: 生ポインタ（std::atomic<float>*）をコンストラクタで一度だけ解決し
+    // キャッシュする。APVTS が保持する atomic の寿命はプロセッサと同じなので
+    // ポインタは無効化されない。processBlock() 側は load() するだけになる。
+    // =====================================================================
+    struct FilterParamPtrs
+    {
+        std::atomic<float>* cutoff    = nullptr;
+        std::atomic<float>* res       = nullptr;
+        std::atomic<float>* model     = nullptr;
+        std::atomic<float>* type      = nullptr;
+        std::atomic<float>* slope     = nullptr;
+        std::atomic<float>* enable    = nullptr;
+        std::atomic<float>* lfoCutSrc = nullptr;
+        std::atomic<float>* lfoResSrc = nullptr;
+    };
+
+    struct GlobalParamPtrs
+    {
+        std::atomic<float>* posX             = nullptr;
+        std::atomic<float>* posY             = nullptr;
+        std::atomic<float>* morphBlend       = nullptr;
+        std::atomic<float>* cutoffAlgo       = nullptr;
+        std::atomic<float>* osMode           = nullptr;
+        std::atomic<float>* dryWet           = nullptr;
+        std::atomic<float>* masterGain       = nullptr;
+        std::atomic<float>* limiterCeiling   = nullptr;
+        std::atomic<float>* lfo1en           = nullptr;
+        std::atomic<float>* lfo1wave         = nullptr;
+        std::atomic<float>* lfo2en           = nullptr;
+        std::atomic<float>* lfo2wave         = nullptr;
+        std::atomic<float>* lfo3en           = nullptr;
+        std::atomic<float>* lfo3wave         = nullptr;
+        std::atomic<float>* lfo5en           = nullptr;
+        std::atomic<float>* envFollowEn      = nullptr;
+        std::atomic<float>* envFollowAttack  = nullptr;
+        std::atomic<float>* envFollowRelease = nullptr;
+        std::atomic<float>* envFollowDepth   = nullptr;
+        std::atomic<float>* envFollowInvert  = nullptr;
+    };
+
+    void cacheParameterPointers();
+
+    std::array<FilterParamPtrs, 4> fp;                  // A / B / C / D
+    GlobalParamPtrs                gp;
+    juce::RangedAudioParameter*    cutoffAParam = nullptr;  // 正規化空間アクセス用
+
     LfoEngine lfoEngine;
     Lfo5Engine lfo5Engine;
 

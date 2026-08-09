@@ -159,6 +159,65 @@ QuadMorphFilterAudioProcessor::QuadMorphFilterAudioProcessor()
         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
     apvts(*this, nullptr, "Parameters", createParameterLayout())
 {
+    // パラメータポインタはここで一度だけ解決する。
+    // コンストラクタはメッセージスレッドで走るため juce::String の生成は安全。
+    cacheParameterPointers();
+}
+
+// ==========================================
+// cacheParameterPointers
+// 全パラメータの生ポインタを一度だけ解決してキャッシュする。
+// オーディオスレッドから文字列検索・文字列連結を完全に排除するための前処理。
+// APVTS が保持する std::atomic<float> の寿命はプロセッサと同一なので
+// 一度取得したポインタが途中で無効になることはない。
+// ==========================================
+void QuadMorphFilterAudioProcessor::cacheParameterPointers()
+{
+    static constexpr const char* kSuffix[4] = { "A", "B", "C", "D" };
+
+    for (int i = 0; i < 4; ++i)
+    {
+        const juce::String s(kSuffix[i]);
+        auto& p = fp[(size_t)i];
+
+        p.cutoff    = apvts.getRawParameterValue("cutoff"    + s);
+        p.res       = apvts.getRawParameterValue("res"       + s);
+        p.model     = apvts.getRawParameterValue("model"     + s);
+        p.type      = apvts.getRawParameterValue("type"      + s);
+        p.slope     = apvts.getRawParameterValue("slope"     + s);
+        p.enable    = apvts.getRawParameterValue("enable"    + s);
+        p.lfoCutSrc = apvts.getRawParameterValue("lfoCutSrc" + s);
+        p.lfoResSrc = apvts.getRawParameterValue("lfoResSrc" + s);
+
+        // レイアウト定義と ID が食い違っていれば起動時に気付けるようにする
+        jassert(p.cutoff != nullptr && p.res       != nullptr
+             && p.model  != nullptr && p.type      != nullptr
+             && p.slope  != nullptr && p.enable    != nullptr
+             && p.lfoCutSrc != nullptr && p.lfoResSrc != nullptr);
+    }
+
+    gp.posX             = apvts.getRawParameterValue("posX");
+    gp.posY             = apvts.getRawParameterValue("posY");
+    gp.morphBlend       = apvts.getRawParameterValue("morphBlend");
+    gp.cutoffAlgo       = apvts.getRawParameterValue("cutoffAlgo");
+    gp.osMode           = apvts.getRawParameterValue("osMode");
+    gp.dryWet           = apvts.getRawParameterValue("dryWet");
+    gp.masterGain       = apvts.getRawParameterValue("masterGain");
+    gp.limiterCeiling   = apvts.getRawParameterValue("limiterCeiling");
+    gp.lfo1en           = apvts.getRawParameterValue("lfo1en");
+    gp.lfo1wave         = apvts.getRawParameterValue("lfo1wave");
+    gp.lfo2en           = apvts.getRawParameterValue("lfo2en");
+    gp.lfo2wave         = apvts.getRawParameterValue("lfo2wave");
+    gp.lfo3en           = apvts.getRawParameterValue("lfo3en");
+    gp.lfo3wave         = apvts.getRawParameterValue("lfo3wave");
+    gp.lfo5en           = apvts.getRawParameterValue("lfo5en");
+    gp.envFollowEn      = apvts.getRawParameterValue("envFollowen");
+    gp.envFollowAttack  = apvts.getRawParameterValue("envFollowattack");
+    gp.envFollowRelease = apvts.getRawParameterValue("envFollowrelease");
+    gp.envFollowDepth   = apvts.getRawParameterValue("envFollowdepth");
+    gp.envFollowInvert  = apvts.getRawParameterValue("envFollowinvert");
+
+    cutoffAParam = apvts.getParameter("cutoffA");
 }
 
 QuadMorphFilterAudioProcessor::~QuadMorphFilterAudioProcessor() {}
@@ -218,14 +277,14 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     const int   numChannels = buffer.getNumChannels();
     const float dt = numSamples / (float)expectedSampleRate;
 
-    bool lfo5Enabled = apvts.getRawParameterValue("lfo5en")->load() > 0.5f;
+    bool lfo5Enabled = gp.lfo5en->load() > 0.5f;
     const float releaseCoef = 1.0f - std::exp(-1.0f / (0.050f * expectedSampleRate));
     const float smoothStepPerSample = 1.0f / (0.050f * expectedSampleRate);
 
-    float currentDryWetNormalized = apvts.getRawParameterValue("dryWet")->load() / 100.0f;
+    float currentDryWetNormalized = gp.dryWet->load() / 100.0f;
     currentDryWetNormalized = juce::jlimit(0.0f, 1.0f, currentDryWetNormalized);
-    float currentMasterGaindB = apvts.getRawParameterValue("masterGain")->load();
-    float currentCeilingdB = apvts.getRawParameterValue("limiterCeiling")->load();
+    float currentMasterGaindB = gp.masterGain->load();
+    float currentCeilingdB = gp.limiterCeiling->load();
 
     float currentMasterGainLinear = juce::Decibels::decibelsToGain(currentMasterGaindB);
     float currentCeilingLinear = juce::Decibels::decibelsToGain(currentCeilingdB);
@@ -255,7 +314,7 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     float posY = lfoEngine.getPosition(0).y;
 
     // XY → Cutoff/Reso 変換
-    const int cutoffAlgo = (int)apvts.getRawParameterValue("cutoffAlgo")->load();
+    const int cutoffAlgo = (int)gp.cutoffAlgo->load();
     float xyCutoff, xyRes;
 
     if (cutoffAlgo == 1)
@@ -282,10 +341,10 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     xyCutoff = juce::jlimit(20.0f, 20000.0f, xyCutoff);
     xyRes = juce::jlimit(0.1f, 10.0f, xyRes);
 
-    bool lfo1_isRand1 = ((int)apvts.getRawParameterValue("lfo2wave")->load() == 3)
-        && (apvts.getRawParameterValue("lfo2en")->load() > 0.5f);
-    bool lfo2_isRand1 = ((int)apvts.getRawParameterValue("lfo3wave")->load() == 3)
-        && (apvts.getRawParameterValue("lfo3en")->load() > 0.5f);
+    bool lfo1_isRand1 = ((int)gp.lfo2wave->load() == 3)
+        && (gp.lfo2en->load() > 0.5f);
+    bool lfo2_isRand1 = ((int)gp.lfo3wave->load() == 3)
+        && (gp.lfo3en->load() > 0.5f);
     bool lfo1_useMod4 = lfo1_isRand1 || lfoEngine.isSpreadActive(1);
     bool lfo2_useMod4 = lfo2_isRand1 || lfoEngine.isSpreadActive(2);
 
@@ -295,7 +354,7 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         lfoEngine.getPosition(2), lfoEngine.getMod4(2), lfo2_useMod4);
 
     {
-        int osMode = (int)apvts.getRawParameterValue("osMode")->load();
+        int osMode = (int)gp.osMode->load();
         filterA.setOsMode(osMode);
         filterB.setOsMode(osMode);
         filterC.setOsMode(osMode);
@@ -303,26 +362,25 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     }
 
     // ===== Envelope Follower：Attack/Release で平滑化 =====
-    float envFollowCutoffNormA = apvts.getRawParameterValue("cutoffA")->load();
-    bool envFollowEnabled = apvts.getRawParameterValue("envFollowen")->load() > 0.5f;
+    float envFollowCutoffNormA = fp[0].cutoff->load();
+    bool envFollowEnabled = gp.envFollowEn->load() > 0.5f;
 
     if (envFollowEnabled)
     {
         // ===== Step 1: ブロック内のピーク値を計算 =====
+        // getSample() は毎サンプルの境界チェック付きアクセスになるため、
+        // チャンネルごとに読み取りポインタを取ってから走査する。
         float maxInputLevel = 0.0f;
-        for (int i = 0; i < numSamples; ++i)
+        for (int ch = 0; ch < numChannels; ++ch)
         {
-            float inputLevel = 0.0f;
-            for (int ch = 0; ch < numChannels; ++ch)
-            {
-                inputLevel = std::max(inputLevel, std::abs(buffer.getSample(ch, i)));
-            }
-            maxInputLevel = std::max(maxInputLevel, inputLevel);
+            const float* in = buffer.getReadPointer(ch);
+            for (int i = 0; i < numSamples; ++i)
+                maxInputLevel = std::max(maxInputLevel, std::abs(in[i]));
         }
 
         // ===== Step 2: Attack/Release で平滑化（パラメータ連動） =====
-        const float attackTimeMs = apvts.getRawParameterValue("envFollowattack")->load();
-        const float releaseTimeMs = apvts.getRawParameterValue("envFollowrelease")->load();
+        const float attackTimeMs = gp.envFollowAttack->load();
+        const float releaseTimeMs = gp.envFollowRelease->load();
         const float attackTime = std::max(0.001f, attackTimeMs * 0.001f);   // 秒換算
         const float releaseTime = std::max(0.001f, releaseTimeMs * 0.001f); // 秒換算
 
@@ -335,12 +393,12 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             envFollowEnvelopeValue = releaseCoeff * envFollowEnvelopeValue + (1.0f - releaseCoeff) * maxInputLevel;
 
         // ===== Step 3: 平滑化された値で Cutoff を計算（Invertの論理矛盾を安全に修正） =====
-        auto* cutoffAParam = apvts.getParameter("cutoffA");
+        // cutoffAParam はコンストラクタで解決済み（文字列検索なし）
         if (cutoffAParam != nullptr)
         {
             float rawNormalizedCutoff = cutoffAParam->getValue(); // 0.0 ~ 1.0 の正規化空間
-            float depthPercent = apvts.getRawParameterValue("envFollowdepth")->load() / 100.0f;
-            bool invert = apvts.getRawParameterValue("envFollowinvert")->load() > 0.5f;
+            float depthPercent = gp.envFollowDepth->load() / 100.0f;
+            bool invert = gp.envFollowInvert->load() > 0.5f;
 
             float modulatedNormalized = rawNormalizedCutoff;
 
@@ -360,28 +418,28 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         }
     }
 
-    auto readModSrc = [&](const juce::String& paramId) -> int {
-        return juce::jlimit(0, 4, juce::roundToInt(apvts.getRawParameterValue(paramId)->load()));
+    // idx: 0=A, 1=B, 2=C, 3=D
+    // 旧実装は "lfoCutSrc" + s のような文字列連結で ID を組み立てており、
+    // 呼び出しのたびに juce::String がヒープ確保されていた（RT 安全性違反）。
+    // 現在はコンストラクタで解決済みのポインタを添字で引くだけ。
+    auto readModSrc = [](std::atomic<float>* p) -> int {
+        return juce::jlimit(0, 4, juce::roundToInt(p->load()));
         };
 
-    auto getFilterParams = [&](const juce::String& s, int /*idx*/) -> std::pair<float, float>
+    auto getFilterParams = [&](int idx) -> std::pair<float, float>
         {
-            const int cutSrc = readModSrc("lfoCutSrc" + s);
-            const int resSrc = readModSrc("lfoResSrc" + s);
+            const auto& p = fp[(size_t)idx];
+
+            const int cutSrc = readModSrc(p.lfoCutSrc);
+            const int resSrc = readModSrc(p.lfoResSrc);
             const bool lfoCutOn = cutSrc > 0;
             const bool lfoResOn = resSrc > 0;
             const int  cutModIdx = cutSrc > 0 ? cutSrc - 1 : 0;
             const int  resModIdx = resSrc > 0 ? resSrc - 1 : 0;
 
-            float baseCutoff = apvts.getRawParameterValue("cutoff" + s)->load();
-
-            // ===== FilterA に Envelope Follower を適用 =====
-            if (s == "A")
-            {
-                baseCutoff = envFollowCutoffNormA;
-            }
-
-            float baseRes = apvts.getRawParameterValue("res" + s)->load();
+            // ===== FilterA (idx 0) のみ Envelope Follower を適用 =====
+            float baseCutoff = (idx == 0) ? envFollowCutoffNormA : p.cutoff->load();
+            float baseRes    = p.res->load();
 
             float fc = lfoCutOn ? MorphEngine::applyFrequencyMod(baseCutoff, cM[cutModIdx]) : baseCutoff;
             float res = lfoResOn ? MorphEngine::applyResonanceMod(baseRes, rM[resModIdx]) : baseRes;
@@ -389,75 +447,46 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             return { juce::jlimit(20.0f, 20000.0f, fc), juce::jlimit(0.1f, 10.0f, res) };
         };
 
-    auto updateTpt = [&](TptFilter& f, const juce::String& s, int idx)
+    auto updateTpt = [&](TptFilter& f, int idx)
         {
-            auto [fc, res] = getFilterParams(s, idx);
-            f.setModel(juce::roundToInt(apvts.getRawParameterValue("model" + s)->load()));
+            const auto& p = fp[(size_t)idx];
+            auto [fc, res] = getFilterParams(idx);
+            f.setModel(juce::roundToInt(p.model->load()));
             f.setCutoff(fc);
             f.setResonance(res);
-            f.setType(juce::roundToInt(apvts.getRawParameterValue("type" + s)->load()));
-            f.setSlope(juce::roundToInt(apvts.getRawParameterValue("slope" + s)->load()));
+            f.setType(juce::roundToInt(p.type->load()));
+            f.setSlope(juce::roundToInt(p.slope->load()));
         };
 
-    updateTpt(filterA, "A", 0);
-    updateTpt(filterB, "B", 1);
-    updateTpt(filterC, "C", 2);
-    updateTpt(filterD, "D", 3);
+    updateTpt(filterA, 0);
+    updateTpt(filterB, 1);
+    updateTpt(filterC, 2);
+    updateTpt(filterD, 3);
 
-    bool enA = apvts.getRawParameterValue("enableA")->load() > 0.5f;
-    bool enB = apvts.getRawParameterValue("enableB")->load() > 0.5f;
-    bool enC = apvts.getRawParameterValue("enableC")->load() > 0.5f;
-    bool enD = apvts.getRawParameterValue("enableD")->load() > 0.5f;
-    int enabledCount = (int)enA + (int)enB + (int)enC + (int)enD;
+    bool enA = fp[0].enable->load() > 0.5f;
+    bool enB = fp[1].enable->load() > 0.5f;
+    bool enC = fp[2].enable->load() > 0.5f;
+    bool enD = fp[3].enable->load() > 0.5f;
+    const int enabledCount = (int)enA + (int)enB + (int)enC + (int)enD;
 
-    std::array<float, 4> wMix;
-    bool lfo0_isRand1 = ((int)apvts.getRawParameterValue("lfo1wave")->load() == 3)
-        && (apvts.getRawParameterValue("lfo1en")->load() > 0.5f);
+    // 【V1.1.0 削除】ブロックレートの wMix 計算ブロック（約 45 行）
+    //   ここで計算していた std::array<float,4> wMix は、算出後どこからも
+    //   参照されていなかった（実際のミックスはサンプルループ内の
+    //   wMix_current が担っている）。switch + sqrt + 正規化がブロック毎に
+    //   まるごと捨てられていたため削除。
+    //
+    //   【要確認】削除したコードには LFO1 の波形が Rand1 のとき
+    //   wMix = lfoEngine.getMod4(0) を使う分岐があったが、
+    //   生きているサンプルループ側にはこの分岐が無く、
+    //   getPosition(0) の 2D 座標から重みを求めている。
+    //   Rand1 時に「4 フィルターへ独立したランダム重みを配る」挙動を
+    //   意図していたのなら、それは現状すでに失われている
+    //   （この削除で音は変わらない。元々効いていなかったため）。
 
-    if (lfo0_isRand1)
-    {
-        wMix = lfoEngine.getMod4(0);
-    }
-    else if (enabledCount == 1)
-    {
-        wMix = { enA ? 1.0f : 0.0f, enB ? 1.0f : 0.0f, enC ? 1.0f : 0.0f, enD ? 1.0f : 0.0f };
-    }
-    else
-    {
-        const int morphBlend = (int)apvts.getRawParameterValue("morphBlend")->load();
-        switch (morphBlend)
-        {
-        case 1:  wMix = MorphEngine::computeLinearWMix(posX, posY); break;
-        case 2:  wMix = MorphEngine::computeSmoothstepWMix(posX, posY); break;
-        case 3:  wMix = MorphEngine::computeRadialWMix(posX, posY); break;
-        default: wMix = MorphEngine::computeEqualPowerWMix(posX, posY); break;
-        }
-    }
-
-    if (!enA) wMix[0] = 0.0f;
-    if (!enB) wMix[1] = 0.0f;
-    if (!enC) wMix[2] = 0.0f;
-    if (!enD) wMix[3] = 0.0f;
-
-    float sumSq = 0.0f;
-    if (enA) sumSq += wMix[0] * wMix[0];
-    if (enB) sumSq += wMix[1] * wMix[1];
-    if (enC) sumSq += wMix[2] * wMix[2];
-    if (enD) sumSq += wMix[3] * wMix[3];
-
-    if (sumSq > 1e-8f)
-    {
-        float norm = 1.0f / std::sqrt(sumSq);
-        if (enA) wMix[0] *= norm;
-        if (enB) wMix[1] *= norm;
-        if (enC) wMix[2] *= norm;
-        if (enD) wMix[3] *= norm;
-    }
-
-    int modelA = (int)apvts.getRawParameterValue("modelA")->load();
-    int modelB = (int)apvts.getRawParameterValue("modelB")->load();
-    int modelC = (int)apvts.getRawParameterValue("modelC")->load();
-    int modelD = (int)apvts.getRawParameterValue("modelD")->load();
+    int modelA = (int)fp[0].model->load();
+    int modelB = (int)fp[1].model->load();
+    int modelC = (int)fp[2].model->load();
+    int modelD = (int)fp[3].model->load();
 
     // 【V1.1.0 削除】旧 svfQuad.processBuffer(buffer, filterBuffers);
     //   svfQuad は 4 インスタンスとも常時 disabled で出力を clear() するだけであり、
@@ -502,6 +531,61 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     }
 
     // =========================================================================
+    // ループ不変量の事前計算
+    //
+    // 旧実装はこれらをサンプルループ内で毎回読んでいたが、いずれも
+    // ブロック内で変化しない値であり、文字列キー検索を 48kHz なら
+    // 毎秒 19 万回繰り返しているだけだった。
+    // =========================================================================
+    const float targetMorphX     = gp.posX->load();
+    const float targetMorphY     = gp.posY->load();
+    const bool  lfo1Enabled      = gp.lfo1en->load() > 0.5f;
+    const int   morphBlendCurrent = (int)gp.morphBlend->load();
+
+    // wMix を計算するヘルパー（switch + 正規化）。
+    // ラムダは参照キャプチャのみでヒープ確保を伴わない。
+    auto computeWMixNormalized = [&](float mx, float my) -> std::array<float, 4>
+        {
+            std::array<float, 4> w;
+            switch (morphBlendCurrent)
+            {
+            case 1:  w = MorphEngine::computeLinearWMix(mx, my); break;
+            case 2:  w = MorphEngine::computeSmoothstepWMix(mx, my); break;
+            case 3:  w = MorphEngine::computeRadialWMix(mx, my); break;
+            default: w = MorphEngine::computeEqualPowerWMix(mx, my); break;
+            }
+
+            float sumSq = 0.0f;
+            if (enA) sumSq += w[0] * w[0];
+            if (enB) sumSq += w[1] * w[1];
+            if (enC) sumSq += w[2] * w[2];
+            if (enD) sumSq += w[3] * w[3];
+            if (sumSq > 1e-8f)
+            {
+                const float norm = 1.0f / std::sqrt(sumSq);
+                if (enA) w[0] *= norm;
+                if (enB) w[1] *= norm;
+                if (enC) w[2] *= norm;
+                if (enD) w[3] *= norm;
+            }
+            return w;
+        };
+
+    // wMix がブロック全体で不変になる 2 ケースを事前に判定する。
+    //   1) 有効フィルターが 1 個以下 → 重みは 0/1 の固定値
+    //   2) LFO1 有効 → morph 座標に LFO のブロック定数 posX/posY を使うため不変
+    // 残る「LFO1 無効 かつ 有効フィルター 2 個以上」のときだけ、
+    // サンプル毎に平滑化される lastMorphX/Y に追従する必要がある。
+    const bool wMixIsBlockConstant = (enabledCount <= 1) || lfo1Enabled;
+
+    std::array<float, 4> wMix_current{};
+    if (enabledCount <= 1)
+        wMix_current = { enA ? 1.0f : 0.0f, enB ? 1.0f : 0.0f,
+                         enC ? 1.0f : 0.0f, enD ? 1.0f : 0.0f };
+    else if (lfo1Enabled)
+        wMix_current = computeWMixNormalized(posX, posY);
+
+    // =========================================================================
     // サンプルループ
     // =========================================================================
     for (int i = 0; i < numSamples; ++i)
@@ -515,51 +599,17 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         float ceilingDiff = currentCeilingLinear - lastCeilingLinear;
         lastCeilingLinear += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, ceilingDiff);
 
-        float targetMorphX = apvts.getRawParameterValue("posX")->load();
-        float targetMorphY = apvts.getRawParameterValue("posY")->load();
+        // lastMorphX/Y の平滑化は毎サンプル必ず実行する。
+        // 次ブロックの baseX/baseY として持ち越されるため、
+        // wMix がブロック定数のケースでも省略してはならない。
         float morphXDiff = targetMorphX - lastMorphX;
         float morphYDiff = targetMorphY - lastMorphY;
         lastMorphX += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, morphXDiff);
         lastMorphY += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, morphYDiff);
 
-        int enabledCount = (enA ? 1 : 0) + (enB ? 1 : 0) + (enC ? 1 : 0) + (enD ? 1 : 0);
-
-        std::array<float, 4> wMix_current;
-
-        if (enabledCount <= 1)
-        {
-            wMix_current = { enA ? 1.0f : 0.0f, enB ? 1.0f : 0.0f,
-                           enC ? 1.0f : 0.0f, enD ? 1.0f : 0.0f };
-        }
-        else
-        {
-            bool lfo1Enabled = apvts.getRawParameterValue("lfo1en")->load() > 0.5f;
-            float morphX = lfo1Enabled ? posX : lastMorphX;
-            float morphY = lfo1Enabled ? posY : lastMorphY;
-
-            int morphBlendCurrent = (int)apvts.getRawParameterValue("morphBlend")->load();
-            switch (morphBlendCurrent)
-            {
-            case 1:  wMix_current = MorphEngine::computeLinearWMix(morphX, morphY); break;
-            case 2:  wMix_current = MorphEngine::computeSmoothstepWMix(morphX, morphY); break;
-            case 3:  wMix_current = MorphEngine::computeRadialWMix(morphX, morphY); break;
-            default: wMix_current = MorphEngine::computeEqualPowerWMix(morphX, morphY); break;
-            }
-
-            float sumSq_current = 0.0f;
-            if (enA) sumSq_current += wMix_current[0] * wMix_current[0];
-            if (enB) sumSq_current += wMix_current[1] * wMix_current[1];
-            if (enC) sumSq_current += wMix_current[2] * wMix_current[2];
-            if (enD) sumSq_current += wMix_current[3] * wMix_current[3];
-            if (sumSq_current > 1e-8f)
-            {
-                float norm = 1.0f / std::sqrt(sumSq_current);
-                if (enA) wMix_current[0] *= norm;
-                if (enB) wMix_current[1] *= norm;
-                if (enC) wMix_current[2] *= norm;
-                if (enD) wMix_current[3] *= norm;
-            }
-        }
+        // 平滑化された morph 座標に追従する必要があるときだけ再計算する
+        if (!wMixIsBlockConstant)
+            wMix_current = computeWMixNormalized(lastMorphX, lastMorphY);
 
         float dryWetSmoothed = lastDryWet;
         if (lfo5Enabled)
