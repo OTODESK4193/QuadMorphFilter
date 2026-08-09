@@ -82,6 +82,10 @@ void FilterVisualizer::readSnapshots()
     const auto cM = MorphEngine::computeModulation(cPos, lfo2Mod4, cutIsRand1);
     const auto rM = MorphEngine::computeModulation(rPos, lfo3Mod4, resIsRand1);
 
+    // ---- Solo 状態（DSP 側と同じく Enable より優先）----
+    soloIdx = processor.soloFilter.load();
+    if (soloIdx < 0 || soloIdx > 3) soloIdx = -1;
+
     // ---- 各フィルターの状態 ----
     int enabledCount = 0;
     for (int i = 0; i < 4; ++i)
@@ -89,7 +93,10 @@ void FilterVisualizer::readSnapshots()
         const juce::String s = kSuffix[i];
         auto& sn = snap[(size_t)i];
 
-        sn.enabled = raw("enable" + s) > 0.5f;
+        // Solo 中は該当フィルターのみ有効。Enable が off でも鳴らすため
+        // ここでも強制的に true にして、表示と実音を一致させる。
+        sn.enabled = (soloIdx >= 0) ? (i == soloIdx)
+                                    : (raw("enable" + s) > 0.5f);
         if (sn.enabled) ++enabledCount;
 
         sn.model = juce::roundToInt(raw("model" + s));
@@ -782,16 +789,42 @@ void FilterVisualizer::paint(juce::Graphics& g)
         fillPath.lineTo(plot.getX(), plot.getBottom());
         fillPath.closeSubPath();
 
-        const auto blend = blendedMorphColour();
-
-        juce::ColourGradient grad(blend.withAlpha(0.30f), plot.getX(), plot.getY(),
-                                  blend.withAlpha(0.0f), plot.getX(), plot.getBottom(), false);
-        grad.addColour(0.6, blend.withAlpha(0.07f));
-
         g.saveState();
         g.reduceClipRegion(plot.getSmallestIntegerContainer());
-        g.setGradientFill(grad);
-        g.fillPath(fillPath);
+
+        if (soloIdx >= 0)
+        {
+            // ---- Solo 表示 ----
+            // 対象フィルター固有の色で、通常より濃く・階調を増やして塗る。
+            // 上端を明るく、下へ向けて 3 段階で抜くことで
+            // カーブの「面」がはっきり浮かび上がる。
+            const auto col = QMColors::filterColour(soloIdx);
+
+            juce::ColourGradient grad(col.withAlpha(0.62f), plot.getX(), plot.getY(),
+                                      col.withAlpha(0.0f), plot.getX(), plot.getBottom(), false);
+            grad.addColour(0.28, col.withAlpha(0.34f));
+            grad.addColour(0.62, col.withAlpha(0.14f));
+
+            g.setGradientFill(grad);
+            g.fillPath(fillPath);
+
+            // カーブの稜線を同色で強調して、塗りと線を一体に見せる
+            g.setColour(col.withAlpha(0.95f));
+            g.strokePath(sumPath, juce::PathStrokeType(2.6f,
+                juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+        else
+        {
+            const auto blend = blendedMorphColour();
+
+            juce::ColourGradient grad(blend.withAlpha(0.30f), plot.getX(), plot.getY(),
+                                      blend.withAlpha(0.0f), plot.getX(), plot.getBottom(), false);
+            grad.addColour(0.6, blend.withAlpha(0.07f));
+
+            g.setGradientFill(grad);
+            g.fillPath(fillPath);
+        }
+
         g.restoreState();
     }
 
@@ -835,13 +868,19 @@ void FilterVisualizer::paint(juce::Graphics& g)
     // 3) 合成カーブ（主役）
     //    こちらもケーシングを敷いてから明るい線を重ねる。
     // ======================================================================
+    // Solo 中は主線もそのフィルターの色にする。白のままだと
+    // せっかく色で塗った面の上を白線が横切って印象が濁るため。
+    const juce::Colour sumLine = (soloIdx >= 0)
+        ? QMColors::filterColour(soloIdx).brighter(0.35f)
+        : QMColors::text;
+
     g.setColour(QMColors::well.withAlpha(0.85f));
     g.strokePath(sumPath, juce::PathStrokeType(6.0f,
         juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    g.setColour(QMColors::text.withAlpha(0.20f));
+    g.setColour(sumLine.withAlpha(0.20f));
     g.strokePath(sumPath, juce::PathStrokeType(5.0f,
         juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    g.setColour(QMColors::text);
+    g.setColour(sumLine);
     g.strokePath(sumPath, juce::PathStrokeType(2.2f,
         juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 

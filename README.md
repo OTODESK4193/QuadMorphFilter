@@ -326,6 +326,11 @@ Control the minimum and maximum mix level of the wet signal via LFO5:
 
 #### GUI
 
+* **Embedded fonts.** Inter for the interface and JetBrains Mono for numeric readouts, both bundled under SIL OFL 1.1 (licence text included in `Source/Assets/Fonts/`). Values are monospaced so the digits stop shifting as modulated numbers change.
+* **Solo buttons.** Each filter row has an `S` next to its on/off button. Solo is exclusive, overrides the enable switch the way a mixer does, and applies to both the audio and the response display — the soloed curve is filled with a gradient in that filter's own colour. Solo is deliberately not stored in the plugin state, so it always releases when a project is reopened.
+* **LFO modulation is shown on the sliders.** When LFO2 or LFO3 is assigned to a filter's cutoff or resonance, the slider draws a translucent band from the knob position to the modulated position with a bright moving tip, and the numeric readout follows the value actually reaching the filter.
+* **Model descriptions.** Hovering a MODEL selector shows a one-line explanation below the MORPH section, including what the Res knob does on models where it is not a conventional resonance control.
+* Cutoff and Resonance sliders shortened to three quarters of their previous length to make room for the Solo column; the LFO columns are now right-aligned so they stay put at any window size.
 * Tabbed layout (FILTER / MOD / OUT) replaces the single crowded page.
 * Filter response display enlarged and redrawn: per-filter translucent curves weighted by morph amount, composite curve with glow and gradient fill, per-filter cutoff markers, refined grid.
 * dB axis is now compressed above 0 dB so high-resonance peaks stay on screen.

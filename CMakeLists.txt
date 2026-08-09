@@ -36,6 +36,22 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 set(JUCE_DIR "C:/JUCE")
 add_subdirectory(${JUCE_DIR} build_juce)
 
+# ============================================================================
+#  埋め込みフォント (BinaryData)   ※ LIFT-X と同じ構成
+#   UI 全般は Inter、数値表示は JetBrains Mono。どちらも SIL OFL 1.1 で、
+#   Source/Assets/Fonts/ に実体とライセンス全文を同梱している。
+#   必要な 4 ウェイトだけを置いてあるため合計 約900KB。
+#   生成されたヘッダは BinaryFonts.h / 名前空間は BinaryFonts。
+# ============================================================================
+juce_add_binary_data(QuadMorph_Fonts
+    HEADER_NAME BinaryFonts.h
+    NAMESPACE   BinaryFonts
+    SOURCES
+        Source/Assets/Fonts/Inter-Regular.ttf
+        Source/Assets/Fonts/Inter-Bold.ttf
+        Source/Assets/Fonts/JetBrainsMono-Regular.ttf
+        Source/Assets/Fonts/JetBrainsMono-Bold.ttf)
+
 # 3. プラグインの定義
 juce_add_plugin(QuadMorphFilter
     COMPANY_NAME "OTODESK"
@@ -110,4 +126,6 @@ PRIVATE
     juce::juce_gui_extra
     # ===== 【追加】xsimd を追加 =====
         xsimd
+    # ===== 【V1.1.0 追加】埋め込みフォント =====
+        QuadMorph_Fonts
 )

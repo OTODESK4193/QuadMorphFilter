@@ -4,11 +4,14 @@
 #include "FilterPanel.h"
 #include "../PluginProcessor.h"
 #include "../DSP/ModelCapabilities.h"
+#include "../DSP/MorphEngine.h"   // 変調インジケータで DSP と同じ式を使う
+#include <cmath>
 
 namespace
 {
     // ---- 列幅（論理座標）----
     constexpr int kEnW = 30;
+    constexpr int kSoloW = 24;   // 【V1.1.0 追加】Solo ボタン
     constexpr int kModelW = 152;
     constexpr int kTypeW = 74;
     constexpr int kSlopeW = 84;
@@ -21,6 +24,48 @@ namespace
     const char* const kSrcLabels[] = { "--", "+X", "+Y", "-X", "-Y" };
 
     const char* const kFilterNames[4] = { "A", "B", "C", "D" };
+
+    // ------------------------------------------------------------------
+    // モデル説明（MODEL コンボにマウスオーバーで MORPH 下に表示）
+    //
+    // ※ 表示文字列は英字のみ。juce::String(const char*) は ASCII 前提で、
+    //    非 ASCII を渡すと assert する（144 行付近のコメントと同じ理由）。
+    //
+    // 並び順は g.model.addItemList() と完全に一致させること。
+    // Res ノブの働きがモデルごとに違うため、通常のレゾナンス以外の
+    // 役割を持つものは "Res =" として明記している。
+    // ------------------------------------------------------------------
+    const char* const kModelDesc[28] =
+    {
+        /*  0 */ "Clean SVF  -  Transparent state-variable filter. Neutral reference tone with no colouration.",
+        /*  1 */ "Moog Ladder  -  4-pole transistor ladder solved with Newton-Raphson. Warm, thick, self-oscillates.",
+        /*  2 */ "TB-303  -  Diode ladder with 8 Hz feedback high-pass. The classic acid squelch.",
+        /*  3 */ "Oberheim SEM  -  2-pole multimode with soft band-pass saturation. Smooth and vocal.",
+        /*  4 */ "Bitcrush  -  SVF followed by bit and sample-rate reduction.  Res = crush amount.",
+        /*  5 */ "Vowel Filter  -  Three formant band-passes.  Cutoff sweeps through A-E-I-O-U vowels.",
+        /*  6 */ "Comb Filter  -  Tuned delay line with feedback.  Cutoff = pitch, Res = feedback depth.",
+        /*  7 */ "MS-20  -  Sallen-Key with asymmetric drive and a DC blocker. Screams when pushed.",
+        /*  8 */ "Phaser  -  Cascaded all-pass stages producing moving notches.  Res = feedback.",
+        /*  9 */ "Wavefolder  -  Pre-filter then antialiased sine folding.  Res = fold gain.",
+        /* 10 */ "FDN Reverb  -  4-line feedback delay network with damping.  Res = decay time.",
+        /* 11 */ "Phase Shift  -  Broadband all-pass. Alters phase while leaving the magnitude flat.",
+        /* 12 */ "CEM3320  -  Curtis OTA ladder. Tighter and cleaner than the Moog, with a firm low end.",
+        /* 13 */ "SSM2040  -  SSM ladder with asymmetric clipping. Aggressive, slightly gritty resonance.",
+        /* 14 */ "CS-80  -  Yamaha-style multimode with gentle input drive. Silky and wide.",
+        /* 15 */ "Roland Jupiter  -  Bright 4-pole IR3109-style ladder. Glassy top end.",
+        /* 16 */ "EDP Wasp  -  CMOS-based filter. Raw, buzzy and deliberately dirty.",
+        /* 17 */ "Butterworth  -  Maximally flat pass-band. The most neutral of the digital designs.",
+        /* 18 */ "Chebyshev  -  Steeper roll-off in exchange for pass-band ripple.",
+        /* 19 */ "Bessel  -  Linear phase, so transients keep their shape. Gentlest slope.",
+        /* 20 */ "Elliptic  -  Steepest roll-off with a transmission zero.  Res shifts the notch.",
+        /* 21 */ "Vactrol LPG  -  Low-pass gate. Level and brightness move together, Buchla style.",
+        /* 22 */ "Modal Res  -  Eight tuned resonant bands. Struck-object and bell-like tones.",
+        /* 23 */ "Waveguide  -  Delay loop with scattering.  Cutoff = pitch, Res = decay.",
+        /* 24 */ "Bode Shifter  -  Hilbert frequency shifter.  Res = feedback, for metallic Shepard tones.",
+        /* 25 */ "2D Morph  -  Seven biquads morphed by pole placement. Evolving spectral shapes.",
+        /* 26 */ "Phased Array  -  Multi-stage all-pass stereo decorrelation. Widens without chorusing.",
+        /* 27 */ "Nyquist AA  -  Transparent high-frequency limiter. Tames aliasing and harshness."
+    };
 }
 
 // ==========================================================================
@@ -56,7 +101,10 @@ FilterPanel::FilterPanel(QuadMorphFilterAudioProcessor& p)
         processor.apvts, "xyDepth", xyDepthSlider);
 
     updateLfoSrcButtons();
-    startTimerHz(20);
+    updateSoloButtons();
+
+    // 30Hz。LFO 変調インジケータを滑らかに動かすため 20 → 30 に引き上げた。
+    startTimerHz(30);
 }
 
 FilterPanel::~FilterPanel()
@@ -78,6 +126,28 @@ void FilterPanel::setupGroup(Group& g, int index, const juce::String& s)
     addAndMakeVisible(g.enableButton);
     g.eAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         processor.apvts, "enable" + s, g.enableButton);
+
+    // ---- Solo（排他）----
+    // APVTS ではなく processor.soloFilter（atomic）を直接操作する。
+    // 一時的なモニタリング機能なので保存もオートメーションもしない。
+    g.soloButton.setButtonText("S");
+    g.soloButton.setClickingTogglesState(false);   // 状態は soloFilter 側で管理
+    // 点灯色はそのフィルター固有の色。カーブの塗り色と一致するので
+    // 「どのフィルターを Solo しているか」が一目で分かる。
+    g.soloButton.setColour(juce::TextButton::textColourOnId, accent);
+    g.soloButton.setColour(juce::TextButton::textColourOffId, QMColors::textDim);
+    g.soloButton.setTooltip("Solo filter " + s + "  -  hear and display this filter only. "
+                            "Click again to release.");
+    addAndMakeVisible(g.soloButton);
+
+    g.soloButton.onClick = [this, index]()
+    {
+        // 同じボタンをもう一度押したら解除、違うボタンなら乗り換え
+        const int current = processor.soloFilter.load();
+        processor.soloFilter.store(current == index ? -1 : index);
+        updateSoloButtons();
+        repaint();
+    };
 
     // ---- Model ----
     g.model.addItemList({
@@ -335,10 +405,123 @@ void FilterPanel::updateLfoSrcButtons()
     }
 }
 
+// ==========================================================================
+// updateModulationIndicators
+// LFO2 / LFO3 による変調後の実効値を、DSP と同じ式で求めてスライダーに渡す。
+// （MorphEngine の関数をそのまま使うので、表示と実音がずれない）
+// ==========================================================================
+void FilterPanel::updateModulationIndicators()
+{
+    auto& apvts = processor.apvts;
+    auto raw = [&apvts](const juce::String& id) { return apvts.getRawParameterValue(id)->load(); };
+
+    // LFO2 = Cutoff 変調 / LFO3 = Reso 変調
+    const bool cutIsRand1 = ((int)raw("lfo2wave") == 3) && (raw("lfo2en") > 0.5f);
+    const bool resIsRand1 = ((int)raw("lfo3wave") == 3) && (raw("lfo3en") > 0.5f);
+
+    const auto cM = MorphEngine::computeModulation(
+        processor.getLfoPos(1), processor.getLfoMod4(1), cutIsRand1);
+    const auto rM = MorphEngine::computeModulation(
+        processor.getLfoPos(2), processor.getLfoMod4(2), resIsRand1);
+
+    for (int i = 0; i < 4; ++i)
+    {
+        const juce::String s = kFilterNames[i];
+        auto& grp = groups[(size_t)i];
+
+        const int cutSrc = juce::jlimit(0, 4, juce::roundToInt(raw("lfoCutSrc" + s)));
+        const int resSrc = juce::jlimit(0, 4, juce::roundToInt(raw("lfoResSrc" + s)));
+
+        // ---- Cutoff ----
+        auto applyTo = [&](juce::Slider& sl, const juce::String& paramId,
+                           int src, float modValue, float octaves,
+                           float lo, float hi)
+        {
+            if (src <= 0)
+            {
+                // 変調なし → インジケータを消す
+                if ((bool)sl.getProperties().getWithDefault("qmModOn", false))
+                {
+                    sl.getProperties().set("qmModOn", false);
+                    sl.repaint();
+                }
+                return;
+            }
+
+            auto* prm = apvts.getParameter(paramId);
+            if (prm == nullptr) return;
+
+            const float base = raw(paramId);
+            const float modulated = juce::jlimit(lo, hi,
+                base * std::pow(2.0f, octaves * modValue));
+
+            const double norm = (double)prm->convertTo0to1(modulated);
+            const double prev = sl.getProperties().getWithDefault("qmModNorm", -1.0);
+            const bool   wasOn = (bool)sl.getProperties().getWithDefault("qmModOn", false);
+
+            sl.getProperties().set("qmModOn", true);
+
+            // 位置が実質変わっていないときは repaint を省く（描画負荷の抑制）。
+            // ただし OFF → ON に切り替わった瞬間は必ず描き直す。
+            if (!wasOn || std::abs(norm - prev) > 0.0015)
+            {
+                sl.getProperties().set("qmModNorm", norm);
+                sl.getProperties().set("qmModValue", (double)modulated);
+                sl.repaint();
+            }
+        };
+
+        applyTo(grp.cutoff, "cutoff" + s, cutSrc,
+                cM[(size_t)juce::jmax(0, cutSrc - 1)], 4.0f, 20.0f, 20000.0f);
+        applyTo(grp.res, "res" + s, resSrc,
+                rM[(size_t)juce::jmax(0, resSrc - 1)], 2.0f, 0.1f, 10.0f);
+    }
+}
+
+// ==========================================================================
+// hoveredModelIndex
+// MODEL コンボ（内部 Label を含む）にマウスが乗っていれば、その選択中の
+// モデル番号を返す。マウスリスナーを張るより取りこぼしが少なく、
+// コンボを開いている最中の挙動も安定する。
+// ==========================================================================
+int FilterPanel::hoveredModelIndex() const
+{
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto& combo = groups[(size_t)i].model;
+
+        if (combo.isMouseOver(true))
+            return juce::jlimit(0, 27, combo.getSelectedId() - 1);
+    }
+    return -1;
+}
+
+// ==========================================================================
+void FilterPanel::updateSoloButtons()
+{
+    const int solo = processor.soloFilter.load();
+
+    for (int i = 0; i < 4; ++i)
+        groups[(size_t)i].soloButton.setToggleState(solo == i, juce::dontSendNotification);
+}
+
+// ==========================================================================
 void FilterPanel::timerCallback()
 {
-    if (isVisible())
-        updateLfoSrcButtons();
+    if (!isVisible())
+        return;
+
+    updateLfoSrcButtons();
+    updateSoloButtons();
+    updateModulationIndicators();
+
+    // MODEL のマウスオーバー監視（説明帯の更新）
+    const int h = hoveredModelIndex();
+    if (h != hoveredModel)
+    {
+        hoveredModel = h;
+        repaint(descArea);
+    }
 }
 
 // ==========================================================================
@@ -367,18 +550,25 @@ FilterPanel::RowLayout FilterPanel::layoutRow(juce::Rectangle<int> r) const
 {
     RowLayout L;
 
-    const int fixed = kEnW + kModelW + kTypeW + kSlopeW + kSrcW * 2;
-    const int gaps = kGapS * 5 + kGapM * 2;
-    const int barW = juce::jmax(70, (r.getWidth() - fixed - gaps) / 2);
-
+    // 左から: ON / S / MODEL / TYPE / SLOPE
     L.enable = r.removeFromLeft(kEnW);    r.removeFromLeft(kGapS);
+    L.solo = r.removeFromLeft(kSoloW);    r.removeFromLeft(kGapS);
     L.model = r.removeFromLeft(kModelW);  r.removeFromLeft(kGapS);
     L.type = r.removeFromLeft(kTypeW);    r.removeFromLeft(kGapS);
     L.slope = r.removeFromLeft(kSlopeW);  r.removeFromLeft(kGapM);
+
+    // LFO 列は右端から確保する。
+    // 【V1.1.0】バーを 3/4 に縮めた分の余白が中央に生まれるが、
+    // 右詰めにしておけば LFO2 / LFO3 の列位置がウィンドウ幅によらず安定する。
+    L.lfoRes = r.removeFromRight(kSrcW);  r.removeFromRight(kGapS);
+    L.lfoCut = r.removeFromRight(kSrcW);  r.removeFromRight(kGapM);
+
+    // 残り領域を 2 本のバーで分け、要望どおり 3/4 の長さに縮める。
+    const int fullBar = juce::jmax(60, (r.getWidth() - kGapS) / 2);
+    const int barW = juce::jmax(52, fullBar * 3 / 4);
+
     L.cutoff = r.removeFromLeft(barW);    r.removeFromLeft(kGapS);
-    L.res = r.removeFromLeft(barW);       r.removeFromLeft(kGapM);
-    L.lfoCut = r.removeFromLeft(kSrcW);   r.removeFromLeft(kGapS);
-    L.lfoRes = r.removeFromLeft(kSrcW);
+    L.res = r.removeFromLeft(barW);
 
     return L;
 }
@@ -402,6 +592,7 @@ void FilterPanel::resized()
         const auto L = layoutRow(rowAreas[(size_t)i]);
 
         g.enableButton.setBounds(L.enable.withSizeKeepingCentre(kEnW, QMUI::kCtrlH));
+        g.soloButton.setBounds(L.solo.withSizeKeepingCentre(kSoloW, QMUI::kCtrlH));
         g.model.setBounds(L.model.withSizeKeepingCentre(kModelW, QMUI::kCtrlH));
         g.type.setBounds(L.type.withSizeKeepingCentre(kTypeW, QMUI::kCtrlH));
         g.slope.setBounds(L.slope.withSizeKeepingCentre(kSlopeW, QMUI::kCtrlH));
@@ -431,6 +622,10 @@ void FilterPanel::resized()
             xyDepthSlider.setBounds(r.removeFromLeft(barW)
                                         .withSizeKeepingCentre(barW, QMUI::kBarH));
     }
+
+    // ---- モデル説明の帯（MORPH の下の余白を使う）----
+    area.removeFromTop(10);
+    descArea = area.removeFromTop(juce::jmin(QMUI::kRowH, juce::jmax(0, area.getHeight())));
 }
 
 // ==========================================================================
@@ -442,6 +637,7 @@ void FilterPanel::paint(juce::Graphics& g)
     {
         const auto L = layoutRow(columnArea);
         QMUI::drawColumnLabel(g, "ON", L.enable);
+        QMUI::drawColumnLabel(g, "S", L.solo);
         QMUI::drawColumnLabel(g, "MODEL", L.model, juce::Justification::centredLeft);
         QMUI::drawColumnLabel(g, "TYPE", L.type);
         QMUI::drawColumnLabel(g, "SLOPE", L.slope);
@@ -477,4 +673,36 @@ void FilterPanel::paint(juce::Graphics& g)
                juce::Justification::centredLeft, false);
     g.drawText("CUTOFF ALGO", morphRowArea.getX() + 58 + 130 + 30, morphRowArea.getY(), 80,
                morphRowArea.getHeight(), juce::Justification::centredLeft, false);
+
+    // ---- モデル説明 ----
+    // MODEL コンボにマウスを乗せると、そのモデルの解説をここに出す。
+    // 乗っていないときは操作方法のヒントを薄く出しておく。
+    if (!descArea.isEmpty())
+    {
+        const auto area = descArea.toFloat();
+
+        if (hoveredModel >= 0 && hoveredModel < 28)
+        {
+            // 説明中のフィルター行の色で左端にラインを引き、どの行の
+            // モデルを見ているのかを分かるようにする
+            g.setColour(QMColors::panel.withAlpha(0.55f));
+            g.fillRoundedRectangle(area, 5.0f);
+
+            g.setColour(QMColors::accentFilter.withAlpha(0.85f));
+            g.fillRoundedRectangle(area.getX() + 1.0f, area.getY() + 5.0f,
+                                   2.5f, area.getHeight() - 10.0f, 1.25f);
+
+            g.setColour(QMColors::text.withAlpha(0.90f));
+            g.setFont(juce::Font(juce::FontOptions(11.5f)));
+            g.drawText(kModelDesc[hoveredModel],
+                       descArea.reduced(12, 0), juce::Justification::centredLeft, true);
+        }
+        else
+        {
+            g.setColour(QMColors::textDim.withAlpha(0.55f));
+            g.setFont(juce::Font(juce::FontOptions(11.0f)));
+            g.drawText("Hover a MODEL selector to see what that filter does.",
+                       descArea.reduced(12, 0), juce::Justification::centredLeft, false);
+        }
+    }
 }

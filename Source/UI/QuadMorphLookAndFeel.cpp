@@ -3,10 +3,37 @@
 // ==========================================
 #include "QuadMorphLookAndFeel.h"
 #include "UiCommon.h"
+#include "BinaryFonts.h"   // juce_add_binary_data が生成（CMakeLists 参照）
 
 QuadMorphLookAndFeel::QuadMorphLookAndFeel()
 {
+    // 埋め込みフォントの読み込み（エディタ生成時に 1 回だけ）
+    interRegular = juce::Typeface::createSystemTypefaceFor(
+        BinaryFonts::InterRegular_ttf, BinaryFonts::InterRegular_ttfSize);
+    interBold = juce::Typeface::createSystemTypefaceFor(
+        BinaryFonts::InterBold_ttf, BinaryFonts::InterBold_ttfSize);
+    monoRegular = juce::Typeface::createSystemTypefaceFor(
+        BinaryFonts::JetBrainsMonoRegular_ttf, BinaryFonts::JetBrainsMonoRegular_ttfSize);
+    monoBold = juce::Typeface::createSystemTypefaceFor(
+        BinaryFonts::JetBrainsMonoBold_ttf, BinaryFonts::JetBrainsMonoBold_ttfSize);
+
     refreshColours();
+}
+
+// ==========================================================================
+// getTypefaceForFont
+// LIFT-X と同じ方式。等幅を明示的に要求している箇所
+// （QMFonts::mono() 経由で kMonoName が入る）だけ JetBrains Mono を返し、
+// それ以外は全て Inter に統一する。
+// ==========================================================================
+juce::Typeface::Ptr QuadMorphLookAndFeel::getTypefaceForFont(const juce::Font& f)
+{
+    const bool bold = f.isBold();
+
+    if (f.getTypefaceName() == QMFonts::kMonoName)
+        return bold ? monoBold : monoRegular;
+
+    return bold ? interBold : interRegular;
 }
 
 void QuadMorphLookAndFeel::refreshColours()
@@ -79,12 +106,49 @@ void QuadMorphLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, int y,
         g.restoreState();
     }
 
+    // ======================================================================
+    // --- LFO 変調インジケータ（V1.1.0 追加）---
+    //   FilterPanel が毎フレーム "qmModOn" / "qmModNorm" を書き込む。
+    //   qmModNorm はスライダーのレンジ上での正規化位置（0..1、スキュー適用済み）。
+    //   ノブ位置から変調後の位置までを半透明の帯で結び、先端に明るい線を引く。
+    //   「いまどこまで振れているか」と「振れ幅」が同時に読める。
+    // ======================================================================
+    const bool modOn = (bool)slider.getProperties().getWithDefault("qmModOn", false);
+
+    if (modOn && slider.isEnabled())
+    {
+        const float modProp = juce::jlimit(0.0f, 1.0f,
+            (float)(double)slider.getProperties().getWithDefault("qmModNorm", (double)prop));
+        const float modW = b.getWidth() * modProp;
+
+        const float lo = juce::jmin(fillW, modW);
+        const float hi = juce::jmax(fillW, modW);
+
+        // 変調幅の帯
+        if (hi - lo > 0.5f)
+        {
+            g.saveState();
+            g.reduceClipRegion(b.withX(b.getX() + lo).withWidth(hi - lo)
+                                .getSmallestIntegerContainer());
+            g.setColour(accent.withAlpha(0.26f));
+            g.fillRoundedRectangle(b, radius);
+            g.restoreState();
+        }
+
+        // 変調後の現在位置（明るい実線）
+        const float mx = juce::jlimit(b.getX() + 1.0f, b.getRight() - 2.0f,
+                                      b.getX() + modW - 1.0f);
+        g.setColour(accent.brighter(0.75f).withAlpha(0.95f));
+        g.fillRect(mx, b.getY() + 1.0f, 1.8f, b.getHeight() - 2.0f);
+    }
+
     // --- 現在位置のライン（ハンドル代わり）---
     if (slider.isEnabled() && fillW > 1.5f)
     {
         const float hx = juce::jlimit(b.getX() + 1.0f, b.getRight() - 2.0f,
                                       b.getX() + fillW - 1.0f);
-        g.setColour(accent.brighter(0.35f));
+        // 変調中はノブ位置を控えめにして、動いている先端と区別する
+        g.setColour(accent.brighter(modOn ? 0.05f : 0.35f).withAlpha(modOn ? 0.75f : 1.0f));
         g.fillRect(hx, b.getY() + 1.5f, 1.6f, b.getHeight() - 3.0f);
     }
 
@@ -95,17 +159,30 @@ void QuadMorphLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, int y,
     // --- 文字（名前 / 値）---
     const auto textArea = b.reduced(7.0f, 0.0f);
     const juce::String nameTxt = slider.getName();
-    const juce::String valTxt = QMUI::formatValue(slider.getValue(), QMUI::unitOf(slider));
+
+    // 変調中は「実際にフィルターへ渡っている値」を表示する。
+    // ノブ位置は塗りの端で分かるので、数値は動いている側を出したほうが読み取りやすい。
+    const double shownValue = modOn
+        ? (double)slider.getProperties().getWithDefault("qmModValue", slider.getValue())
+        : slider.getValue();
+
+    const juce::String valTxt = QMUI::formatValue(shownValue, QMUI::unitOf(slider));
     const float fontH = juce::jlimit(9.5f, 12.5f, b.getHeight() * 0.55f);
 
     auto drawPair = [&](juce::Colour nameCol, juce::Colour valCol)
     {
-        g.setFont(juce::Font(juce::FontOptions(fontH, juce::Font::bold)));
+        // 名前は Inter（プロポーショナル）
         if (nameTxt.isNotEmpty())
         {
+            g.setFont(juce::Font(juce::FontOptions(fontH, juce::Font::bold)));
             g.setColour(nameCol);
             g.drawText(nameTxt, textArea, juce::Justification::centredLeft, false);
         }
+
+        // 値は JetBrains Mono（等幅）。
+        // LFO 変調で数値が毎フレーム変わるため、等幅でないと桁が伸び縮みして
+        // 文字が左右に揺れて読みづらい。
+        g.setFont(QMFonts::mono(fontH - 0.5f, true));
         g.setColour(valCol);
         g.drawText(valTxt, textArea, juce::Justification::centredRight, false);
     };

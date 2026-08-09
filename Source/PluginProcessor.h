@@ -62,6 +62,15 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
+    // ===== 【V1.1.0 追加】Solo =====
+    // -1 = Solo なし / 0..3 = そのフィルターだけを鳴らす（排他）。
+    // 一時的なモニタリング機能なので APVTS には入れない。
+    //   ・保存/復元されない（プロジェクトを開き直すと必ず解除される）
+    //   ・オートメーション対象にならない
+    //   ・パラメータ数が増えないので既存プリセットとの互換も保たれる
+    // UI スレッドが書き、オーディオスレッドが読むだけなので atomic で足りる。
+    std::atomic<int> soloFilter { -1 };
+
     std::array<juce::Point<float>, 2048> recBuffer[3];
     std::atomic<int>   recLength[3]{ 0 };
     std::atomic<bool>  isWaitingForRecord[3]{ false };

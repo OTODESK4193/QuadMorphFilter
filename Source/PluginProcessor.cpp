@@ -557,6 +557,20 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     bool enB = fp[1].enable->load() > 0.5f;
     bool enC = fp[2].enable->load() > 0.5f;
     bool enD = fp[3].enable->load() > 0.5f;
+
+    // ===== 【V1.1.0 追加】Solo =====
+    // ミキサーの Solo と同じく Enable より優先する（Enable が off の
+    // フィルターを Solo しても鳴る）。他の 3 つは処理自体を飛ばすので
+    // CPU も下がる。UI スレッドが書く atomic を 1 回読むだけ。
+    const int soloIdx = soloFilter.load(std::memory_order_relaxed);
+    if (soloIdx >= 0 && soloIdx < 4)
+    {
+        enA = (soloIdx == 0);
+        enB = (soloIdx == 1);
+        enC = (soloIdx == 2);
+        enD = (soloIdx == 3);
+    }
+
     const int enabledCount = (int)enA + (int)enB + (int)enC + (int)enD;
 
 

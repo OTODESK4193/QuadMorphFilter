@@ -18,6 +18,12 @@ public:
     /** テーマ切替後に色を貼り直す */
     void refreshColours();
 
+    /** 埋め込みフォントへの一括差し替え（LIFT-X と同じ方式）。
+        QMFonts::kMonoName を指定されたときだけ JetBrains Mono、
+        それ以外は全て Inter を返すため、各パネルの
+        juce::FontOptions(size, bold) 呼び出しはそのままで統一される。 */
+    juce::Typeface::Ptr getTypefaceForFont(const juce::Font& f) override;
+
     void drawLinearSlider(juce::Graphics& g, int x, int y, int width, int height,
                           float sliderPos, float minSliderPos, float maxSliderPos,
                           juce::Slider::SliderStyle style,
@@ -43,4 +49,8 @@ public:
 
     /** ComboBox のテキスト位置（右の矢印と重ならないように少し詰める） */
     void positionComboBoxText(juce::ComboBox& box, juce::Label& label) override;
+
+private:
+    // 埋め込みフォント。コンストラクタで 1 度だけ生成する。
+    juce::Typeface::Ptr interRegular, interBold, monoRegular, monoBold;
 };

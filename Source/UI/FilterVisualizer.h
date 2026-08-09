@@ -58,6 +58,10 @@ private:
 
     std::array<Snapshot, 4> snap;
 
+    // 【V1.1.0 追加】Solo 中のフィルター番号（-1 = Solo なし）。
+    // readSnapshots() で processor.soloFilter から読み取り、paint() が参照する。
+    int soloIdx = -1;
+
     // 応答バッファ（paint 内アロケーション禁止のためメンバ保持）
     std::array<std::array<float, kMaxPoints>, 4> mag{};
     std::array<float, kMaxPoints> magSum{};

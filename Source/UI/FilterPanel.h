@@ -34,6 +34,7 @@ private:
     struct Group
     {
         juce::TextButton enableButton;
+        juce::TextButton soloButton;      // 【V1.1.0 追加】排他 Solo
         juce::ComboBox   model, type, slope;
         juce::Slider     cutoff, res;
         juce::TextButton lfoCutBtn, lfoResBtn;
@@ -46,12 +47,21 @@ private:
     void setupGroup(Group& g, int index, const juce::String& suffix);
     void refreshGroupControls(Group& g, const juce::String& suffix, int modelIdx);
     void updateLfoSrcButtons();
+
+    /** processor.soloFilter の状態を 4 つの S ボタンの点灯に反映する */
+    void updateSoloButtons();
+
+    /** LFO 変調後の実効 Cutoff / Res を求め、各スライダーの
+        "qmModOn" / "qmModNorm" プロパティに書き込む。
+        描画は QuadMorphLookAndFeel::drawLinearSlider が行う。 */
+    void updateModulationIndicators();
+
     void timerCallback() override;
 
     /** 1 行分の各カラム矩形を返す（paint と resized で共有する） */
     struct RowLayout
     {
-        juce::Rectangle<int> enable, model, type, slope, cutoff, res, lfoCut, lfoRes;
+        juce::Rectangle<int> enable, solo, model, type, slope, cutoff, res, lfoCut, lfoRes;
     };
     RowLayout layoutRow(juce::Rectangle<int> row) const;
 
@@ -70,8 +80,18 @@ private:
     juce::Slider xyDepthSlider;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> xyDepthAtt;
 
+    /** MODEL コンボのどれかにマウスが乗っていれば、その選択中モデル番号
+        （0..27）を返す。乗っていなければ -1。タイマーから毎フレーム確認する。 */
+    int hoveredModelIndex() const;
+
+    /** MODEL にマウスオーバー中のモデル番号（-1 = なし）。paint が参照する。 */
+    int hoveredModel = -1;
+
     // 見出しの描画位置（resized で確定、paint で使用）
     juce::Rectangle<int> headerArea, columnArea, morphHeaderArea, morphRowArea;
+
+    /** MORPH 行の下、モデル説明を表示する帯 */
+    juce::Rectangle<int> descArea;
     std::array<juce::Rectangle<int>, 4> rowAreas;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(FilterPanel)

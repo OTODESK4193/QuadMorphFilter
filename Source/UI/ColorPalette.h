@@ -15,6 +15,31 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <array>
 
+// ============================================================================
+//  埋め込みフォント（LIFT-X と同じ構成）
+//   ・UI 全般   : Inter          (Regular / Bold)
+//   ・数値表示 : JetBrains Mono (Regular / Bold)
+//  どちらも SIL OFL 1.1。実体とライセンス全文を Source/Assets/Fonts/ に同梱。
+//
+//  差し替えは QuadMorphLookAndFeel::getTypefaceForFont() が一括で行うため、
+//  既存の juce::FontOptions(size, bold) という呼び出しは 1 箇所も変えずに
+//  Inter へ切り替わる。等幅にしたい箇所だけ QMFonts::mono() を使う。
+//
+//  全パネルが include する ColorPalette.h に置いてある
+//  （QuadMorphLookAndFeel.h を include していないパネルからも参照するため）。
+// ============================================================================
+namespace QMFonts
+{
+    // getTypefaceForFont() がこの名前を見て JetBrains Mono を返す
+    inline const char* kMonoName = "QMF Mono";
+
+    inline juce::Font mono(float height, bool bold = false)
+    {
+        return juce::Font(juce::FontOptions(kMonoName, height,
+                                            bold ? juce::Font::bold : juce::Font::plain));
+    }
+}
+
 namespace QMColors
 {
     // ---- 基本色（setTheme で書き換わる）----
