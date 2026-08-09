@@ -78,6 +78,13 @@ private:
         // ---- 【V1.1.0 追加】ヘッダーの Preset / Random / Reset ----
         juce::TextButton presetBtn, randomBtn, resetBtn;
 
+        // ◀ [プリセット名] ▶ の順送りボタン
+        juce::TextButton prevBtn, nextBtn;
+
+        /** Factory プリセットを delta 個ぶん送る（端で折り返す）。
+            現在が Factory 由来でない場合は先頭から始める。 */
+        void stepPreset(int delta);
+
         /** ユーザープリセットの保存先。
             ~/Documents/OTODESK/QuadMorphFilter/Presets */
         static juce::File presetDirectory();
@@ -90,8 +97,12 @@ private:
         void loadPresetFile(const juce::File& f);
         void loadFactoryPreset(int index);
 
-        /** ヘッダーに出す現在のプリセット名 */
-        juce::String currentPresetName { "Init" };
+        // 【V1.1.0】プリセット名と番号はプロセッサ（APVTS のステート）が持つ。
+        // ここに持たせるとウィンドウを閉じただけで消えてしまうため。
+        //   processor.getPresetName() / getPresetIndex() を参照する。
+
+        /** 名前表示の矩形（resized で確定、paint で使用） */
+        juce::Rectangle<int> presetNameArea;
 
         // ブラウザは重いので必要になるまで作らない。
         // 破棄順序: tooltip より前に宣言し、tooltip が最後に消えるようにする。

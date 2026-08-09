@@ -293,8 +293,8 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
     lastMorphX = gp.posX->load();
     lastMorphY = gp.posY->load();
 
-    // モーフ重みは「現在値 = 目標値」から始めて、再生開始直後の
-    // 立ち上がりでフェードインが起きないようにする
+    // モーフ重みはゼロから始める。最初のブロックで目標値まで 5ms かけて
+    // 立ち上がるので、再生開始の瞬間にゲインが飛び込むことがない。
     lastWMix.fill(0.0f);
 
     int maxLatency = 0;
@@ -830,13 +830,27 @@ void QuadMorphFilterAudioProcessor::getStateInformation(juce::MemoryBlock& destD
 {
     auto state = apvts.copyState();
     std::unique_ptr<juce::XmlElement> xml(state.createXml());
-    copyXmlToBinary(*xml, destData);
+
+    // createXml() が null を返すことは通常ないが、返ったときに
+    // *xml を参照するとホストごと落ちる。保存を諦めるほうが安全。
+    if (xml != nullptr)
+        copyXmlToBinary(*xml, destData);
 }
 void QuadMorphFilterAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     std::unique_ptr<juce::XmlElement> xmlState(getXmlFromBinary(data, sizeInBytes));
-    if (xmlState.get() != nullptr)
-        apvts.replaceState(juce::ValueTree::fromXml(*xmlState));
+    if (xmlState == nullptr)
+        return;
+
+    // タグ名が違うデータ（他プラグインの状態など）を流し込まれても壊れないようにする
+    if (!xmlState->hasTagName(apvts.state.getType()))
+        return;
+
+    // 【補足】replaceState は ValueTree を差し替えるだけで、
+    // AudioProcessorParameter のインスタンス自体は作り直されない。
+    // そのため cacheParameterPointers() で保持している
+    // std::atomic<float>* は差し替え後もそのまま有効。
+    apvts.replaceState(juce::ValueTree::fromXml(*xmlState));
 }
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {

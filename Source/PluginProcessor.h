@@ -80,6 +80,46 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
+    // ==================================================================
+    // 【V1.1.0 追加】APVTS のステートに載せる付随情報
+    //
+    // これらは apvts.state のプロパティとして持つ。copyState() が
+    // プロパティごとコピーするので、DAW 保存にもプリセット .xml にも
+    // 自動的に含まれ、エディタを閉じて開き直しても失われない。
+    //
+    // 旧実装はプリセット名をエディタ（Content）のメンバに持っていたため、
+    // ウィンドウを閉じて開くだけで "Init" に戻ってしまっていた。
+    // ==================================================================
+    juce::String getPresetName() const
+    {
+        return apvts.state.getProperty("presetName", "Init").toString();
+    }
+    void setPresetName(const juce::String& n)
+    {
+        apvts.state.setProperty("presetName", n, nullptr);
+    }
+
+    /** 現在の Factory プリセット番号（-1 = Factory 由来ではない）。
+        ヘッダーの ◀ ▶ で順送りするために保持する。 */
+    int getPresetIndex() const
+    {
+        return (int)apvts.state.getProperty("presetIndex", -1);
+    }
+    void setPresetIndex(int i)
+    {
+        apvts.state.setProperty("presetIndex", i, nullptr);
+    }
+
+    /** エディタの表示倍率（%）。リサイズした大きさを次回も再現する。 */
+    int getEditorScalePercent() const
+    {
+        return juce::jlimit(70, 160, (int)apvts.state.getProperty("editorScale", 100));
+    }
+    void setEditorScalePercent(int pct)
+    {
+        apvts.state.setProperty("editorScale", juce::jlimit(70, 160, pct), nullptr);
+    }
+
     // ===== 【V1.1.0 追加】Solo =====
     // -1 = Solo なし / 0..3 = そのフィルターだけを鳴らす（排他）。
     // 一時的なモニタリング機能なので APVTS には入れない。

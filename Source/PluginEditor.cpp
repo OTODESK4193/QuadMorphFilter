@@ -106,6 +106,19 @@ QuadMorphFilterAudioProcessorEditor::Content::Content(QuadMorphFilterAudioProces
     randomBtn.onClick = [this] { doRandom(); };
     resetBtn.onClick  = [this] { doReset(); };
 
+    // ---- ◀ [プリセット名] ▶ ----
+    // 三角は ASCII に無いので fromUTF8 で明示的に組む。
+    // （juce::String(const char*) は ASCII 前提で assert するため）
+    styleHeaderBtn(prevBtn, juce::String::fromUTF8("\xE2\x97\x80"), QMColors::textDim,
+        "PREVIOUS PRESET  -  step back through the 200 factory presets. "
+        "Wraps around at the start.");
+    styleHeaderBtn(nextBtn, juce::String::fromUTF8("\xE2\x96\xB6"), QMColors::textDim,
+        "NEXT PRESET  -  step forward through the 200 factory presets. "
+        "Wraps around at the end.");
+
+    prevBtn.onClick = [this] { stepPreset(-1); };
+    nextBtn.onClick = [this] { stepPreset(+1); };
+
     setActiveTab(TabFilter);
     applyTheme(lastThemeIndex);
 
@@ -182,7 +195,8 @@ void QuadMorphFilterAudioProcessorEditor::Content::doReset()
             if (yes != 1 || safe == nullptr) return;
 
             FactoryPresets::applyInit(safe->processor);
-            safe->currentPresetName = "Init";
+            safe->processor.setPresetName("Init");
+            safe->processor.setPresetIndex(-1);
 
             if (safe->browser != nullptr)
                 safe->browser->setCurrentFactory(-1);
@@ -195,7 +209,8 @@ void QuadMorphFilterAudioProcessorEditor::Content::doReset()
 void QuadMorphFilterAudioProcessorEditor::Content::doRandom()
 {
     PresetRandomiser::randomise(processor, rng);
-    currentPresetName = "Random";
+    processor.setPresetName("Random");
+    processor.setPresetIndex(-1);
 
     if (browser != nullptr)
         browser->setCurrentFactory(-1);
@@ -204,10 +219,33 @@ void QuadMorphFilterAudioProcessorEditor::Content::doRandom()
 }
 
 // --------------------------------------------------------------------------
+// stepPreset
+// ヘッダーの ◀ ▶。Factory プリセットを順送りする。
+// 現在が Factory 由来でない（User / Random / Init）ときは先頭から始める。
+// --------------------------------------------------------------------------
+void QuadMorphFilterAudioProcessorEditor::Content::stepPreset(int delta)
+{
+    const int n = FactoryPresets::count();
+    if (n <= 0) return;
+
+    const int cur = processor.getPresetIndex();
+
+    // 端で折り返す。負数の剰余に注意して正へ寄せる。
+    const int next = (cur < 0) ? (delta > 0 ? 0 : n - 1)
+                               : ((cur + delta) % n + n) % n;
+
+    loadFactoryPreset(next);
+
+    if (browser != nullptr)
+        browser->setCurrentFactory(next);
+}
+
+// --------------------------------------------------------------------------
 void QuadMorphFilterAudioProcessorEditor::Content::loadFactoryPreset(int index)
 {
     FactoryPresets::apply(processor, index);
-    currentPresetName = FactoryPresets::nameOf(index);
+    processor.setPresetName(FactoryPresets::nameOf(index));
+    processor.setPresetIndex(index);
     repaint();
 }
 
@@ -219,7 +257,8 @@ void QuadMorphFilterAudioProcessorEditor::Content::loadPresetFile(const juce::Fi
         if (xml->hasTagName(processor.apvts.state.getType()))
         {
             processor.apvts.replaceState(juce::ValueTree::fromXml(*xml));
-            currentPresetName = f.getFileNameWithoutExtension();
+            processor.setPresetName(f.getFileNameWithoutExtension());
+            processor.setPresetIndex(-1);
             repaint();
         }
 }
@@ -239,7 +278,8 @@ void QuadMorphFilterAudioProcessorEditor::Content::savePreset(const juce::String
     if (auto xml = processor.apvts.copyState().createXml())
         xml->writeTo(file);
 
-    currentPresetName = name;
+    processor.setPresetName(name);
+    processor.setPresetIndex(-1);
 
     if (browser != nullptr)
         browser->setCurrentFile(file);
@@ -327,6 +367,15 @@ void QuadMorphFilterAudioProcessorEditor::Content::resized()
         place(resetBtn, 64);
         place(randomBtn, 74);
         place(presetBtn, 74);
+
+        // ◀ [名前] ▶
+        x -= 6;
+        place(nextBtn, 22);
+        const int nameW = 168;
+        x -= nameW;
+        presetNameArea = { x, y, nameW, h };
+        x -= 2;
+        place(prevBtn, 22);
     }
 
     // ブラウザは上部の表示領域を覆うように出す
@@ -391,12 +440,19 @@ void QuadMorphFilterAudioProcessorEditor::Content::paint(juce::Graphics& g)
                    r.getX() + 322, r.getY(), 300, r.getHeight(),
                    juce::Justification::centredLeft, false);
 
-        // ---- 現在のプリセット名（ボタン列の左）----
-        g.setColour(QMColors::text.withAlpha(0.85f));
-        g.setFont(QMFonts::mono(12.0f, true));
-        g.drawText(currentPresetName,
-                   presetBtn.getX() - 214, r.getY(), 206, r.getHeight(),
-                   juce::Justification::centredRight, false);
+        // ---- 現在のプリセット名（◀ ▶ の間）----
+        if (!presetNameArea.isEmpty())
+        {
+            g.setColour(QMColors::well.withAlpha(0.75f));
+            g.fillRoundedRectangle(presetNameArea.toFloat(), 4.0f);
+            g.setColour(QMColors::panelLine.withAlpha(0.35f));
+            g.drawRoundedRectangle(presetNameArea.toFloat().reduced(0.5f), 4.0f, 1.0f);
+
+            g.setColour(QMColors::text.withAlpha(0.90f));
+            g.setFont(QMFonts::mono(11.5f, true));
+            g.drawText(processor.getPresetName(), presetNameArea.reduced(6, 0),
+                       juce::Justification::centred, false);
+        }
 
         // 下境界
         g.setColour(QMColors::panelLine.withAlpha(0.35f));
@@ -433,7 +489,11 @@ QuadMorphFilterAudioProcessorEditor::QuadMorphFilterAudioProcessorEditor(
     setConstrainer(&constrainer);
     setResizable(true, true);
 
-    setSize(kBaseW, kBaseH);
+    // 【V1.1.0】前回の表示倍率を復元する。
+    // 旧実装は常に 100% で開いていたため、リサイズしてもウィンドウを
+    // 閉じるたびに元へ戻ってしまっていた。
+    const int pct = audioProcessor.getEditorScalePercent();
+    setSize(kBaseW * pct / 100, kBaseH * pct / 100);
 }
 
 QuadMorphFilterAudioProcessorEditor::~QuadMorphFilterAudioProcessorEditor()
@@ -454,4 +514,8 @@ void QuadMorphFilterAudioProcessorEditor::resized()
     const float scale = (float)getWidth() / (float)kBaseW;
     content.setTransform(juce::AffineTransform::scale(scale));
     content.setBounds(0, 0, kBaseW, kBaseH);
+
+    // 表示倍率を APVTS のステートへ控える。
+    // これで DAW 保存にもエディタの開き直しにも引き継がれる。
+    audioProcessor.setEditorScalePercent(juce::roundToInt(scale * 100.0f));
 }
