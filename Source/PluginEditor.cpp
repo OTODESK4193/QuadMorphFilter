@@ -29,7 +29,7 @@ namespace
 
     constexpr int kXYPadW = 308;
 
-    const char* const kTabNames[] = { "FILTER", "MOD", "OUT" };
+    const char* const kTabNames[] = { "FILTER", "MOD", "CONFIG" };
 }
 
 // ==========================================================================
@@ -43,7 +43,7 @@ QuadMorphFilterAudioProcessorEditor::Content::Content(QuadMorphFilterAudioProces
       xyPad(p),
       filterPanel(p),
       modPanel(p),
-      outPanel(p)
+      configPanel(p)
 {
     // ---- テーマを先に確定させてから子を構築済みの色で塗り直す ----
     lastThemeIndex = (int)processor.apvts.getRawParameterValue("colorTheme")->load();
@@ -66,19 +66,13 @@ QuadMorphFilterAudioProcessorEditor::Content::Content(QuadMorphFilterAudioProces
 
     addAndMakeVisible(filterPanel);
     addChildComponent(modPanel);
-    addChildComponent(outPanel);
+    addChildComponent(configPanel);
 
     // ---- テーマ選択 ----
-    themeCombo.addItemList(QMColors::getThemeNames(), 1);
-    themeCombo.setTooltip("GUI color theme");
-    addAndMakeVisible(themeCombo);
-    themeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        processor.apvts, "colorTheme", themeCombo);
-
-    // ComboBoxAttachment は Listener 経由なので、onChange は自由に使える。
-    themeCombo.onChange = [this]
+    // 【V1.1.0】コンボ本体はヘッダーから CONFIG タブへ移した。
+    // 選択が変わったらコールバックで受け取り、ここで色を貼り直す。
+    configPanel.onThemeChanged = [this](int idx)
     {
-        const int idx = themeCombo.getSelectedItemIndex();
         if (idx >= 0 && idx != lastThemeIndex) applyTheme(idx);
     };
 
@@ -120,7 +114,7 @@ void QuadMorphFilterAudioProcessorEditor::Content::applyTheme(int themeIndex)
 
     filterPanel.refreshTheme();
     modPanel.refreshTheme();
-    outPanel.refreshTheme();
+    configPanel.refreshTheme();
 
     styleTabs();
     repaintAll(this);
@@ -145,7 +139,7 @@ void QuadMorphFilterAudioProcessorEditor::Content::setActiveTab(int tab)
 
     filterPanel.setVisible(activeTab == TabFilter);
     modPanel.setVisible(activeTab == TabMod);
-    outPanel.setVisible(activeTab == TabOut);
+    configPanel.setVisible(activeTab == TabConfig);
 
     styleTabs();
     repaint(0, kTabY, getWidth(), kTabH + 4);
@@ -157,7 +151,6 @@ void QuadMorphFilterAudioProcessorEditor::Content::resized()
     const int w = getWidth();
 
     headerArea = { kMargin, kHeaderY, w - kMargin * 2, kHeaderH };
-    themeCombo.setBounds(w - kMargin - 118, kHeaderY + 7, 118, 22);
 
     // ---- 上部: フィルターカーブ（大）+ XY パッド ----
     const int visW = w - kMargin * 2 - kXYPadW - 12;
@@ -173,7 +166,7 @@ void QuadMorphFilterAudioProcessorEditor::Content::resized()
     const auto panelBounds = juce::Rectangle<int>(0, kPanelY, w, kPanelH);
     filterPanel.setBounds(panelBounds);
     modPanel.setBounds(panelBounds);
-    outPanel.setBounds(panelBounds);
+    configPanel.setBounds(panelBounds);
 }
 
 // ==========================================================================

@@ -20,6 +20,13 @@ namespace
     constexpr int kGapS = 6;
     constexpr int kGapM = 8;
 
+    // ---- OUTPUT セクションのノブ ----
+    constexpr int kKnobW = 118;   // 列幅
+    constexpr int kKnobD = 66;    // ノブ直径
+    constexpr int kLabelH = 14;   // 上の名前
+    constexpr int kValueH = 16;   // 下の数値
+    constexpr int kKnobGap = 22;  // 列間
+
     // 0=Off, 1=+X, 2=+Y, 3=-X, 4=-Y
     const char* const kSrcLabels[] = { "--", "+X", "+Y", "-X", "-Y" };
 
@@ -66,6 +73,39 @@ namespace
         /* 26 */ "Phased Array  -  Multi-stage all-pass stereo decorrelation. Widens without chorusing.",
         /* 27 */ "Nyquist AA  -  Transparent high-frequency limiter. Tames aliasing and harshness."
     };
+
+    // Res ノブの役割（モデルごとに意味が変わるため個別に用意）
+    const char* const kResDesc[28] =
+    {
+        /*  0 */ "resonance peak at the cutoff.",
+        /*  1 */ "ladder feedback. Self-oscillates near the top.",
+        /*  2 */ "ladder feedback. The classic acid squelch lives high up here.",
+        /*  3 */ "resonance, with the band-pass path saturating as it rises.",
+        /*  4 */ "bit depth and sample-rate crushing amount.",
+        /*  5 */ "formant sharpness, how vocal the vowel sounds.",
+        /*  6 */ "comb feedback, which sets how long the tuned delay rings.",
+        /*  7 */ "resonance. High values push the filter into its screaming range.",
+        /*  8 */ "all-pass feedback, deepening the notches.",
+        /*  9 */ "fold gain. More folds means more added harmonics.",
+        /* 10 */ "reverb decay time.",
+        /* 11 */ "how far the phase spreads across the spectrum.",
+        /* 12 */ "resonance. Tighter and cleaner than the Moog ladder.",
+        /* 13 */ "resonance, with asymmetric clipping adding grit as it rises.",
+        /* 14 */ "resonance with gentle input drive.",
+        /* 15 */ "resonance. Bright and glassy at the top.",
+        /* 16 */ "resonance. Gets raw and buzzy quickly.",
+        /* 17 */ "pass-band peaking.",
+        /* 18 */ "pass-band ripple depth. More ripple means a steeper roll-off.",
+        /* 19 */ "phase character. Bessel stays close to linear phase.",
+        /* 20 */ "stop-band notch position.",
+        /* 21 */ "release time of the low-pass gate.",
+        /* 22 */ "how sharply the eight tuned bands ring.",
+        /* 23 */ "decay time of the waveguide loop.",
+        /* 24 */ "feedback. Raising it stacks shifts into metallic Shepard tones.",
+        /* 25 */ "the Y coordinate of the pole-placement morph.",
+        /* 26 */ "depth of the all-pass stereo decorrelation.",
+        /* 27 */ "how hard the high-frequency limiter clamps."
+    };
 }
 
 // ==========================================================================
@@ -75,30 +115,23 @@ FilterPanel::FilterPanel(QuadMorphFilterAudioProcessor& p)
     for (int i = 0; i < 4; ++i)
         setupGroup(groups[(size_t)i], i, kFilterNames[i]);
 
-    // ---- MORPH ----
-    morphBlendCombo.addItemList({ "Equal Power", "Linear", "Smoothstep", "Radial" }, 1);
-    addAndMakeVisible(morphBlendCombo);
-    morphBlendAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        processor.apvts, "morphBlend", morphBlendCombo);
+    // ---- OUTPUT（旧 OUT タブから移設）----
+    // 表示文字列は英字のみ（juce::String(const char*) は ASCII 前提）。
+    styleKnob(masterGainSlider, "OUTPUT GAIN", QMUI::Unit::Db, QMColors::accentOut,
+              "masterGain", mgAtt,
+              "OUTPUT GAIN  -  final level after the filters and the dry/wet mix, "
+              "applied before the limiter. Use it to match bypassed and processed levels.");
 
-    cutoffAlgoCombo.addItemList({ "Absolute", "Relative", "Zone" }, 1);
-    addAndMakeVisible(cutoffAlgoCombo);
-    cutoffAlgoAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        processor.apvts, "cutoffAlgo", cutoffAlgoCombo);
+    styleKnob(dryWetSlider, "DRY / WET", QMUI::Unit::Pct, QMColors::accentMorph,
+              "dryWet", dwAtt,
+              "DRY / WET  -  balance between the untouched input and the filtered signal, "
+              "using an equal-power curve so the level stays steady. When LFO5 is enabled "
+              "the ring shows its range and the dot follows the live value.");
 
-    // ---- XY Depth（Cutoff Algo の適用量。0% で従来どおり）----
-    xyDepthSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    xyDepthSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
-    xyDepthSlider.setName("XY Amt");
-    xyDepthSlider.getProperties().set("qmUnit", (int)QMUI::Unit::Pct);
-    xyDepthSlider.setColour(juce::Slider::thumbColourId, QMColors::accentMorph);
-    // 表示文字列は英字のみ（144 行のコメント参照: 非 ASCII は assert する）
-    xyDepthSlider.setTooltip("How much the Cutoff Algo mapping of the morph XY position "
-                             "drives every filter's cutoff and resonance.  "
-                             "At 0% the Cut / Res sliders are used unchanged.");
-    addAndMakeVisible(xyDepthSlider);
-    xyDepthAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        processor.apvts, "xyDepth", xyDepthSlider);
+    styleKnob(ceilingSlider, "CEILING", QMUI::Unit::Db, QMColors::rose,
+              "limiterCeiling", clAtt,
+              "LIMITER CEILING  -  the output never exceeds this level. Resonant filters "
+              "can add a lot of gain, so this is the safety net that keeps peaks in check.");
 
     updateLfoSrcButtons();
     updateSoloButtons();
@@ -110,6 +143,82 @@ FilterPanel::FilterPanel(QuadMorphFilterAudioProcessor& p)
 FilterPanel::~FilterPanel()
 {
     stopTimer();   // Timer は必ずデストラクタ最優先で停止（CLAUDE.md §3）
+}
+
+// ==========================================================================
+void FilterPanel::styleKnob(juce::Slider& s, const juce::String& name, QMUI::Unit unit,
+                            juce::Colour accent, const juce::String& paramId,
+                            std::unique_ptr<SliderAtt>& att, const juce::String& info)
+{
+    s.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    s.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    s.setRotaryParameters(juce::MathConstants<float>::pi * 1.2f,
+                          juce::MathConstants<float>::pi * 2.8f, true);
+    s.setName(name);
+    s.getProperties().set("qmUnit", (int)unit);
+    s.setColour(juce::Slider::thumbColourId, accent);
+    QMUI::setInfo(s, info);
+    addAndMakeVisible(s);
+    att = std::make_unique<SliderAtt>(processor.apvts, paramId, s);
+}
+
+// ==========================================================================
+// updateLfo5Indicator
+// LFO5 は Dry/Wet を Min〜Max の範囲で振る。dryWet パラメータのレンジも
+// 0〜100 なので、正規化は 100 で割るだけでよい。
+// ==========================================================================
+void FilterPanel::updateLfo5Indicator()
+{
+    auto& apvts = processor.apvts;
+    auto raw = [&apvts](const juce::String& id) { return apvts.getRawParameterValue(id)->load(); };
+
+    auto& props = dryWetSlider.getProperties();
+    const bool on = raw("lfo5en") > 0.5f;
+
+    if (!on)
+    {
+        if ((bool)props.getWithDefault("qmModOn", false))
+        {
+            props.set("qmModOn", false);
+            dryWetSlider.repaint();
+        }
+        return;
+    }
+
+    const float lo = juce::jlimit(0.0f, 1.0f, raw("lfo5min") / 100.0f);
+    const float hi = juce::jlimit(0.0f, 1.0f, raw("lfo5max") / 100.0f);
+    const float live = juce::jlimit(0.0f, 1.0f, processor.getLfo5Output());
+
+    const double prev = props.getWithDefault("qmModNorm", -1.0);
+    const bool wasOn = (bool)props.getWithDefault("qmModOn", false);
+
+    props.set("qmModOn", true);
+    props.set("qmModMin", (double)lo);
+    props.set("qmModMax", (double)hi);
+
+    if (!wasOn || std::abs((double)live - prev) > 0.0015)
+    {
+        props.set("qmModNorm", (double)live);
+        props.set("qmModValue", (double)(live * 100.0f));
+        dryWetSlider.repaint();
+        repaint(dryWetSlot.value);   // 下の数値表示も追随させる
+    }
+}
+
+// ==========================================================================
+// updateInfoText
+// マウス直下のコントロールから "qmInfo" を拾って Info 欄を更新する。
+// 各コントロール側の配線は不要で、setInfo() してあるものが自動的に対象になる。
+// ==========================================================================
+void FilterPanel::updateInfoText()
+{
+    const auto info = QMUI::findInfoUnderMouse();
+
+    if (info != currentInfo)
+    {
+        currentInfo = info;
+        repaint(infoArea);
+    }
 }
 
 // ==========================================================================
@@ -219,6 +328,30 @@ void FilterPanel::setupGroup(Group& g, int index, const juce::String& s)
              "LFO 2 axis that modulates Filter " + s + " cutoff  (Off / +X / +Y / -X / -Y)");
     setupSrc(g.lfoResBtn, "lfoResSrc" + s, QMColors::lfoColour(2),
              "LFO 3 axis that modulates Filter " + s + " resonance  (Off / +X / +Y / -X / -Y)");
+
+    // ---- Info（マウスオーバーで右下の Info 欄に出る説明）----
+    QMUI::setInfo(g.enableButton,
+        "FILTER " + s + " ON / OFF  -  disabled filters are skipped entirely, "
+        "so turning one off also saves CPU.");
+    QMUI::setInfo(g.soloButton,
+        "SOLO FILTER " + s + "  -  hear and display this filter on its own. "
+        "Solo overrides the on/off switch the way a mixer does, and only one filter "
+        "can be soloed at a time. It is not saved with the project.");
+    QMUI::setInfo(g.type,
+        "RESPONSE TYPE  -  low-pass, band-pass, high-pass or notch. "
+        "Models that only support some of these grey out the rest.");
+    QMUI::setInfo(g.slope,
+        "SLOPE  -  how many filter stages are cascaded. Steeper slopes cut harder "
+        "past the cutoff and cost more CPU. Some models repurpose this control.");
+    QMUI::setInfo(g.cutoff,
+        "CUTOFF  -  the corner frequency, 20 Hz to 20 kHz. On delay-based models "
+        "such as Comb and Waveguide this sets the pitch instead.");
+    QMUI::setInfo(g.lfoCutBtn,
+        "LFO2 to CUTOFF  -  pick which axis of LFO2 modulates this filter's cutoff. "
+        "Click to cycle Off, +X, +Y, -X, -Y. The slider then shows the modulation range.");
+    QMUI::setInfo(g.lfoResBtn,
+        "LFO3 to RESONANCE  -  pick which axis of LFO3 modulates this filter's "
+        "resonance. Click to cycle Off, +X, +Y, -X, -Y.");
 
     // ---- モデル変更時にコントロール構成を更新 ----
     g.model.onChange = [this, &g, s]()
@@ -377,6 +510,15 @@ void FilterPanel::refreshGroupControls(Group& g, const juce::String& suffix, int
     g.cutoff.setName(cutName);
     g.res.setName(resName);
 
+    // ---- Info: 選択中モデルの説明をコンボへ持たせる ----
+    // Info 欄はマウス直下のコントロールから "qmInfo" を拾うだけなので、
+    // ここで内容を差し替えておけば自動的に表示が切り替わる。
+    QMUI::setInfo(g.model, kModelDesc[juce::jlimit(0, 27, modelIdx)]);
+
+    // Res はモデルごとに役割が変わるので、名前に合わせて説明も差し替える
+    QMUI::setInfo(g.res,
+        juce::String(resName) + "  -  " + kResDesc[juce::jlimit(0, 27, modelIdx)]);
+
     g.cutoff.repaint();
     g.res.repaint();
 }
@@ -479,24 +621,6 @@ void FilterPanel::updateModulationIndicators()
 }
 
 // ==========================================================================
-// hoveredModelIndex
-// MODEL コンボ（内部 Label を含む）にマウスが乗っていれば、その選択中の
-// モデル番号を返す。マウスリスナーを張るより取りこぼしが少なく、
-// コンボを開いている最中の挙動も安定する。
-// ==========================================================================
-int FilterPanel::hoveredModelIndex() const
-{
-    for (int i = 0; i < 4; ++i)
-    {
-        const auto& combo = groups[(size_t)i].model;
-
-        if (combo.isMouseOver(true))
-            return juce::jlimit(0, 27, combo.getSelectedId() - 1);
-    }
-    return -1;
-}
-
-// ==========================================================================
 void FilterPanel::updateSoloButtons()
 {
     const int solo = processor.soloFilter.load();
@@ -514,19 +638,17 @@ void FilterPanel::timerCallback()
     updateLfoSrcButtons();
     updateSoloButtons();
     updateModulationIndicators();
-
-    // MODEL のマウスオーバー監視（説明帯の更新）
-    const int h = hoveredModelIndex();
-    if (h != hoveredModel)
-    {
-        hoveredModel = h;
-        repaint(descArea);
-    }
+    updateLfo5Indicator();
+    updateInfoText();
 }
 
 // ==========================================================================
 void FilterPanel::refreshTheme()
 {
+    masterGainSlider.setColour(juce::Slider::thumbColourId, QMColors::accentOut);
+    dryWetSlider.setColour(juce::Slider::thumbColourId, QMColors::accentMorph);
+    ceilingSlider.setColour(juce::Slider::thumbColourId, QMColors::rose);
+
     for (int i = 0; i < 4; ++i)
     {
         auto& g = groups[(size_t)i];
@@ -563,11 +685,15 @@ FilterPanel::RowLayout FilterPanel::layoutRow(juce::Rectangle<int> r) const
     L.lfoRes = r.removeFromRight(kSrcW);  r.removeFromRight(kGapS);
     L.lfoCut = r.removeFromRight(kSrcW);  r.removeFromRight(kGapM);
 
-    // 残り領域を 2 本のバーで分け、要望どおり 3/4 の長さに縮める。
-    const int fullBar = juce::jmax(60, (r.getWidth() - kGapS) / 2);
-    const int barW = juce::jmax(52, fullBar * 3 / 4);
+    // 残り領域を Cutoff / Res の 2 本で均等に分ける。
+    // 【V1.1.0】以前は 3/4 に縮めていたが、"Cut 20.0k" のように
+    // 名前と値の両方をバー内に描くため幅が足りず、文字が重なっていた。
+    // MORPH セクションを CONFIG タブへ移して行に余裕ができたので、
+    // 余りを丸ごと 2 等分して十分な余白を確保する。
+    const int barGap = kGapM;
+    const int barW = juce::jmax(120, (r.getWidth() - barGap) / 2);
 
-    L.cutoff = r.removeFromLeft(barW);    r.removeFromLeft(kGapS);
+    L.cutoff = r.removeFromLeft(barW);    r.removeFromLeft(barGap);
     L.res = r.removeFromLeft(barW);
 
     return L;
@@ -602,30 +728,38 @@ void FilterPanel::resized()
         g.lfoResBtn.setBounds(L.lfoRes.withSizeKeepingCentre(kSrcW, QMUI::kCtrlH));
     }
 
-    area.removeFromTop(10);
-    morphHeaderArea = area.removeFromTop(QMUI::kHeadH);
-    area.removeFromTop(4);
-    morphRowArea = area.removeFromTop(QMUI::kCtrlH);
+    // ======================================================================
+    // OUTPUT セクション（旧 OUT タブから移設）
+    //   左にノブ 3 つ、右の余白に Info 欄を置く。
+    // ======================================================================
+    area.removeFromTop(12);
+    outHeaderArea = area.removeFromTop(QMUI::kHeadH);
+    area.removeFromTop(8);
 
+    auto outRow = area.removeFromTop(juce::jmax(0,
+        juce::jmin(kLabelH + kKnobD + kValueH + 6, area.getHeight())));
+
+    auto knobArea = outRow.removeFromLeft(kKnobW * 3 + kKnobGap * 2);
+
+    auto place = [&](juce::Slider& s, KnobSlot& slot)
     {
-        auto r = morphRowArea;
-        r.removeFromLeft(58);                                 // "BLEND" ラベル分
-        morphBlendCombo.setBounds(r.removeFromLeft(130));
-        r.removeFromLeft(30);
-        r.removeFromLeft(84);                                 // "CUTOFF ALGO" ラベル分
-        cutoffAlgoCombo.setBounds(r.removeFromLeft(120));
+        auto col = knobArea.removeFromLeft(kKnobW);
+        slot.label = col.removeFromTop(kLabelH);
+        slot.knob = col.removeFromTop(kKnobD);
+        col.removeFromTop(4);
+        slot.value = col.removeFromTop(juce::jmax(0, juce::jmin(kValueH, col.getHeight())));
 
-        // XY Depth バー（名前と値はバー内に描画されるのでラベル不要）
-        r.removeFromLeft(20);
-        const int barW = juce::jmin(160, r.getWidth());
-        if (barW > 40)
-            xyDepthSlider.setBounds(r.removeFromLeft(barW)
-                                        .withSizeKeepingCentre(barW, QMUI::kBarH));
-    }
+        s.setBounds(slot.knob.withSizeKeepingCentre(kKnobD, kKnobD));
+        knobArea.removeFromLeft(kKnobGap);
+    };
 
-    // ---- モデル説明の帯（MORPH の下の余白を使う）----
-    area.removeFromTop(10);
-    descArea = area.removeFromTop(juce::jmin(QMUI::kRowH, juce::jmax(0, area.getHeight())));
+    place(masterGainSlider, gainSlot);
+    place(dryWetSlider, dryWetSlot);
+    place(ceilingSlider, ceilingSlot);
+
+    // ---- Info 欄（ノブの右の余白すべて）----
+    outRow.removeFromLeft(18);
+    infoArea = outRow;
 }
 
 // ==========================================================================
@@ -664,45 +798,68 @@ void FilterPanel::paint(juce::Graphics& g)
                                2.5f, (float)row.getHeight() - 10.0f, 1.25f);
     }
 
-    // ---- MORPH ----
-    QMUI::drawSectionHeader(g, "MORPH", morphHeaderArea, QMColors::accentMorph);
+    // ---- OUTPUT ----
+    QMUI::drawSectionHeader(g, "OUTPUT", outHeaderArea, QMColors::accentOut);
 
-    g.setColour(QMColors::textDim);
-    g.setFont(juce::Font(juce::FontOptions(10.5f, juce::Font::bold)));
-    g.drawText("BLEND", morphRowArea.getX(), morphRowArea.getY(), 54, morphRowArea.getHeight(),
-               juce::Justification::centredLeft, false);
-    g.drawText("CUTOFF ALGO", morphRowArea.getX() + 58 + 130 + 30, morphRowArea.getY(), 80,
-               morphRowArea.getHeight(), juce::Justification::centredLeft, false);
+    paintKnobText(g, gainSlot, masterGainSlider, QMColors::accentOut);
+    paintKnobText(g, dryWetSlot, dryWetSlider, QMColors::accentMorph);
+    paintKnobText(g, ceilingSlot, ceilingSlider, QMColors::rose);
 
-    // ---- モデル説明 ----
-    // MODEL コンボにマウスを乗せると、そのモデルの解説をここに出す。
-    // 乗っていないときは操作方法のヒントを薄く出しておく。
-    if (!descArea.isEmpty())
+    // ---- INFO ----
+    // マウス直下のコントロールの説明を 3 行で表示する。
+    // 何にも乗っていないときは使い方のヒントを薄く出しておく。
+    if (!infoArea.isEmpty())
     {
-        const auto area = descArea.toFloat();
+        const auto box = infoArea.toFloat();
 
-        if (hoveredModel >= 0 && hoveredModel < 28)
-        {
-            // 説明中のフィルター行の色で左端にラインを引き、どの行の
-            // モデルを見ているのかを分かるようにする
-            g.setColour(QMColors::panel.withAlpha(0.55f));
-            g.fillRoundedRectangle(area, 5.0f);
+        g.setColour(QMColors::panel.withAlpha(0.50f));
+        g.fillRoundedRectangle(box, 6.0f);
+        g.setColour(QMColors::panelLine.withAlpha(0.30f));
+        g.drawRoundedRectangle(box.reduced(0.5f), 6.0f, 1.0f);
 
-            g.setColour(QMColors::accentFilter.withAlpha(0.85f));
-            g.fillRoundedRectangle(area.getX() + 1.0f, area.getY() + 5.0f,
-                                   2.5f, area.getHeight() - 10.0f, 1.25f);
+        const bool hasInfo = currentInfo.isNotEmpty();
 
-            g.setColour(QMColors::text.withAlpha(0.90f));
-            g.setFont(juce::Font(juce::FontOptions(11.5f)));
-            g.drawText(kModelDesc[hoveredModel],
-                       descArea.reduced(12, 0), juce::Justification::centredLeft, true);
-        }
-        else
-        {
-            g.setColour(QMColors::textDim.withAlpha(0.55f));
-            g.setFont(juce::Font(juce::FontOptions(11.0f)));
-            g.drawText("Hover a MODEL selector to see what that filter does.",
-                       descArea.reduced(12, 0), juce::Justification::centredLeft, false);
-        }
+        g.setColour((hasInfo ? QMColors::accentFilter : QMColors::textDim).withAlpha(0.85f));
+        g.fillRoundedRectangle(box.getX() + 1.5f, box.getY() + 6.0f,
+                               2.5f, box.getHeight() - 12.0f, 1.25f);
+
+        auto textArea = infoArea.reduced(14, 8);
+
+        g.setColour(QMColors::textDim.withAlpha(0.75f));
+        g.setFont(juce::Font(juce::FontOptions(9.5f, juce::Font::bold)));
+        g.drawText("INFO", textArea.removeFromTop(11),
+                   juce::Justification::topLeft, false);
+
+        textArea.removeFromTop(2);
+
+        // 3 行分。読みやすいよう従来より大きめのフォントにする。
+        g.setColour(hasInfo ? QMColors::text.withAlpha(0.92f)
+                            : QMColors::textDim.withAlpha(0.60f));
+        g.setFont(juce::Font(juce::FontOptions(13.0f)));
+        g.drawFittedText(hasInfo
+                             ? currentInfo
+                             : "Hover any control to see what it does.",
+                         textArea, juce::Justification::topLeft, 3, 1.0f);
     }
+}
+
+// ==========================================================================
+void FilterPanel::paintKnobText(juce::Graphics& g, const KnobSlot& slot,
+                                const juce::Slider& s, juce::Colour accent) const
+{
+    g.setColour(QMColors::textDim);
+    g.setFont(juce::Font(juce::FontOptions(10.0f, juce::Font::bold)));
+    g.drawText(s.getName(), slot.label, juce::Justification::centred, false);
+
+    // 変調中は実際に効いている値を出す（LookAndFeel 側と同じ考え方）
+    const auto& props = s.getProperties();
+    const bool modOn = (bool)props.getWithDefault("qmModOn", false);
+    const double shown = modOn
+        ? (double)props.getWithDefault("qmModValue", s.getValue())
+        : s.getValue();
+
+    g.setColour(modOn ? accent.brighter(0.4f) : QMColors::text);
+    g.setFont(QMFonts::mono(12.0f, true));
+    g.drawText(QMUI::formatValue(shown, QMUI::unitOf(s)),
+               slot.value, juce::Justification::centred, false);
 }

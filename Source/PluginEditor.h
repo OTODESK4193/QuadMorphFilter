@@ -4,7 +4,7 @@
 // ・論理サイズ 1000 x 700 の ContentComponent を
 //   juce::AffineTransform でスケーリングしてリサイズに対応する
 //   （アスペクト比固定なのでレイアウト崩れが起きない）
-// ・FILTER / MOD / OUT の 3 タブ構成
+// ・FILTER / MOD / CONFIG の 3 タブ構成
 // ・上部はフィルターカーブ（大）と XY パッドを常時表示
 // ==========================================
 #pragma once
@@ -19,7 +19,7 @@
 #include "UI/XYPadComponent.h"
 #include "UI/FilterPanel.h"
 #include "UI/ModPanel.h"
-#include "UI/OutPanel.h"
+#include "UI/ConfigPanel.h"
 
 class QuadMorphFilterAudioProcessorEditor : public juce::AudioProcessorEditor
 {
@@ -48,7 +48,7 @@ private:
         void resized() override;
 
     private:
-        enum Tab { TabFilter = 0, TabMod, TabOut };
+        enum Tab { TabFilter = 0, TabMod, TabConfig };
         static constexpr int kNumTabs = 3;
 
         void setActiveTab(int tab);
@@ -68,10 +68,10 @@ private:
 
         FilterPanel filterPanel;
         ModPanel    modPanel;
-        OutPanel    outPanel;
+        ConfigPanel configPanel;
 
-        juce::ComboBox themeCombo;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> themeAtt;
+        // themeCombo は CONFIG タブへ移設した（V1.1.0）。
+        // ここではテーマ変更の取りこぼしを拾うための現在値だけを持つ。
         int lastThemeIndex = -1;
 
         juce::Rectangle<int> headerArea, tabStripArea;

@@ -26,6 +26,10 @@ namespace
     };
 
     const char* const kLfoTitles[3] = { "1  MORPH", "2  CUTOFF", "3  RESO" };
+
+    // kWaveNames 内の "Recording" の項目 ID（addItemList は 1 始まり）。
+    // LFO4 / LFO5 では選択不可にする。
+    constexpr int kRecordingItemId = 7;
 }
 
 // ==========================================================================
@@ -62,6 +66,11 @@ ModPanel::ModPanel(QuadMorphFilterAudioProcessor& p)
 
         styleToggle(lfo4.enableButton, "4  RATE MOD", accent, "lfo4en", lfo4.eAtt);
         styleWave(lfo4.wave, "lfo4wave", lfo4.wAtt);
+
+        // 【V1.1.0】LFO4 に Recording は不要。
+        // 項目を削除するとコンボの添字が APVTS の選択肢とずれてしまうため、
+        // 並びはそのままに選択だけを無効化する（保存済みの状態も壊れない）。
+        lfo4.wave.setItemEnabled(kRecordingItemId, false);
         styleToggle(lfo4.stepMode, "Step", accent, "lfo4step", lfo4.sAtt);
         styleToggle(lfo4.syncToggle, "Sync", accent, "lfo4sync", lfo4.syAtt);
         styleRateSync(lfo4.rateSync, "lfo4rateSync", lfo4.rsAtt);
@@ -85,6 +94,9 @@ ModPanel::ModPanel(QuadMorphFilterAudioProcessor& p)
 
         styleToggle(lfo5.enableButton, "5  DRY/WET", accent, "lfo5en", lfo5.eAtt);
         styleWave(lfo5.wave, "lfo5wave", lfo5.wAtt);
+
+        // LFO5 も Recording は不要（XY 軌跡を持たない 1 次元の LFO のため）
+        lfo5.wave.setItemEnabled(kRecordingItemId, false);
         styleToggle(lfo5.stepMode, "Step", accent, "lfo5step", lfo5.sAtt);
         styleToggle(lfo5.syncToggle, "Sync", accent, "lfo5sync", lfo5.syAtt);
         styleRateSync(lfo5.rateSync, "lfo5rateSync", lfo5.rsAtt);
@@ -126,6 +138,32 @@ void ModPanel::styleBar(juce::Slider& s, const juce::String& name, QMUI::Unit un
     s.setName(name);
     s.getProperties().set("qmUnit", (int)unit);
     s.setColour(juce::Slider::thumbColourId, accent);
+
+    // パラメータ ID から説明を引く。ID 末尾で判別できるので
+    // 呼び出し側に説明文を書かせずに済む。
+    if (paramId.endsWith("rateFree"))
+        QMUI::setInfo(s, "RATE (FREE)  -  LFO speed in Hz, independent of the host tempo. "
+                         "When LFO4 modulates this LFO the bar shows the range it sweeps "
+                         "and the bright tip follows the live rate.");
+    else if (paramId.endsWith("min"))
+        QMUI::setInfo(s, "MIN  -  lower end of the LFO output range. Setting Min above Max "
+                         "runs the LFO backwards, which is a quick way to invert it.");
+    else if (paramId.endsWith("max"))
+        QMUI::setInfo(s, "MAX  -  upper end of the LFO output range.");
+    else if (paramId.endsWith("phase"))
+        QMUI::setInfo(s, "PHASE  -  start offset in degrees. Use it to run two LFOs of the "
+                         "same shape out of step with each other.");
+    else if (paramId.endsWith("fade"))
+        QMUI::setInfo(s, "FADE IN  -  time for the LFO to reach full depth after it is "
+                         "enabled. Leave at 0 ms for an immediate start.");
+    else if (paramId.endsWith("spread"))
+        QMUI::setInfo(s, "FILTER SPREAD  -  phase offset applied per filter, so A, B, C and D "
+                         "rise in sequence rather than together. Works on the periodic "
+                         "waveforms only.");
+    else if (paramId.endsWith("depth"))
+        QMUI::setInfo(s, "DEPTH  -  modulation amount in octaves. At 4x the target LFO can "
+                         "run up to sixteen times faster or slower.");
+
     addAndMakeVisible(s);
     att = std::make_unique<SliderAtt>(processor.apvts, paramId, s);
 }
@@ -137,6 +175,38 @@ void ModPanel::styleToggle(juce::TextButton& b, const juce::String& text, juce::
     b.setClickingTogglesState(true);
     b.setColour(juce::TextButton::textColourOnId, accent);
     b.setColour(juce::TextButton::textColourOffId, QMColors::textDim);
+
+    if (paramId.endsWith("step"))
+        QMUI::setInfo(b, "STEP  -  quantises the LFO output into steps instead of a smooth "
+                         "sweep, for sample-and-hold style movement.");
+    else if (paramId.endsWith("sync"))
+        QMUI::setInfo(b, "SYNC  -  locks the LFO to the host tempo and swaps the Rate control "
+                         "for a note-division selector.");
+    else if (paramId.startsWith("lfo4assign"))
+        QMUI::setInfo(b, "ASSIGN  -  send LFO4's rate modulation to this LFO. Several targets "
+                         "can be active at once.");
+    else if (paramId == "lfo1en")
+        QMUI::setInfo(b, "LFO1 MORPH  -  moves the XY morph position automatically. "
+                         "The pad dot follows it and the filter mix changes with it.");
+    else if (paramId == "lfo2en")
+        QMUI::setInfo(b, "LFO2 CUTOFF  -  modulation source for filter cutoff. Assign it per "
+                         "filter with the LFO2 buttons on the FILTER tab.");
+    else if (paramId == "lfo3en")
+        QMUI::setInfo(b, "LFO3 RESO  -  modulation source for filter resonance. Assign it per "
+                         "filter with the LFO3 buttons on the FILTER tab.");
+    else if (paramId == "lfo4en")
+        QMUI::setInfo(b, "LFO4 RATE MOD  -  modulates the speed of LFO1, LFO2 and LFO3. "
+                         "Pick the targets with the buttons on the right.");
+    else if (paramId == "lfo5en")
+        QMUI::setInfo(b, "LFO5 DRY/WET  -  sweeps the Dry/Wet balance between Min and Max. "
+                         "The Dry/Wet knob on the FILTER tab shows the range as a ring.");
+    else if (paramId == "envFollowen")
+        QMUI::setInfo(b, "ENVELOPE FOLLOWER  -  the input level drives Filter A's cutoff, so "
+                         "the filter opens as the signal gets louder.");
+    else if (paramId == "envFollowinvert")
+        QMUI::setInfo(b, "INVERT  -  flips the envelope so a louder input closes the filter "
+                         "instead of opening it.");
+
     addAndMakeVisible(b);
     att = std::make_unique<ButtonAtt>(processor.apvts, paramId, b);
 }
@@ -145,6 +215,11 @@ void ModPanel::styleWave(juce::ComboBox& c, const juce::String& paramId,
                          std::unique_ptr<ComboAtt>& att)
 {
     c.addItemList(kWaveNames, 1);
+    QMUI::setInfo(c,
+        "WAVEFORM  -  the shape this LFO traces. The first few are the classic "
+        "shapes; Random 1 gives each of the four filters its own independent value, "
+        "Recording plays back a path you draw on the XY pad, and the rest are "
+        "two-dimensional curves that move X and Y together.");
     addAndMakeVisible(c);
     att = std::make_unique<ComboAtt>(processor.apvts, paramId, c);
 }
@@ -154,6 +229,10 @@ void ModPanel::styleRateSync(juce::ComboBox& c, const juce::String& paramId,
 {
     c.addItemList(kSyncRates, 1);
     c.setJustificationType(juce::Justification::centred);
+    QMUI::setInfo(c,
+        "RATE (SYNC)  -  the note division this LFO runs at, locked to the host "
+        "tempo. D is dotted and T is a triplet. When LFO4 modulates this LFO the "
+        "reading shows the division actually being played, plus its rate in Hz.");
     addAndMakeVisible(c);
     att = std::make_unique<ComboAtt>(processor.apvts, paramId, c);
 }
@@ -218,12 +297,16 @@ void ModPanel::updateRateModIndicators()
         const float rateHz = processor.getEffectiveLfoRate(i);
         const bool synced = isSynced(id + "sync");
 
-        // ---- Sync モード: コンボ横の数値表示 ----
+        // ---- Sync モード: コンボの表示を動的に差し替え + 実効レート表示 ----
         const bool showText = modOn && synced;
+        const int  effIdx = showText ? processor.getEffectiveSyncIndex(i) : -1;
+
         if (showText != rateModShown[i]
+            || effIdx != effectiveSyncIdx[i]
             || (showText && std::abs(rateHz - effectiveRateHz[i]) > 0.005f))
         {
             rateModShown[i] = showText;
+            effectiveSyncIdx[i] = effIdx;
             effectiveRateHz[i] = rateHz;
             repaint(grp.rateSync.getBounds().expanded(90, 2));
         }
@@ -258,6 +341,51 @@ void ModPanel::updateRateModIndicators()
             props.set("qmModValue", (double)shown);
             sl.repaint();
         }
+    }
+}
+
+// ==========================================================================
+// paintOverChildren
+// LFO4 でレート変調が掛かっている LFO の Sync コンボに、
+// 「実際に鳴っている刻み」を上書き表示する。
+//
+// コンボの選択そのものを書き換えないのは意図的で、
+// パラメータを動かすとオートメーションと保存内容が壊れるため。
+// ここでは子の描画が終わったあとに文字を重ねるだけなので、
+// ドロップダウンを開けば本来の選択がそのまま出る。
+// ==========================================================================
+void ModPanel::paintOverChildren(juce::Graphics& g)
+{
+    for (int i = 0; i < 3; ++i)
+    {
+        if (!rateModShown[i]) continue;
+
+        const auto cb = lfos[(size_t)i].rateSync.getBounds();
+        if (cb.isEmpty() || !lfos[(size_t)i].rateSync.isVisible()) continue;
+
+        const auto accent = QMColors::lfoColour(3);   // LFO4 の色
+
+        // ---- 刻み表示の差し替え ----
+        const int effIdx = effectiveSyncIdx[i];
+        if (effIdx >= 0 && effIdx < kSyncRates.size())
+        {
+            // 元の文字を隠してから描き直す（背景はコンボと同じ色）
+            auto inner = cb.reduced(2, 2).withTrimmedRight(18);
+            g.setColour(QMColors::track);
+            g.fillRoundedRectangle(inner.toFloat(), 3.0f);
+
+            g.setColour(accent);
+            g.setFont(juce::Font(juce::FontOptions(11.5f, juce::Font::bold)));
+            g.drawText(kSyncRates[effIdx], inner.reduced(6, 0),
+                       juce::Justification::centredLeft, false);
+        }
+
+        // ---- 実効レート [Hz] ----
+        g.setColour(accent.withAlpha(0.95f));
+        g.setFont(QMFonts::mono(10.0f, true));
+        g.drawText(juce::String(effectiveRateHz[i], 2) + " Hz",
+                   cb.getRight() + 4, cb.getY(), 62, cb.getHeight(),
+                   juce::Justification::centredLeft, false);
     }
 }
 
@@ -459,22 +587,6 @@ void ModPanel::paint(juce::Graphics& g)
         QMUI::drawColumnLabel(g, "SPREAD", L.slot[5]);
     }
 
-    // ---- LFO4 レート変調の実効レート表示（Sync モード時）----
-    // 音符の刻みは離散値でコンボの選択を動かせないため、
-    // 実際に走っているレートを Hz で隣に出して「動いている」ことを見せる。
-    for (int i = 0; i < 3; ++i)
-    {
-        if (!rateModShown[i]) continue;
-
-        const auto cb = lfos[(size_t)i].rateSync.getBounds();
-        if (cb.isEmpty()) continue;
-
-        g.setColour(QMColors::lfoColour(3).withAlpha(0.95f));
-        g.setFont(QMFonts::mono(10.0f, true));
-        g.drawText(juce::String(effectiveRateHz[i], 2) + " Hz",
-                   cb.getRight() + 4, cb.getY(), 62, cb.getHeight(),
-                   juce::Justification::centredLeft, false);
-    }
 
     // ---- 行の背景 + 左端アクセント ----
     auto paintRow = [&g](juce::Rectangle<int> row, juce::Colour accent, bool on)

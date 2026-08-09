@@ -3,6 +3,7 @@
 // ==========================================
 #include "LfoEngine.h"
 #include <cmath>
+#include <limits>
 
 LfoEngine::LfoEngine()
 {
@@ -147,6 +148,7 @@ void LfoEngine::processSingleLfo(int i,
         //   更新の止まった mod4[i]（フリーズした古い値）が変調に使われていた。
         spreadActive[i] = false;
         effectiveRateHz[i] = 0.0f;
+        effectiveSyncIdx[i] = -1;
         return;
     }
 
@@ -170,6 +172,29 @@ void LfoEngine::processSingleLfo(int i,
 
     // UI 表示用に最終レートを控える（Sync/Free と LFO4 変調をすべて含む）
     effectiveRateHz[i] = rate;
+
+    // Sync モードでレート変調が掛かっているときだけ、実際の刻みに最も近い
+    // 音符インデックスを求める。UI はこれを使ってコンボの「表示だけ」を
+    // 動的に差し替える（パラメータを書き換えるとオートメーションと
+    // 保存内容が壊れるため、選択そのものには触れない）。
+    // 探索は 21 候補だけで、変調中のブロックにしか走らない。
+    if (sync && lfo4RateModulationActive[i] && rateModulation != 1.0f && rate > 1.0e-6f)
+    {
+        const float targetPeriod = 1.0f / rate;
+        int   best = (int)prm.rateSync->load();
+        float bestErr = std::numeric_limits<float>::max();
+
+        for (int k = 0; k < 21; ++k)
+        {
+            const float err = std::abs(getSyncTime(k, bpm) - targetPeriod);
+            if (err < bestErr) { bestErr = err; best = k; }
+        }
+        effectiveSyncIdx[i] = best;
+    }
+    else
+    {
+        effectiveSyncIdx[i] = -1;
+    }
 
     float actualDt = rate * dt;
 

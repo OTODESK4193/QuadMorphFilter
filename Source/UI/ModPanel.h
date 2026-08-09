@@ -102,6 +102,14 @@ private:
     /** Sync モードで表示する実効レート [Hz]（0 = 表示しない） */
     float effectiveRateHz[3] = { 0.0f, 0.0f, 0.0f };
     bool  rateModShown[3] = { false, false, false };
+
+    /** Sync コンボに重ねて表示する「実際に鳴っている刻み」（-1 = 重ねない）。
+        パラメータ本体は動かさず、子の描画の上に paintOverChildren で
+        文字だけを上書きする。 */
+    int   effectiveSyncIdx[3] = { -1, -1, -1 };
+
+    /** 子コンポーネントの上に描く（Sync コンボの動的表示に使う） */
+    void paintOverChildren(juce::Graphics& g) override;
     bool isSynced(const juce::String& paramId) const;
 
     /** 行の共通カラム（Enable / Wave / Step / Sync / 可変 6 スロット） */

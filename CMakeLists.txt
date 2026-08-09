@@ -107,8 +107,8 @@ target_sources(QuadMorphFilter
         Source/UI/FilterPanel.h
         Source/UI/ModPanel.cpp
         Source/UI/ModPanel.h
-        Source/UI/OutPanel.cpp
-        Source/UI/OutPanel.h
+        Source/UI/ConfigPanel.cpp
+        Source/UI/ConfigPanel.h
  "Source/DSP/TptFilterState.h" "Source/DSP/TptFilter/SVF/TptFilter_SVF.h" "Source/DSP/TptFilter/SVF/TptFilter_SVF.cpp" "Source/DSP/TptFilter/Ladder/TptFilter_Ladder.h" "Source/DSP/TptFilter/Ladder/TptFilter_Ladder.cpp" "Source/DSP/TptFilter/AnalogEmulation/TptFilter_AnalogEmulation.h" "Source/DSP/TptFilter/AnalogEmulation/TptFilter_AnalogEmulation.cpp" "Source/DSP/TptFilter/DigitalPrecision/TptFilter_DigitalPrecision.h" "Source/DSP/TptFilter/DigitalPrecision/TptFilter_DigitalPrecision.cpp" "Source/DSP/TptFilter/Spectral/TptFilter_Spectral.h" "Source/DSP/TptFilter/Spectral/TptFilter_Spectral.cpp" "Source/DSP/TptFilter/Experimental/TptFilter_Experimental.h" "Source/DSP/TptFilter/Experimental/TptFilter_Experimental.cpp" "Source/DSP/ModelCapabilities.h")
 
 # 5-b. バージョン文字列を GUI から参照できるようにする

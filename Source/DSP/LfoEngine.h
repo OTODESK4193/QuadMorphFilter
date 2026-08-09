@@ -116,6 +116,15 @@ public:
         return idx >= 0 && idx < 3 && lfo4RateModulationActive[idx];
     }
 
+    /** Sync モードで「実際に鳴っている刻み」に最も近い音符インデックス。
+        LFO4 のレート変調で刻みが変わって聞こえるため、UI 側はこれを使って
+        コンボの表示だけを動的に差し替える（パラメータ本体は動かさない）。
+        変調が掛かっていないときは -1。 */
+    int getEffectiveSyncIndex(int idx) const
+    {
+        return (idx >= 0 && idx < 3) ? effectiveSyncIdx[idx] : -1;
+    }
+
     /** 実際に位相を進めるのに使われているレート [Hz]。
         Sync / Free の別と LFO4 変調をすべて反映した最終値なので、
         UI はこれを表示するだけで DSP と必ず一致する。 */
@@ -192,6 +201,7 @@ private:
 
     // 表示用: 各 LFO が実際に使っているレート [Hz]（LFO4 変調適用後）
     float                effectiveRateHz[3] = { 0.0f, 0.0f, 0.0f };
+    int                  effectiveSyncIdx[3] = { -1, -1, -1 };
 
     // ===== LFO4: Rate Modulation 専用 =====
     // LFO1と同じLfoStateを使用、Recording不要

@@ -63,6 +63,9 @@ public:
     /** その LFO が実際に走っているレート [Hz]（Sync / Free / LFO4 変調込み）。 */
     float getEffectiveLfoRate(int index) const { return lfoEngine.getEffectiveRate(index); }
 
+    /** Sync モードで実際に鳴っている刻みに最も近い音符インデックス（-1 = 変調なし）。 */
+    int getEffectiveSyncIndex(int index) const { return lfoEngine.getEffectiveSyncIndex(index); }
+
     // ===== Recording データセッター =====
     void setLfoRecordingData(int index, const std::array<juce::Point<float>, 2048>& buffer, int len)
     {

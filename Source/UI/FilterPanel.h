@@ -1,9 +1,13 @@
 // ==========================================
-// UI/FilterPanel.h   （V1.1.0 新規）
+// UI/FilterPanel.h   （V1.1.0 / レイアウト再構成）
 //
-// FILTER タブ。フィルター A/B/C/D の 4 行と、
-// 各行に対する LFO→Cut / LFO→Res の割り当て、
-// および MORPH（Blend / Cutoff Algo）をまとめる。
+// FILTER タブ。
+//   ・FILTER MATRIX : A/B/C/D の 4 行（On / Solo / Model / Type / Slope /
+//                     Cutoff / Res / LFO2・LFO3 割り当て）
+//   ・OUTPUT        : Gain / Dry-Wet / Ceiling のノブ 3 つ（旧 OUT タブから移設）
+//   ・INFO          : ノブの右の余白。マウス直下のコントロールの説明を 3 行で出す
+//
+// MORPH セクションは CONFIG タブへ移した。
 // ==========================================
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -30,18 +34,22 @@ public:
     void refreshTheme();
 
 private:
+    using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
+    using ComboAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
+    using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
+
     // ------------------------------------------------------------------
     struct Group
     {
         juce::TextButton enableButton;
-        juce::TextButton soloButton;      // 【V1.1.0 追加】排他 Solo
+        juce::TextButton soloButton;      // 排他 Solo
         juce::ComboBox   model, type, slope;
         juce::Slider     cutoff, res;
         juce::TextButton lfoCutBtn, lfoResBtn;
 
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>   eAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>   cAtt, rAtt;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mAtt, tAtt, slAtt;
+        std::unique_ptr<ButtonAtt> eAtt;
+        std::unique_ptr<SliderAtt> cAtt, rAtt;
+        std::unique_ptr<ComboAtt>  mAtt, tAtt, slAtt;
     };
 
     void setupGroup(Group& g, int index, const juce::String& suffix);
@@ -52,11 +60,29 @@ private:
     void updateSoloButtons();
 
     /** LFO 変調後の実効 Cutoff / Res を求め、各スライダーの
-        "qmModOn" / "qmModNorm" プロパティに書き込む。
-        描画は QuadMorphLookAndFeel::drawLinearSlider が行う。 */
+        "qmModOn" / "qmModNorm" プロパティに書き込む。 */
     void updateModulationIndicators();
 
+    /** LFO5 の変調レンジと現在位置を Dry/Wet ノブへ書き込む */
+    void updateLfo5Indicator();
+
+    /** マウス直下のコントロールの説明を拾って Info 欄を更新する */
+    void updateInfoText();
+
     void timerCallback() override;
+
+    /** 出力ノブ 1 つ分（名前・ノブ・数値）の矩形 */
+    struct KnobSlot
+    {
+        juce::Rectangle<int> label, knob, value;
+    };
+
+    void styleKnob(juce::Slider& s, const juce::String& name, QMUI::Unit unit,
+                   juce::Colour accent, const juce::String& paramId,
+                   std::unique_ptr<SliderAtt>& att, const juce::String& info);
+
+    void paintKnobText(juce::Graphics& g, const KnobSlot& slot,
+                       const juce::Slider& s, juce::Colour accent) const;
 
     /** 1 行分の各カラム矩形を返す（paint と resized で共有する） */
     struct RowLayout
@@ -69,29 +95,17 @@ private:
 
     std::array<Group, 4> groups;
 
-    juce::ComboBox morphBlendCombo, cutoffAlgoCombo;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> morphBlendAtt, cutoffAlgoAtt;
+    // ---- 出力段（旧 OUT タブから移設）----
+    juce::Slider masterGainSlider, dryWetSlider, ceilingSlider;
+    std::unique_ptr<SliderAtt> mgAtt, dwAtt, clAtt;
+    KnobSlot gainSlot, dryWetSlot, ceilingSlot;
 
-    // ===== 【V1.1.0 追加】XY Depth =====
-    // Cutoff Algo で求めた Cutoff/Res を各フィルターへどれだけ適用するか。
-    // 0% で従来どおり（Cutoff/Res ノブの値をそのまま使用）。
-    // 宣言順に注意: アタッチメントはスライダーより後に宣言し、
-    // 破棄が先に走るようにする（CLAUDE.md §3）。
-    juce::Slider xyDepthSlider;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> xyDepthAtt;
-
-    /** MODEL コンボのどれかにマウスが乗っていれば、その選択中モデル番号
-        （0..27）を返す。乗っていなければ -1。タイマーから毎フレーム確認する。 */
-    int hoveredModelIndex() const;
-
-    /** MODEL にマウスオーバー中のモデル番号（-1 = なし）。paint が参照する。 */
-    int hoveredModel = -1;
+    // ---- Info 欄 ----
+    juce::String currentInfo;
+    juce::Rectangle<int> infoArea;
 
     // 見出しの描画位置（resized で確定、paint で使用）
-    juce::Rectangle<int> headerArea, columnArea, morphHeaderArea, morphRowArea;
-
-    /** MORPH 行の下、モデル説明を表示する帯 */
-    juce::Rectangle<int> descArea;
+    juce::Rectangle<int> headerArea, columnArea, outHeaderArea;
     std::array<juce::Rectangle<int>, 4> rowAreas;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(FilterPanel)

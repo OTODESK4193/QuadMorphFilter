@@ -94,6 +94,50 @@ namespace QMUI
     }
 
     // ================================================================
+    //  ホバー説明（Info）
+    //
+    //  【V1.1.0 追加】
+    //  コントロールに "qmInfo" プロパティで説明文を持たせておくと、
+    //  FILTER タブ右下の Info 欄がマウス直下のコントロールを探して
+    //  自動的に表示する。個々のコントロール側に配線は要らない。
+    //
+    //  表示文字列は英字のみにすること。juce::String(const char*) は
+    //  ASCII 前提で、非 ASCII を渡すと assert する。
+    // ================================================================
+
+    /** コントロールに説明文を持たせる。
+        あわせてツールチップにも同じ文面を入れるので、Info 欄を持たないタブ
+        （MOD など）でもマウスを置けば説明が読める。 */
+    inline void setInfo(juce::Component& c, const juce::String& text)
+    {
+        c.getProperties().set("qmInfo", text);
+
+        if (auto* tt = dynamic_cast<juce::SettableTooltipClient*>(&c))
+            tt->setTooltip(text);
+    }
+
+    /** マウス直下のコンポーネントから親方向へ "qmInfo" を探す。
+        ComboBox の内部 Label のように、実体が子である場合も拾えるよう
+        親をたどる。見つからなければ空文字。 */
+    inline juce::String findInfoUnderMouse()
+    {
+        auto* c = juce::Desktop::getInstance().getMainMouseSource().getComponentUnderMouse();
+
+        for (int guard = 0; c != nullptr && guard < 12; ++guard)
+        {
+            const auto v = c->getProperties().getWithDefault("qmInfo", juce::var());
+            if (v.isString())
+            {
+                const auto s = v.toString();
+                if (s.isNotEmpty())
+                    return s;
+            }
+            c = c->getParentComponent();
+        }
+        return {};
+    }
+
+    // ================================================================
     // 描画ヘルパー
     // ================================================================
 
