@@ -209,6 +209,103 @@ void QuadMorphLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, int y,
 // ==========================================================================
 // ComboBox
 // ==========================================================================
+// ==========================================================================
+// drawRotarySlider
+// アーク式ノブ。意匠は LIFT-X の ArcDialLookAndFeel に合わせてある。
+//   1) 彫り込みトラック
+//   2) 変調レンジの帯（qmModMin〜qmModMax）
+//   3) 値アーク（左右グラデーション）＋ソフトグロー
+//   4) ポインタ
+//   5) 変調後の現在位置ドット（qmModNorm）
+// ==========================================================================
+void QuadMorphLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y,
+                                            int width, int height,
+                                            float sliderPos,
+                                            float rotaryStartAngle, float rotaryEndAngle,
+                                            juce::Slider& slider)
+{
+    const float radius = (float)juce::jmin(width / 2, height / 2) - 4.0f;
+    const float cx = (float)x + (float)width * 0.5f;
+    const float cy = (float)y + (float)height * 0.5f;
+    const float rx = cx - radius;
+    const float ry = cy - radius;
+    const float rw = radius * 2.0f;
+    const float span = rotaryEndAngle - rotaryStartAngle;
+    const float angle = rotaryStartAngle + sliderPos * span;
+    const float arcT = 5.0f;
+
+    auto accent = slider.findColour(juce::Slider::thumbColourId);
+    if (accent.isTransparent()) accent = QMColors::accentFilter;
+    if (!slider.isEnabled())    accent = QMColors::textDim;
+
+    // 1) トラック（1px 落とした影で彫り込み感を出す）
+    g.setColour(QMColors::bg.darker(0.35f));
+    g.drawEllipse(rx, ry + 1.0f, rw, rw, arcT);
+    g.setColour(QMColors::track);
+    g.drawEllipse(rx, ry, rw, rw, arcT);
+
+    const auto& props = slider.getProperties();
+    const bool modOn = (bool)props.getWithDefault("qmModOn", false);
+
+    // 2) 変調レンジの帯
+    if (modOn && slider.isEnabled())
+    {
+        const float mMin = juce::jlimit(0.0f, 1.0f,
+            (float)(double)props.getWithDefault("qmModMin", 0.0));
+        const float mMax = juce::jlimit(0.0f, 1.0f,
+            (float)(double)props.getWithDefault("qmModMax", 1.0));
+
+        const float aLo = rotaryStartAngle + juce::jmin(mMin, mMax) * span;
+        const float aHi = rotaryStartAngle + juce::jmax(mMin, mMax) * span;
+
+        if (std::abs(aHi - aLo) > 0.001f)
+        {
+            juce::Path band;
+            band.addArc(rx, ry, rw, rw, aLo, aHi, true);
+            g.setColour(accent.withAlpha(0.28f));
+            g.strokePath(band, juce::PathStrokeType(arcT + 4.0f,
+                juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+    }
+
+    // 3) 値アーク
+    juce::Path arc;
+    arc.addArc(rx, ry, rw, rw, rotaryStartAngle, angle, true);
+
+    juce::ColourGradient grad(accent.darker(0.35f), rx, cy,
+                              accent.brighter(0.60f), rx + rw, cy, false);
+    g.setGradientFill(grad);
+    g.strokePath(arc, juce::PathStrokeType(arcT,
+        juce::PathStrokeType::mitered, juce::PathStrokeType::butt));
+
+    g.setColour(accent.withAlpha(0.15f));
+    g.strokePath(arc, juce::PathStrokeType(arcT + 5.0f,
+        juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+    // 4) ポインタ
+    juce::Path pointer;
+    pointer.addRoundedRectangle(-1.5f, -radius + 1.5f, 3.0f, radius * 0.4f, 1.5f);
+    pointer.applyTransform(juce::AffineTransform::rotation(angle).translated(cx, cy));
+    g.setColour(QMColors::text);
+    g.fillPath(pointer);
+
+    // 5) 変調後の現在位置ドット
+    if (modOn && slider.isEnabled())
+    {
+        const float live = juce::jlimit(0.0f, 1.0f,
+            (float)(double)props.getWithDefault("qmModNorm", (double)sliderPos));
+        const float aLive = rotaryStartAngle + live * span;
+        const float dx = cx + std::sin(aLive) * radius;
+        const float dy = cy - std::cos(aLive) * radius;
+
+        g.setColour(accent.withAlpha(0.30f));
+        g.fillEllipse(dx - 5.0f, dy - 5.0f, 10.0f, 10.0f);
+        g.setColour(accent.brighter(0.7f));
+        g.fillEllipse(dx - 2.6f, dy - 2.6f, 5.2f, 5.2f);
+    }
+}
+
+// ==========================================================================
 void QuadMorphLookAndFeel::drawComboBox(juce::Graphics& g, int width, int height,
                                         bool, int, int, int, int,
                                         juce::ComboBox& box)

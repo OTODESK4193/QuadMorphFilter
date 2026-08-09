@@ -103,6 +103,27 @@ public:
     // Spread>0 のとき mod4[i][f] がフィルターごとに異なる位相の波形値になる
     bool isSpreadActive(int idx) const { return idx >= 0 && idx < 3 && spreadActive[idx]; }
 
+    // ===== LFO4 レート変調の状態（UI 表示用）=====
+    // 【V1.1.0 追加】LFO4 は LFO1/2/3 のレートを 2^(waveX*depth) 倍する。
+    // UI 側でレートスライダーとレート表示を動かすために公開する。
+
+    /** 現在のレート変調係数。1.0 = 変調なし、2.0 = 2倍速。 */
+    float getRateModulation() const { return lfo4RateModulation; }
+
+    /** その LFO が LFO4 のアサイン先になっているか。 */
+    bool isRateModulated(int idx) const
+    {
+        return idx >= 0 && idx < 3 && lfo4RateModulationActive[idx];
+    }
+
+    /** 実際に位相を進めるのに使われているレート [Hz]。
+        Sync / Free の別と LFO4 変調をすべて反映した最終値なので、
+        UI はこれを表示するだけで DSP と必ず一致する。 */
+    float getEffectiveRate(int idx) const
+    {
+        return (idx >= 0 && idx < 3) ? effectiveRateHz[idx] : 0.0f;
+    }
+
 private:
     // ===== LFO内部状態 =====
     struct LfoState
@@ -168,6 +189,9 @@ private:
     juce::Point<float>   positions[3];
     std::array<float, 4> mod4[3];
     bool                 spreadActive[3] = { false, false, false };
+
+    // 表示用: 各 LFO が実際に使っているレート [Hz]（LFO4 変調適用後）
+    float                effectiveRateHz[3] = { 0.0f, 0.0f, 0.0f };
 
     // ===== LFO4: Rate Modulation 専用 =====
     // LFO1と同じLfoStateを使用、Recording不要

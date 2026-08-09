@@ -3,6 +3,7 @@
 // ==========================================
 #include "ModPanel.h"
 #include "../PluginProcessor.h"
+#include <cmath>   // std::abs（レート変調インジケータの差分判定）
 
 namespace
 {
@@ -182,6 +183,80 @@ void ModPanel::timerCallback()
             lastSyncState[i] = now;
             resized();
             return;
+        }
+    }
+
+    updateRateModIndicators();
+}
+
+// ==========================================================================
+// updateRateModIndicators
+// LFO4 は LFO1/2/3 のレートを 2^(waveX * depth) 倍する。
+// 変調が掛かっている LFO について、実際に使われているレートを表示に反映する。
+//
+//   Free モード : rateFree スライダーへ変調帯とライブ位置を渡す
+//                 （描画は QuadMorphLookAndFeel::drawLinearSlider）
+//   Sync モード : 音符の刻みは離散値なのでコンボの選択自体は動かせない。
+//                 代わりに実効レート [Hz] をコンボの隣に動的表示する。
+//                 （コンボの選択を書き換えるとパラメータが動いてしまい、
+//                   オートメーションや保存内容を壊すため採らない）
+// ==========================================================================
+void ModPanel::updateRateModIndicators()
+{
+    auto& apvts = processor.apvts;
+
+    for (int i = 0; i < 3; ++i)
+    {
+        auto& grp = lfos[(size_t)i];
+        const juce::String id = "lfo" + juce::String(i + 1);
+
+        const bool enabled = apvts.getRawParameterValue(id + "en")->load() > 0.5f;
+        const bool modOn = enabled && processor.isRateModulated(i)
+                                   && (processor.getLfo4RateMod() != 1.0f
+                                       || apvts.getRawParameterValue("lfo4en")->load() > 0.5f);
+
+        const float rateHz = processor.getEffectiveLfoRate(i);
+        const bool synced = isSynced(id + "sync");
+
+        // ---- Sync モード: コンボ横の数値表示 ----
+        const bool showText = modOn && synced;
+        if (showText != rateModShown[i]
+            || (showText && std::abs(rateHz - effectiveRateHz[i]) > 0.005f))
+        {
+            rateModShown[i] = showText;
+            effectiveRateHz[i] = rateHz;
+            repaint(grp.rateSync.getBounds().expanded(90, 2));
+        }
+
+        // ---- Free モード: スライダーの変調帯 ----
+        auto& sl = grp.rateFree;
+        auto& props = sl.getProperties();
+
+        if (!modOn || synced)
+        {
+            if ((bool)props.getWithDefault("qmModOn", false))
+            {
+                props.set("qmModOn", false);
+                sl.repaint();
+            }
+            continue;
+        }
+
+        auto* prm = apvts.getParameter(id + "rateFree");
+        if (prm == nullptr) continue;
+
+        const float shown = juce::jlimit(0.01f, 20.0f, rateHz);
+        const double norm = (double)prm->convertTo0to1(shown);
+        const double prev = props.getWithDefault("qmModNorm", -1.0);
+        const bool wasOn = (bool)props.getWithDefault("qmModOn", false);
+
+        props.set("qmModOn", true);
+
+        if (!wasOn || std::abs(norm - prev) > 0.0015)
+        {
+            props.set("qmModNorm", norm);
+            props.set("qmModValue", (double)shown);
+            sl.repaint();
         }
     }
 }
@@ -382,6 +457,23 @@ void ModPanel::paint(juce::Graphics& g)
         QMUI::drawColumnLabel(g, "PHASE", L.slot[3]);
         QMUI::drawColumnLabel(g, "FADE IN", L.slot[4]);
         QMUI::drawColumnLabel(g, "SPREAD", L.slot[5]);
+    }
+
+    // ---- LFO4 レート変調の実効レート表示（Sync モード時）----
+    // 音符の刻みは離散値でコンボの選択を動かせないため、
+    // 実際に走っているレートを Hz で隣に出して「動いている」ことを見せる。
+    for (int i = 0; i < 3; ++i)
+    {
+        if (!rateModShown[i]) continue;
+
+        const auto cb = lfos[(size_t)i].rateSync.getBounds();
+        if (cb.isEmpty()) continue;
+
+        g.setColour(QMColors::lfoColour(3).withAlpha(0.95f));
+        g.setFont(QMFonts::mono(10.0f, true));
+        g.drawText(juce::String(effectiveRateHz[i], 2) + " Hz",
+                   cb.getRight() + 4, cb.getY(), 62, cb.getHeight(),
+                   juce::Justification::centredLeft, false);
     }
 
     // ---- 行の背景 + 左端アクセント ----

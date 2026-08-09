@@ -280,6 +280,10 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
     envFollowerSampleRate = sampleRate;
     envFollowEnvelopeValue = 0.0f;
 
+    // ===== スムージング係数（1 極指数、τ = 5ms）=====
+    // 旧実装の線形スルーリミッタから置き換え。SR によらず時定数を一定に保つ。
+    smoothCoef = 1.0f - std::exp(-1.0f / (0.005f * (float)sampleRate));
+
     // 以降はコンストラクタでキャッシュしたポインタを使用（文字列検索なし）
     lastDryWet = juce::jlimit(0.0f, 1.0f, gp.dryWet->load() / 100.0f);
     lastMasterGainLinear = juce::Decibels::decibelsToGain(gp.masterGain->load());
@@ -288,6 +292,10 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
 
     lastMorphX = gp.posX->load();
     lastMorphY = gp.posY->load();
+
+    // モーフ重みは「現在値 = 目標値」から始めて、再生開始直後の
+    // 立ち上がりでフェードインが起きないようにする
+    lastWMix.fill(0.0f);
 
     int maxLatency = 0;
     maxLatency = std::max(maxLatency, filterA.getOsLatencySamples());
@@ -335,7 +343,9 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
 
     bool lfo5Enabled = gp.lfo5en->load() > 0.5f;
     const float releaseCoef = 1.0f - std::exp(-1.0f / (0.050f * expectedSampleRate));
-    const float smoothStepPerSample = 1.0f / (0.050f * expectedSampleRate);
+    // 【V1.1.0 削除】const float smoothStepPerSample = 1.0f / (0.050f * expectedSampleRate);
+    //   線形スルーリミッタ用の 1 サンプル最大変化量だった。
+    //   1 極指数スムーザ（メンバ smoothCoef）へ置き換えたため不要。
 
     float currentDryWetNormalized = gp.dryWet->load() / 100.0f;
     currentDryWetNormalized = juce::jlimit(0.0f, 1.0f, currentDryWetNormalized);
@@ -712,32 +722,35 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     // =========================================================================
     for (int i = 0; i < numSamples; ++i)
     {
-        float dryWetDiff = currentDryWetNormalized - lastDryWet;
-        lastDryWet += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, dryWetDiff);
-
-        float gainDiff = currentMasterGainLinear - lastMasterGainLinear;
-        lastMasterGainLinear += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, gainDiff);
-
-        float ceilingDiff = currentCeilingLinear - lastCeilingLinear;
-        lastCeilingLinear += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, ceilingDiff);
+        // ---- 出力段パラメータ（1 極指数スムーザ、τ=5ms）----
+        lastDryWet += smoothCoef * (currentDryWetNormalized - lastDryWet);
+        lastMasterGainLinear += smoothCoef * (currentMasterGainLinear - lastMasterGainLinear);
+        lastCeilingLinear += smoothCoef * (currentCeilingLinear - lastCeilingLinear);
 
         // lastMorphX/Y の平滑化は毎サンプル必ず実行する。
         // 次ブロックの baseX/baseY として持ち越されるため、
         // wMix がブロック定数のケースでも省略してはならない。
-        float morphXDiff = targetMorphX - lastMorphX;
-        float morphYDiff = targetMorphY - lastMorphY;
-        lastMorphX += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, morphXDiff);
-        lastMorphY += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, morphYDiff);
+        lastMorphX += smoothCoef * (targetMorphX - lastMorphX);
+        lastMorphY += smoothCoef * (targetMorphY - lastMorphY);
 
         // 平滑化された morph 座標に追従する必要があるときだけ再計算する
         if (!wMixIsBlockConstant)
             wMix_current = computeWMixNormalized(lastMorphX, lastMorphY);
 
+        // ---- モーフ重みの平滑化 ----
+        // wMix_current はブロック単位でしか更新されないため、そのまま掛けると
+        // ブロック境界でゲインが階段状に飛ぶ（LFO1 有効時のジッパーノイズの原因）。
+        // 有効なフィルターの分だけ指数スムーザに通してから使う。
+        for (int wi = 0; wi < 4; ++wi)
+            lastWMix[(size_t)wi] += smoothCoef * (wMix_current[(size_t)wi] - lastWMix[(size_t)wi]);
+
         float dryWetSmoothed = lastDryWet;
         if (lfo5Enabled)
         {
-            float lfo5Diff = lfo5Mod - lastLfo5Mod;
-            lastLfo5Mod += juce::jlimit(-smoothStepPerSample, smoothStepPerSample, lfo5Diff);
+            // 旧実装はスルーリミッタだったため、LFO5 のレートを上げるほど
+            // 振幅が潰れて波形が三角に化けていた。指数スムーザなら
+            // 速い LFO にもそのまま追従する。
+            lastLfo5Mod += smoothCoef * (lfo5Mod - lastLfo5Mod);
             dryWetSmoothed = lastLfo5Mod;
         }
 
@@ -751,10 +764,10 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         for (int ch = 0; ch < numChannels; ++ch)
         {
             float wet = 0.0f;
-            if (enA) wet += fAPtrs[ch][i] * wMix_current[0];
-            if (enB) wet += fBPtrs[ch][i] * wMix_current[1];
-            if (enC) wet += fCPtrs[ch][i] * wMix_current[2];
-            if (enD) wet += fDPtrs[ch][i] * wMix_current[3];
+            if (enA) wet += fAPtrs[ch][i] * lastWMix[0];
+            if (enB) wet += fBPtrs[ch][i] * lastWMix[1];
+            if (enC) wet += fCPtrs[ch][i] * lastWMix[2];
+            if (enD) wet += fDPtrs[ch][i] * lastWMix[3];
 
             float gained = (dryPtrs[ch][i] * dry_amp + wet * wet_amp) * gainLinear;
             float absSignal = std::abs(gained);

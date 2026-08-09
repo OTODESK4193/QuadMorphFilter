@@ -146,6 +146,7 @@ void LfoEngine::processSingleLfo(int i,
         //   LFO を無効化すると、呼び出し側の isSpreadActive() が true を返し続け、
         //   更新の止まった mod4[i]（フリーズした古い値）が変調に使われていた。
         spreadActive[i] = false;
+        effectiveRateHz[i] = 0.0f;
         return;
     }
 
@@ -166,6 +167,9 @@ void LfoEngine::processSingleLfo(int i,
     float rate = (sync
         ? (1.0f / getSyncTime((int)prm.rateSync->load(), bpm))
         : prm.rateFree->load()) * rateModulation;
+
+    // UI 表示用に最終レートを控える（Sync/Free と LFO4 変調をすべて含む）
+    effectiveRateHz[i] = rate;
 
     float actualDt = rate * dt;
 

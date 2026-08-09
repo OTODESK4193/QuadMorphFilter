@@ -91,6 +91,17 @@ private:
     void styleRateSync(juce::ComboBox& c, const juce::String& paramId, std::unique_ptr<ComboAtt>& att);
 
     void timerCallback() override;
+
+    /** 【V1.1.0 追加】LFO4 によるレート変調を LFO1/2/3 の表示へ反映する。
+        Free モード : rateFree スライダーに変調帯とライブ位置を描かせる
+        Sync モード : rateSync コンボの右に実効レート [Hz] を動的表示する
+        値は LfoEngine が実際に位相を進めるのに使った最終レートなので、
+        表示と実挙動がずれない。 */
+    void updateRateModIndicators();
+
+    /** Sync モードで表示する実効レート [Hz]（0 = 表示しない） */
+    float effectiveRateHz[3] = { 0.0f, 0.0f, 0.0f };
+    bool  rateModShown[3] = { false, false, false };
     bool isSynced(const juce::String& paramId) const;
 
     /** 行の共通カラム（Enable / Wave / Step / Sync / 可変 6 スロット） */

@@ -48,6 +48,21 @@ public:
     juce::Point<float>   getLfoPos(int index)  const { return lfoEngine.getPosition(index); }
     std::array<float, 4> getLfoMod4(int index) const { return lfoEngine.getMod4(index); }
 
+    // ===== 【V1.1.0 追加】UI の変調インジケータ用アクセサ =====
+    // いずれもブロック毎に更新される表示用の値。UI タイマーから読む。
+
+    /** LFO5 (Dry/Wet 変調) の現在出力 [0,1]。Min/Max 適用後の値。 */
+    float getLfo5Output() const { return lfo5Engine.getOutput(); }
+
+    /** LFO4 によるレート変調係数（1.0 = 変調なし）。 */
+    float getLfo4RateMod() const { return lfoEngine.getRateModulation(); }
+
+    /** LFO index (0=LFO1, 1=LFO2, 2=LFO3) が LFO4 のアサイン先か。 */
+    bool isRateModulated(int index) const { return lfoEngine.isRateModulated(index); }
+
+    /** その LFO が実際に走っているレート [Hz]（Sync / Free / LFO4 変調込み）。 */
+    float getEffectiveLfoRate(int index) const { return lfoEngine.getEffectiveRate(index); }
+
     // ===== Recording データセッター =====
     void setLfoRecordingData(int index, const std::array<juce::Point<float>, 2048>& buffer, int len)
     {
@@ -173,13 +188,40 @@ private:
     std::atomic<int> pendingLatencySamples { 0 };
     int              reportedLatencySamples = -1;   // メッセージスレッドからのみ触る
 
-    // ===== パラメータスムージング（統一的な 5ms タイムコンスタント）オリジナル復元 =====
+    // ==================================================================
+    // パラメータスムージング
+    //
+    // 【V1.1.0 修正】旧実装は
+    //     x += jlimit(-step, +step, target - x);   step = 1/(0.05*SR)
+    // という「線形スルーリミッタ」だった。これには 2 つ問題があった。
+    //
+    //  (1) 折れ線なので値の傾きが不連続。到達した瞬間に微小なカドが残り、
+    //      ゲイン系に掛けると弱いクリックとして聞こえる。
+    //  (2) 変化速度に上限があるため、速い制御信号に追従できない。
+    //      特に LFO5 (Dry/Wet) は 50ms かけないと全振幅を移動できず、
+    //      レートを上げるほど振幅が潰れて波形も三角に化けていた。
+    //
+    // 現在は 1 極の指数スムーザ（時定数 5ms）に統一している。
+    //     x += smoothCoef * (target - x)
+    // 傾きが連続で、追従速度に上限がないため上記どちらも起きない。
+    // 係数は prepareToPlay で SR から算出する。
+    float smoothCoef = 0.0f;                   // = 1 - exp(-1/(τ·SR))、τ = 5ms
+
     float lastDryWet = 0.5f;                   // 0.0-1.0 range（dB domain ではない）
     float lastMasterGainLinear = 1.0f;         // linear scale（dB→linear 変換済み）
     float lastCeilingLinear = 0.977f;          // linear scale
     float lastMorphX = 0.5f;                   // Morph X スムージング
     float lastMorphY = 0.5f;                   // Morph Y スムージング
     float lastLfo5Mod = 0.5f;                  // LFO5 modulation スムージング（P4）
+
+    // ===== 【V1.1.0 追加】モーフ重みのスムージング =====
+    // wMix はこれまで一切スムージングされておらず、ブロック境界で 4 本の
+    // ミックスゲインが階段状に飛んでいた。LFO1 を有効にすると morph 座標が
+    // 毎ブロック動くため、48kHz / 128 サンプルなら毎秒 375 回の不連続となり
+    // ジッパーノイズとして聞こえる。
+    // （LFO1 が無効なときは lastMorphX/Y の平滑値を使うため目立たなかった）
+    // 4 本の重みそれぞれを同じ指数スムーザに通して連続化する。
+    std::array<float, 4> lastWMix { 0.5f, 0.5f, 0.5f, 0.5f };
 
     // ===== Envelope Follower =====
     float envFollowEnvelopeValue = 0.0f;  // Attack/Release で平滑化された入力レベル
