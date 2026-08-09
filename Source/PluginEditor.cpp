@@ -4,6 +4,8 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "UI/UiCommon.h"
+#include "FactoryPresets.h"
+#include "PresetRandomiser.h"
 
 #ifndef QUADMORPH_VERSION
  #define QUADMORPH_VERSION "1.1.0"
@@ -76,6 +78,34 @@ QuadMorphFilterAudioProcessorEditor::Content::Content(QuadMorphFilterAudioProces
         if (idx >= 0 && idx != lastThemeIndex) applyTheme(idx);
     };
 
+    // ---- ヘッダーの Preset / Random / Reset ----
+    // 表示文字列は英字のみ（juce::String(const char*) は ASCII 前提）
+    auto styleHeaderBtn = [this](juce::TextButton& b, const juce::String& text,
+                                 juce::Colour accent, const juce::String& info)
+    {
+        b.setButtonText(text);
+        b.setClickingTogglesState(false);
+        b.setColour(juce::TextButton::textColourOffId, accent);
+        b.setColour(juce::TextButton::textColourOnId, accent.brighter(0.4f));
+        QMUI::setInfo(b, info);
+        addAndMakeVisible(b);
+    };
+
+    styleHeaderBtn(presetBtn, "PRESET", QMColors::accentFilter,
+        "PRESET  -  open the browser. 200 factory presets in ten categories, plus your "
+        "own saved presets. Click the star to keep a favourite, and a single click loads.");
+    styleHeaderBtn(randomBtn, "RANDOM", QMColors::accentMorph,
+        "RANDOM  -  build a new patch. It picks one voicing character, spreads the four "
+        "cutoffs across the spectrum and keeps resonance in check, so the result stays "
+        "usable rather than noise. Output levels are never randomised.");
+    styleHeaderBtn(resetBtn, "RESET", QMColors::rose,
+        "RESET  -  return every parameter, including all five LFOs and the envelope "
+        "follower, to its default. You will be asked to confirm first.");
+
+    presetBtn.onClick = [this] { openBrowser(); };
+    randomBtn.onClick = [this] { doRandom(); };
+    resetBtn.onClick  = [this] { doReset(); };
+
     setActiveTab(TabFilter);
     applyTheme(lastThemeIndex);
 
@@ -86,6 +116,135 @@ QuadMorphFilterAudioProcessorEditor::Content::Content(QuadMorphFilterAudioProces
 QuadMorphFilterAudioProcessorEditor::Content::~Content()
 {
     stopTimer();   // Timer は必ずデストラクタ最優先で停止（CLAUDE.md §3）
+}
+
+// ==========================================================================
+//  プリセット / Reset / Random
+// ==========================================================================
+juce::File QuadMorphFilterAudioProcessorEditor::Content::presetDirectory()
+{
+    auto dir = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+                   .getChildFile("OTODESK")
+                   .getChildFile("QuadMorphFilter")
+                   .getChildFile("Presets");
+    dir.createDirectory();
+    return dir;
+}
+
+void QuadMorphFilterAudioProcessorEditor::Content::openBrowser()
+{
+    if (browser == nullptr)
+    {
+        browser = std::make_unique<PresetBrowser>(presetDirectory());
+
+        // Factory 一覧を渡す
+        juce::Array<PresetBrowser::FactoryItem> items;
+        for (int i = 0; i < FactoryPresets::count(); ++i)
+            items.add({ FactoryPresets::nameOf(i), FactoryPresets::categoryOf(i), i });
+        browser->setFactoryPresets(items);
+
+        browser->onClose = [this] { closeBrowser(); };
+        browser->onInit = [this] { doReset(); };
+        browser->onLoadFactory = [this](int idx) { loadFactoryPreset(idx); };
+        browser->onLoad = [this](const juce::File& f) { loadPresetFile(f); };
+        browser->onSave = [this](const juce::String& n, const juce::String& s) { savePreset(n, s); };
+
+        addAndMakeVisible(*browser);
+        resized();
+    }
+
+    browser->setVisible(true);
+    browser->toFront(true);
+}
+
+void QuadMorphFilterAudioProcessorEditor::Content::closeBrowser()
+{
+    if (browser != nullptr)
+        browser->setVisible(false);
+}
+
+// --------------------------------------------------------------------------
+void QuadMorphFilterAudioProcessorEditor::Content::doReset()
+{
+    // 破棄されたあとにコールバックが走らないよう SafePointer で守る
+    juce::Component::SafePointer<Content> safe(this);
+
+    juce::NativeMessageBox::showYesNoBox(
+        juce::MessageBoxIconType::WarningIcon,
+        "Reset All Parameters",
+        "This returns every parameter to its default, including all four filters, "
+        "all five LFOs, the envelope follower and the morph settings.\n\n"
+        "Your current patch will be lost unless you have saved it.\n\n"
+        "Continue?",
+        nullptr,
+        juce::ModalCallbackFunction::create([safe](int yes) mutable
+        {
+            if (yes != 1 || safe == nullptr) return;
+
+            FactoryPresets::applyInit(safe->processor);
+            safe->currentPresetName = "Init";
+
+            if (safe->browser != nullptr)
+                safe->browser->setCurrentFactory(-1);
+
+            safe->repaint();
+        }));
+}
+
+// --------------------------------------------------------------------------
+void QuadMorphFilterAudioProcessorEditor::Content::doRandom()
+{
+    PresetRandomiser::randomise(processor, rng);
+    currentPresetName = "Random";
+
+    if (browser != nullptr)
+        browser->setCurrentFactory(-1);
+
+    repaint();
+}
+
+// --------------------------------------------------------------------------
+void QuadMorphFilterAudioProcessorEditor::Content::loadFactoryPreset(int index)
+{
+    FactoryPresets::apply(processor, index);
+    currentPresetName = FactoryPresets::nameOf(index);
+    repaint();
+}
+
+void QuadMorphFilterAudioProcessorEditor::Content::loadPresetFile(const juce::File& f)
+{
+    if (!f.existsAsFile()) return;
+
+    if (auto xml = juce::XmlDocument::parse(f))
+        if (xml->hasTagName(processor.apvts.state.getType()))
+        {
+            processor.apvts.replaceState(juce::ValueTree::fromXml(*xml));
+            currentPresetName = f.getFileNameWithoutExtension();
+            repaint();
+        }
+}
+
+void QuadMorphFilterAudioProcessorEditor::Content::savePreset(const juce::String& name,
+                                                              const juce::String& subCat)
+{
+    auto dir = presetDirectory();
+    if (subCat.isNotEmpty())
+    {
+        dir = dir.getChildFile(juce::File::createLegalFileName(subCat));
+        dir.createDirectory();
+    }
+
+    auto file = dir.getChildFile(juce::File::createLegalFileName(name) + ".xml");
+
+    if (auto xml = processor.apvts.copyState().createXml())
+        xml->writeTo(file);
+
+    currentPresetName = name;
+
+    if (browser != nullptr)
+        browser->setCurrentFile(file);
+
+    repaint();
 }
 
 // ==========================================================================
@@ -152,6 +311,28 @@ void QuadMorphFilterAudioProcessorEditor::Content::resized()
 
     headerArea = { kMargin, kHeaderY, w - kMargin * 2, kHeaderH };
 
+    // ---- ヘッダー右のボタン列（右から Reset / Random / Preset）----
+    {
+        int x = w - kMargin;
+        const int y = kHeaderY + 7;
+        const int h = 22;
+
+        auto place = [&x, y, h](juce::TextButton& b, int bw)
+        {
+            x -= bw;
+            b.setBounds(x, y, bw, h);
+            x -= 6;
+        };
+
+        place(resetBtn, 64);
+        place(randomBtn, 74);
+        place(presetBtn, 74);
+    }
+
+    // ブラウザは上部の表示領域を覆うように出す
+    if (browser != nullptr)
+        browser->setBounds(kMargin, kTopY, w - kMargin * 2, kTopH + kTabH + 8);
+
     // ---- 上部: フィルターカーブ（大）+ XY パッド ----
     const int visW = w - kMargin * 2 - kXYPadW - 12;
     visualizer.setBounds(kMargin, kTopY, visW, kTopH);
@@ -207,8 +388,15 @@ void QuadMorphFilterAudioProcessorEditor::Content::paint(juce::Graphics& g)
         g.setColour(QMColors::textDim);
         g.setFont(juce::Font(juce::FontOptions(10.5f, juce::Font::bold)));
         g.drawText("OTODESK   /   28 Filter Models   /   V" QUADMORPH_VERSION,
-                   r.getX() + 322, r.getY(), 380, r.getHeight(),
+                   r.getX() + 322, r.getY(), 300, r.getHeight(),
                    juce::Justification::centredLeft, false);
+
+        // ---- 現在のプリセット名（ボタン列の左）----
+        g.setColour(QMColors::text.withAlpha(0.85f));
+        g.setFont(QMFonts::mono(12.0f, true));
+        g.drawText(currentPresetName,
+                   presetBtn.getX() - 214, r.getY(), 206, r.getHeight(),
+                   juce::Justification::centredRight, false);
 
         // 下境界
         g.setColour(QMColors::panelLine.withAlpha(0.35f));

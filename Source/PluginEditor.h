@@ -20,6 +20,7 @@
 #include "UI/FilterPanel.h"
 #include "UI/ModPanel.h"
 #include "UI/ConfigPanel.h"
+#include "UI/PresetBrowser.h"
 
 class QuadMorphFilterAudioProcessorEditor : public juce::AudioProcessorEditor
 {
@@ -73,6 +74,30 @@ private:
         // themeCombo は CONFIG タブへ移設した（V1.1.0）。
         // ここではテーマ変更の取りこぼしを拾うための現在値だけを持つ。
         int lastThemeIndex = -1;
+
+        // ---- 【V1.1.0 追加】ヘッダーの Preset / Random / Reset ----
+        juce::TextButton presetBtn, randomBtn, resetBtn;
+
+        /** ユーザープリセットの保存先。
+            ~/Documents/OTODESK/QuadMorphFilter/Presets */
+        static juce::File presetDirectory();
+
+        void openBrowser();
+        void closeBrowser();
+        void doReset();
+        void doRandom();
+        void savePreset(const juce::String& name, const juce::String& subCat);
+        void loadPresetFile(const juce::File& f);
+        void loadFactoryPreset(int index);
+
+        /** ヘッダーに出す現在のプリセット名 */
+        juce::String currentPresetName { "Init" };
+
+        // ブラウザは重いので必要になるまで作らない。
+        // 破棄順序: tooltip より前に宣言し、tooltip が最後に消えるようにする。
+        std::unique_ptr<PresetBrowser> browser;
+
+        juce::Random rng;
 
         juce::Rectangle<int> headerArea, tabStripArea;
 
