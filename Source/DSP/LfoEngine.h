@@ -34,13 +34,26 @@ public:
 
     void prepare(double newSampleRate);
 
+    // ===== パラメータポインタのキャッシュ =====
+    // 【V1.1.0 追加】
+    // 旧実装は processSingleLfo() の冒頭で
+    //   juce::String id = "lfo" + juce::String(i + 1);
+    // を組み立て、さらに id + "en" / id + "wave" … と連結していた。
+    // juce::String は SSO を持たず常にヒープ確保するため、
+    // LFO1〜3 と LFO4 を合わせてブロック毎に約 40 回の malloc が
+    // オーディオスレッド上で発生していた（CLAUDE.md §1 違反）。
+    //
+    // 必ず AudioProcessor のコンストラクタ（メッセージスレッド）から
+    // 一度だけ呼ぶこと。以後 process() は apvts に触れない。
+    void cacheParams(juce::AudioProcessorValueTreeState& apvts);
+
     // ===== メイン処理 =====
     // processBlock から毎ブロック呼び出す
+    // （パラメータは cacheParams() でキャッシュ済みのポインタから読む）
     void process(float dt,
         double bpm,
         float baseX,
         float baseY,
-        juce::AudioProcessorValueTreeState& apvts,
         const RecordingContext& rec);
 
     // ===== 出力アクセサ =====
@@ -115,6 +128,42 @@ private:
 
     double sampleRate = 48000.0;
 
+    // ===== パラメータポインタキャッシュ =====
+    // APVTS が保持する std::atomic<float> の寿命はプロセッサと同一なので
+    // 一度解決したポインタが途中で無効になることはない。
+    struct LfoParamPtrs
+    {
+        std::atomic<float>* en       = nullptr;
+        std::atomic<float>* wave     = nullptr;
+        std::atomic<float>* step     = nullptr;
+        std::atomic<float>* sync     = nullptr;
+        std::atomic<float>* minVal   = nullptr;
+        std::atomic<float>* maxVal   = nullptr;
+        std::atomic<float>* phase    = nullptr;
+        std::atomic<float>* fade     = nullptr;
+        std::atomic<float>* rateSync = nullptr;
+        std::atomic<float>* rateFree = nullptr;
+        std::atomic<float>* spread   = nullptr;
+    };
+
+    struct Lfo4ParamPtrs
+    {
+        std::atomic<float>* en       = nullptr;
+        std::atomic<float>* wave     = nullptr;
+        std::atomic<float>* step     = nullptr;
+        std::atomic<float>* sync     = nullptr;
+        std::atomic<float>* rateSync = nullptr;
+        std::atomic<float>* rateFree = nullptr;
+        std::atomic<float>* depth    = nullptr;
+        std::atomic<float>* assignA  = nullptr;
+        std::atomic<float>* assignB  = nullptr;
+        std::atomic<float>* assignC  = nullptr;
+    };
+
+    LfoParamPtrs   lp[3];    // LFO1 / LFO2 / LFO3
+    Lfo4ParamPtrs  lp4;      // LFO4 (Rate Modulation)
+    bool           paramsCached = false;
+
     LfoState             states[3];
     juce::Point<float>   positions[3];
     std::array<float, 4> mod4[3];
@@ -145,11 +194,8 @@ private:
         double bpm,
         float baseX,
         float baseY,
-        juce::AudioProcessorValueTreeState& apvts,
         const RecordingContext& rec);
 
     // LFO4専用処理（Rate Modulation）
-    void processLFO4(float dt,
-        double bpm,
-        juce::AudioProcessorValueTreeState& apvts);
+    void processLFO4(float dt, double bpm);
 };

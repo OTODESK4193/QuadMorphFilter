@@ -162,6 +162,8 @@ QuadMorphFilterAudioProcessor::QuadMorphFilterAudioProcessor()
     // パラメータポインタはここで一度だけ解決する。
     // コンストラクタはメッセージスレッドで走るため juce::String の生成は安全。
     cacheParameterPointers();
+    lfoEngine.cacheParams(apvts);
+    lfo5Engine.cacheParams(apvts);
 }
 
 // ==========================================
@@ -243,13 +245,14 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
     envFollowerSampleRate = sampleRate;
     envFollowEnvelopeValue = 0.0f;
 
-    lastDryWet = juce::jlimit(0.0f, 1.0f, apvts.getRawParameterValue("dryWet")->load() / 100.0f);
-    lastMasterGainLinear = juce::Decibels::decibelsToGain(apvts.getRawParameterValue("masterGain")->load());
+    // 以降はコンストラクタでキャッシュしたポインタを使用（文字列検索なし）
+    lastDryWet = juce::jlimit(0.0f, 1.0f, gp.dryWet->load() / 100.0f);
+    lastMasterGainLinear = juce::Decibels::decibelsToGain(gp.masterGain->load());
     lastLfo5Mod = 0.5f;
-    lastCeilingLinear = juce::Decibels::decibelsToGain(apvts.getRawParameterValue("limiterCeiling")->load());
+    lastCeilingLinear = juce::Decibels::decibelsToGain(gp.limiterCeiling->load());
 
-    lastMorphX = apvts.getRawParameterValue("posX")->load();
-    lastMorphY = apvts.getRawParameterValue("posY")->load();
+    lastMorphX = gp.posX->load();
+    lastMorphY = gp.posY->load();
 
     int maxLatency = 0;
     maxLatency = std::max(maxLatency, filterA.getOsLatencySamples());
@@ -304,10 +307,10 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     LfoEngine::RecordingContext recCtx{
         recBuffer, recLength, isWaitingForRecord, isRecordingDrag, currentRecX, currentRecY
     };
-    lfoEngine.process(dt, bpm, baseX, baseY, apvts, recCtx);
+    lfoEngine.process(dt, bpm, baseX, baseY, recCtx);
 
     // ===== LFO5 (Dry/Wet Modulation) あなたのオリジナルロジックを完全復元 =====
-    lfo5Engine.process(dt, bpm, apvts);
+    lfo5Engine.process(dt, (float)bpm);
     float lfo5Mod = lfo5Engine.getOutput();
 
     float posX = lfoEngine.getPosition(0).x;

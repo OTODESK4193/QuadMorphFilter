@@ -1,7 +1,11 @@
 #pragma once
-#include <juce_core/juce_core.h>
+// APVTS と juce::jlimit を直接使うため、juce_core だけでなく
+// juce_audio_processors を明示的にインクルードする
+// （従来は PluginProcessor.h 側のインクルード順に依存していた）。
+#include <juce_audio_processors/juce_audio_processors.h>
 #include <cmath>
 #include <array>
+#include <atomic>
 
 class Lfo5Engine
 {
@@ -13,9 +17,39 @@ public:
         output = 0.0f;
     }
 
-    void process(float dt, float bpm, const juce::AudioProcessorValueTreeState& apvts)
+    // ===== パラメータポインタのキャッシュ =====
+    // 【V1.1.0 追加】
+    // 旧 process() は毎ブロック 8 回の getRawParameterValue（文字列キー検索）を
+    // オーディオスレッドから呼んでいた。ポインタを一度だけ解決して保持する。
+    // AudioProcessor のコンストラクタ（メッセージスレッド）から呼ぶこと。
+    void cacheParams(juce::AudioProcessorValueTreeState& apvts)
     {
-        bool enabled = apvts.getRawParameterValue("lfo5en")->load() > 0.5f;
+        prm.en       = apvts.getRawParameterValue("lfo5en");
+        prm.sync     = apvts.getRawParameterValue("lfo5sync");
+        prm.rateSync = apvts.getRawParameterValue("lfo5rateSync");
+        prm.rateFree = apvts.getRawParameterValue("lfo5rateFree");
+        prm.wave     = apvts.getRawParameterValue("lfo5wave");
+        prm.step     = apvts.getRawParameterValue("lfo5step");
+        prm.minVal   = apvts.getRawParameterValue("lfo5min");
+        prm.maxVal   = apvts.getRawParameterValue("lfo5max");
+
+        jassert(prm.en != nullptr && prm.sync != nullptr && prm.rateSync != nullptr
+             && prm.rateFree != nullptr && prm.wave != nullptr && prm.step != nullptr
+             && prm.minVal != nullptr && prm.maxVal != nullptr);
+
+        paramsCached = true;
+    }
+
+    void process(float dt, float bpm)
+    {
+        jassert(paramsCached);
+        if (!paramsCached)
+        {
+            output = 0.0f;
+            return;
+        }
+
+        bool enabled = prm.en->load() > 0.5f;
         if (!enabled)
         {
             output = 0.0f;
@@ -24,16 +58,16 @@ public:
 
         // ===== Rate 計算 =====
         float rate = 0.0f;
-        bool isSynced = apvts.getRawParameterValue("lfo5sync")->load() > 0.5f;
+        bool isSynced = prm.sync->load() > 0.5f;
 
         if (isSynced)
         {
-            int syncIdx = (int)apvts.getRawParameterValue("lfo5rateSync")->load();
+            int syncIdx = (int)prm.rateSync->load();
             rate = computeSyncRate(syncIdx, bpm);
         }
         else
         {
-            rate = apvts.getRawParameterValue("lfo5rateFree")->load();
+            rate = prm.rateFree->load();
         }
 
         // ===== Phase アップデート =====
@@ -51,8 +85,8 @@ public:
         }
 
         // ===== Wave 形を計算 =====
-        int waveType = (int)apvts.getRawParameterValue("lfo5wave")->load();
-        bool stepMode = apvts.getRawParameterValue("lfo5step")->load() > 0.5f;
+        int waveType = (int)prm.wave->load();
+        bool stepMode = prm.step->load() > 0.5f;
 
         float baseOutput = computeWave(phase, waveType);
 
@@ -64,8 +98,8 @@ public:
         }
 
         // ===== Min/Max 範囲を適用 (0.0 ~ 1.0 の output を Min～Max 範囲にマップ) =====
-        float minVal = apvts.getRawParameterValue("lfo5min")->load() / 100.0f;
-        float maxVal = apvts.getRawParameterValue("lfo5max")->load() / 100.0f;
+        float minVal = prm.minVal->load() / 100.0f;
+        float maxVal = prm.maxVal->load() / 100.0f;
         minVal = juce::jlimit(0.0f, 1.0f, minVal);
         maxVal = juce::jlimit(0.0f, 1.0f, maxVal);
 
@@ -76,6 +110,24 @@ public:
     float getPhase() const { return phase; }
 
 private:
+    // ===== パラメータポインタキャッシュ =====
+    struct ParamPtrs
+    {
+        std::atomic<float>* en       = nullptr;
+        std::atomic<float>* sync     = nullptr;
+        std::atomic<float>* rateSync = nullptr;
+        std::atomic<float>* rateFree = nullptr;
+        std::atomic<float>* wave     = nullptr;
+        std::atomic<float>* step     = nullptr;
+        std::atomic<float>* minVal   = nullptr;
+        std::atomic<float>* maxVal   = nullptr;
+    };
+
+    // 変数名に注意: computeWave / billiardNoise / smoothNoise が
+    // 位相を表す引数 float p を取るため、メンバ名は p ではなく prm とする。
+    ParamPtrs prm;
+    bool      paramsCached = false;
+
     double sampleRate = 0.0;
     float phase = 0.0f;
     float output = 0.0f;

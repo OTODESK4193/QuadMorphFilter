@@ -19,23 +19,77 @@ void LfoEngine::prepare(double newSampleRate)
 }
 
 // ==========================================
+// cacheParams
+// 全 LFO パラメータの生ポインタを一度だけ解決する。
+// メッセージスレッド（AudioProcessor コンストラクタ）から呼ぶこと。
+// ==========================================
+void LfoEngine::cacheParams(juce::AudioProcessorValueTreeState& apvts)
+{
+    for (int i = 0; i < 3; ++i)
+    {
+        const juce::String id = "lfo" + juce::String(i + 1);
+        auto& prm = lp[i];
+
+        prm.en       = apvts.getRawParameterValue(id + "en");
+        prm.wave     = apvts.getRawParameterValue(id + "wave");
+        prm.step     = apvts.getRawParameterValue(id + "step");
+        prm.sync     = apvts.getRawParameterValue(id + "sync");
+        prm.minVal   = apvts.getRawParameterValue(id + "min");
+        prm.maxVal   = apvts.getRawParameterValue(id + "max");
+        prm.phase    = apvts.getRawParameterValue(id + "phase");
+        prm.fade     = apvts.getRawParameterValue(id + "fade");
+        prm.rateSync = apvts.getRawParameterValue(id + "rateSync");
+        prm.rateFree = apvts.getRawParameterValue(id + "rateFree");
+        prm.spread   = apvts.getRawParameterValue(id + "spread");
+
+        jassert(prm.en != nullptr && prm.wave != nullptr && prm.step != nullptr
+             && prm.sync != nullptr && prm.minVal != nullptr && prm.maxVal != nullptr
+             && prm.phase != nullptr && prm.fade != nullptr
+             && prm.rateSync != nullptr && prm.rateFree != nullptr && prm.spread != nullptr);
+    }
+
+    lp4.en       = apvts.getRawParameterValue("lfo4en");
+    lp4.wave     = apvts.getRawParameterValue("lfo4wave");
+    lp4.step     = apvts.getRawParameterValue("lfo4step");
+    lp4.sync     = apvts.getRawParameterValue("lfo4sync");
+    lp4.rateSync = apvts.getRawParameterValue("lfo4rateSync");
+    lp4.rateFree = apvts.getRawParameterValue("lfo4rateFree");
+    lp4.depth    = apvts.getRawParameterValue("lfo4depth");
+    lp4.assignA  = apvts.getRawParameterValue("lfo4assignA");
+    lp4.assignB  = apvts.getRawParameterValue("lfo4assignB");
+    lp4.assignC  = apvts.getRawParameterValue("lfo4assignC");
+
+    jassert(lp4.en != nullptr && lp4.wave != nullptr && lp4.step != nullptr
+         && lp4.sync != nullptr && lp4.rateSync != nullptr && lp4.rateFree != nullptr
+         && lp4.depth != nullptr && lp4.assignA != nullptr
+         && lp4.assignB != nullptr && lp4.assignC != nullptr);
+
+    paramsCached = true;
+}
+
+// ==========================================
 // メイン処理: 3つのLFOを順番に処理
 // ==========================================
 void LfoEngine::process(float dt,
     double bpm,
     float baseX,
     float baseY,
-    juce::AudioProcessorValueTreeState& apvts,
     const RecordingContext& rec)
 {
+    // cacheParams() の呼び忘れを開発中に検出する。
+    // Release ビルドでは jassert は消えるため、念のため早期リターンで保護する。
+    jassert(paramsCached);
+    if (!paramsCached)
+        return;
+
     // ===== LFO4: Rate Modulation 処理 =====
-    processLFO4(dt, bpm, apvts);
+    processLFO4(dt, bpm);
 
     // ===== LFO4 アサイン先チェック =====
     // アサイン先でない場合は lfo4RateModulation を無視（1.0 として動作）
-    bool assignLFO1 = apvts.getRawParameterValue("lfo4assignA")->load() > 0.5f;
-    bool assignLFO2 = apvts.getRawParameterValue("lfo4assignB")->load() > 0.5f;
-    bool assignLFO3 = apvts.getRawParameterValue("lfo4assignC")->load() > 0.5f;
+    bool assignLFO1 = lp4.assignA->load() > 0.5f;
+    bool assignLFO2 = lp4.assignB->load() > 0.5f;
+    bool assignLFO3 = lp4.assignC->load() > 0.5f;
 
     for (int i = 0; i < 3; ++i)
     {
@@ -43,7 +97,7 @@ void LfoEngine::process(float dt,
         bool isAssigned = (i == 0 && assignLFO1) || (i == 1 && assignLFO2) || (i == 2 && assignLFO3);
         lfo4RateModulationActive[i] = isAssigned;
 
-        processSingleLfo(i, dt, bpm, baseX, baseY, apvts, rec);
+        processSingleLfo(i, dt, bpm, baseX, baseY, rec);
     }
 }
 
@@ -55,17 +109,21 @@ void LfoEngine::processSingleLfo(int i,
     double bpm,
     float baseX,
     float baseY,
-    juce::AudioProcessorValueTreeState& apvts,
     const RecordingContext& rec)
 {
-    juce::String id = "lfo" + juce::String(i + 1);
+    // 【V1.1.0】旧実装の juce::String id = "lfo" + juce::String(i + 1); を廃止。
+    // 以降は cacheParams() で解決済みのポインタを添字で引くだけ（確保ゼロ）。
+    //
+    // 変数名に注意: この関数の後半で位相を表すローカル変数 float p が使われているため、
+    // パラメータ参照は p ではなく prm とすること（同名だと再定義エラーになる）。
+    const auto& prm = lp[i];
 
-    bool  enabled = apvts.getRawParameterValue(id + "en")->load() > 0.5f;
-    int   wave = (int)apvts.getRawParameterValue(id + "wave")->load();
-    bool  step = apvts.getRawParameterValue(id + "step")->load() > 0.5f;
-    bool  sync = apvts.getRawParameterValue(id + "sync")->load() > 0.5f;
-    float minVal = apvts.getRawParameterValue(id + "min")->load();
-    float maxVal = apvts.getRawParameterValue(id + "max")->load();
+    bool  enabled = prm.en->load() > 0.5f;
+    int   wave = (int)prm.wave->load();
+    bool  step = prm.step->load() > 0.5f;
+    bool  sync = prm.sync->load() > 0.5f;
+    float minVal = prm.minVal->load();
+    float maxVal = prm.maxVal->load();
 
     // ===== Min > Max のとき逆方向動作 =====
     // Min=95%, Max=20% → LFO は高い側から低い側へ動く（逆方向）。
@@ -85,8 +143,8 @@ void LfoEngine::processSingleLfo(int i,
     }
 
     // ===== Phase Offset + Fade-in パラメータ読み取り =====
-    const float phaseOffsetDeg = apvts.getRawParameterValue(id + "phase")->load();
-    const float fadeTime       = apvts.getRawParameterValue(id + "fade" )->load();
+    const float phaseOffsetDeg = prm.phase->load();
+    const float fadeTime       = prm.fade->load();
 
     // ===== Fade-in エンベロープ更新 =====
     // isWait=true（Recording 録音待機中）はフェードを一時停止
@@ -99,8 +157,8 @@ void LfoEngine::processSingleLfo(int i,
     // LFO4 Rate Modulation をアサイン先フラグに基づいて適用
     float rateModulation = lfo4RateModulationActive[i] ? lfo4RateModulation : 1.0f;
     float rate = (sync
-        ? (1.0f / getSyncTime((int)apvts.getRawParameterValue(id + "rateSync")->load(), bpm))
-        : apvts.getRawParameterValue(id + "rateFree")->load()) * rateModulation;
+        ? (1.0f / getSyncTime((int)prm.rateSync->load(), bpm))
+        : prm.rateFree->load()) * rateModulation;
 
     float actualDt = rate * dt;
 
@@ -333,7 +391,7 @@ void LfoEngine::processSingleLfo(int i,
     // 周期的な波形に対して、フィルター(A=0,B=1,C=2,D=3)ごとに
     // spread° ずつ位相をずらした値を mod4[i][f] に格納する。
     // 例: Spread=90°,Sine → A=sin(p), B=sin(p+90°), C=sin(p+180°), D=sin(p+270°)
-    const float spreadDeg   = apvts.getRawParameterValue(id + "spread")->load();
+    const float spreadDeg   = prm.spread->load();
     const float spreadRad   = spreadDeg * juce::MathConstants<float>::pi / 180.0f;
     // Spread が有効な周期波形 (ステートフル波形は除外)
     const bool  canSpread   = (spreadRad > 0.001f) &&
@@ -472,12 +530,10 @@ float LfoEngine::getSyncTime(int selection, double bpm)
 // ==========================================
 // LFO4 専用処理: Rate Modulation
 // ==========================================
-void LfoEngine::processLFO4(float dt,
-    double bpm,
-    juce::AudioProcessorValueTreeState& apvts)
+void LfoEngine::processLFO4(float dt, double bpm)
 {
-    // ===== パラメータ読み込み =====
-    bool enabled = apvts.getRawParameterValue("lfo4en")->load() > 0.5f;
+    // ===== パラメータ読み込み（キャッシュ済みポインタ）=====
+    bool enabled = lp4.en->load() > 0.5f;
 
     if (!enabled)
     {
@@ -486,12 +542,12 @@ void LfoEngine::processLFO4(float dt,
         return;
     }
 
-    int   wave      = (int)apvts.getRawParameterValue("lfo4wave")->load();
-    bool  step      = apvts.getRawParameterValue("lfo4step")->load() > 0.5f;
-    bool  sync      = apvts.getRawParameterValue("lfo4sync")->load() > 0.5f;
-    int   rateSync  = (int)apvts.getRawParameterValue("lfo4rateSync")->load();
-    float rateFree  = apvts.getRawParameterValue("lfo4rateFree")->load();
-    float depth     = apvts.getRawParameterValue("lfo4depth")->load();
+    int   wave      = (int)lp4.wave->load();
+    bool  step      = lp4.step->load() > 0.5f;
+    bool  sync      = lp4.sync->load() > 0.5f;
+    int   rateSync  = (int)lp4.rateSync->load();
+    float rateFree  = lp4.rateFree->load();
+    float depth     = lp4.depth->load();
 
     // ===== Rate計算 =====
     // sync モード: getSyncTime() は周期 [秒] を返すため 1/T でHz 換算してから位相を進める
