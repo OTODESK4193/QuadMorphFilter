@@ -24,7 +24,9 @@
 ---
 
 ##
-<img src="Source/Assets/Screenshot.jpg" width="600">
+<img src="Source/Assets/Main_Filter.jpg" width="820">
+
+<sub>FILTER tab — the four-filter matrix, the combined response curve and the XY morph pad.</sub>
 
 ## Overview
 
@@ -118,10 +120,55 @@ A comprehensive, handcrafted collection spanning 6 distinct filter architecture 
 * **LFO Tab Navigation:** Visual tabs to select which LFO is being edited or recorded — prevents accidental overwrites.
 * **Parameter Smoothing:** All slider changes are interpolated to eliminate clicks and pops.
 
-> **Removed in V1.1.0:** the *E-Button* background randomizer. Its role is taken over by the proper 10-theme selector in the header.
+> **Removed in V1.1.0:** the *E-Button* background randomizer. Its role is taken over by the proper 10-theme selector, now on the CONFIG tab.
 
 ##
-<img src="Source/Assets/Screenshot2.jpg" width="600">
+<img src="Source/Assets/Mod.jpg" width="820">
+
+<sub>MOD tab — LFO 1-3 with their waveform, sync, range, phase, fade and filter-spread controls, plus LFO4 (rate modulation), LFO5 (dry/wet) and the envelope follower.</sub>
+
+
+## Presets
+
+<img src="Source/Assets/PRESET.jpg" width="820">
+
+<sub>The preset browser, opened from the PRESET button in the header.</sub>
+
+**200 factory presets** are built in, organised into ten categories:
+
+| Category | What it covers |
+|---|---|
+| Classic Analog | Moog, CEM3320, SSM2040, Jupiter, SEM and CS-80 staples |
+| Acid & Squelch | TB-303 territory — high resonance with tempo-synced movement |
+| Vocal & Formant | The Vowel filter morphing between vowel positions |
+| Rhythmic & Gated | Synced LFOs used as gates and choppers |
+| Ambient & Space | FDN reverb, waveguide and modal resonators |
+| Metallic & Resonant | Comb, modal and waveguide ringing |
+| Lo-Fi & Digital | Bitcrush and Nyquist AA textures |
+| Motion & Morph | Filter spread and 2-D waveforms rotating the four filters |
+| FX & Special | Phaser, Bode shifter, wavefolder, phased array |
+| Bass & Sub | Low-register patches with restrained resonance |
+
+The browser has four views — **All / Factory / User / Favorites** — with a subcategory column and a search box. A single click loads; clicking the star keeps a preset in Favorites. Favourites are shared between plugin instances, and the file is re-read and merged on every write so two open windows never overwrite each other's list.
+
+**Random** inside the browser loads a random preset *from whatever the list is currently showing*, so you can shuffle within a single category or within your favourites.
+
+### Header controls
+
+| Button | What it does |
+|---|---|
+| ◀ ▶ | Step through the factory presets one at a time, wrapping at either end |
+| PRESET | Open and close the browser |
+| RANDOM | Generate a **new** patch (see below) — not the same as the browser's Random |
+| RESET | Return every parameter to its default, after a confirmation dialog |
+
+### About RANDOM
+
+Scattering uniform random numbers across every parameter almost always produces something unusable, so the generator works under four constraints. It picks **one voicing character** (Analog, Aggressive, Resonant, Clean, Digital or Spatial) and draws all four models from that group rather than independently. It **spreads the four cutoffs** along a logarithmic curve so they divide the spectrum instead of fighting over one band. It **scales resonance down as more filters are active**, and further for the higher bands. LFOs are **tempo-synced** and limited to 8 bars through 1 beat. Output gain, dry/wet and the ceiling are never randomised, so there are no level accidents.
+
+### Saving your own
+
+Type a name, optionally a subcategory, and press Save. Presets are stored as XML under `Documents/OTODESK/QuadMorphFilter/Presets`, with the subcategory becoming a folder. Right-click a user preset to delete it.
 
 
 ## Filter Models Guide
@@ -289,6 +336,12 @@ Control the minimum and maximum mix level of the wet signal via LFO5:
 | Envelope Invert | On/Off | Off | Invert envelope polarity |
 | GUI Theme | 10 themes | Midnight | Color theme (display only, not automatable) |
 
+Envelope Depth, GUI Theme and Oversampling all live on the **CONFIG** tab.
+
+<img src="Source/Assets/Config.jpg" width="820">
+
+<sub>CONFIG tab — morph settings, colour theme, oversampling quality and plugin information.</sub>
+
 
 ## Changelog
 
@@ -324,8 +377,18 @@ Control the minimum and maximum mix level of the wet signal via LFO5:
 * Loop invariants hoisted out of the sample loop; the morph weight calculation is now skipped entirely when it cannot change within a block.
 * Removed a dead `FilterA_SVF_SIMD` instance that cleared four buffers every block for no reason, an unused 128 KB waveguide buffer per filter instance, and a ~45-line block-rate weight calculation whose result was never read.
 
+#### Presets and workflow
+
+* **200 factory presets** across ten categories, with a three-column browser (category / subcategory / list), a search box and favourites. Favourites are shared across instances and merged on write, so two open windows never clobber each other's list.
+* **User presets** save to `Documents/OTODESK/QuadMorphFilter/Presets` as XML; the optional subcategory becomes a folder. Right-click to delete.
+* **◀ ▶ in the header** step through the factory presets, and the current preset name is shown between them.
+* **RANDOM** generates a new patch under musical constraints rather than scattering uniform noise across the parameters — one voicing character, cutoffs spread across the spectrum, resonance scaled to the number of active filters, and tempo-synced LFOs. Output levels are never randomised.
+* **RESET** returns everything to defaults behind a confirmation dialog.
+* The preset name, the factory index and the window size are stored in the plugin state, so they survive both a DAW reload and simply closing and reopening the editor.
+
 #### GUI
 
+* **Tabs are now FILTER / MOD / CONFIG.** The output stage moved onto the FILTER tab as three knobs, and the morph settings, colour theme and oversampling moved to CONFIG.
 * **Embedded fonts.** Inter for the interface and JetBrains Mono for numeric readouts, both bundled under SIL OFL 1.1 (licence text included in `Source/Assets/Fonts/`). Values are monospaced so the digits stop shifting as modulated numbers change.
 * **Solo buttons.** Each filter row has an `S` next to its on/off button. Solo is exclusive, overrides the enable switch the way a mixer does, and applies to both the audio and the response display — the soloed curve is filled with a gradient in that filter's own colour. Solo is deliberately not stored in the plugin state, so it always releases when a project is reopened.
 * **LFO modulation is shown on the sliders.** When LFO2 or LFO3 is assigned to a filter's cutoff or resonance, the slider draws a translucent band from the knob position to the modulated position with a bright moving tip, and the numeric readout follows the value actually reaching the filter.

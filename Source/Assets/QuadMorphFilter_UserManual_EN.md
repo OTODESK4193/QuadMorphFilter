@@ -15,13 +15,14 @@
 5. [Filter System](#filter-system)
 6. [Morphing Features](#morphing-features)
 7. [LFO System](#lfo-system)
-8. [Advanced Features](#advanced-features)
-9. [Parameter Reference](#parameter-reference)
-10. [Use Cases & Techniques](#use-cases--techniques)
-11. [Troubleshooting](#troubleshooting)
-12. [FAQ](#faq)
-13. [Technical Specifications](#technical-specifications)
-14. [License](#license)
+8. [Presets](#presets)
+9. [Advanced Features](#advanced-features)
+10. [Parameter Reference](#parameter-reference)
+11. [Use Cases & Techniques](#use-cases--techniques)
+12. [Troubleshooting](#troubleshooting)
+13. [FAQ](#faq)
+14. [Technical Specifications](#technical-specifications)
+15. [License](#license)
 
 ---
 
@@ -91,31 +92,38 @@ A standalone executable is also provided. Simply run `Quad-Morph Filter.exe` —
 
 ### Interface Overview
 
+The window is split into a top half that is always visible and a bottom half that
+switches between three tabs.
+
 ```
-┌─────────────────────────────────────────────┐
-│ Filter Panel                                │
-│  ├─ Filter A/B/C/D (Enable, Model, Type)  │
-│  ├─ Cutoff / Resonance Sliders             │
-│  └─ LFO Cut/Res Buttons                    │
-├─────────────────────────────────────────────┤
-│ XY Morph Pad                                │
-│  ├─ Morph Area (A/B/C/D at corners)       │
-│  ├─ LFO Tabs (LFO1/2/3 Selection)         │
-│  └─ Recording Grid Overlay                 │
-├─────────────────────────────────────────────┤
-│ Visualizer & E-Button                       │
-│  ├─ Real-Time Frequency Response Graph     │
-│  └─ E-Button (Background Color Randomizer) │
-├─────────────────────────────────────────────┤
-│ LFO Control Section                         │
-│  ├─ LFO1/2/3 Parameters                   │
-│  └─ LFO4/5 Specialized Controls            │
-├─────────────────────────────────────────────┤
-│ Master Controls                             │
-│  ├─ Output Gain / Dry-Wet Mix             │
-│  ├─ Oversampling / Limiter Ceiling        │
-│  └─ Envelope Follower                      │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│ Header                                                    │
+│   Title        ◀ [preset name] ▶  PRESET RANDOM RESET    │
+├───────────────────────────────┬──────────────────────────┤
+│ Filter response curve          │ XY morph pad             │
+│  - individual A/B/C/D curves   │  - A/B/C/D at corners    │
+│  - combined curve (main line)  │  - LFO1/2/3 tabs         │
+│  - cutoff position markers     │  - drag to record a path │
+├───────────────────────────────┴──────────────────────────┤
+│ [ FILTER ] [ MOD ] [ CONFIG ]                            │
+├──────────────────────────────────────────────────────────┤
+│ FILTER tab                                                │
+│   FILTER MATRIX                                          │
+│     ON / S(Solo) / MODEL / TYPE / SLOPE                  │
+│     CUTOFF / RESONANCE / LFO2 / LFO3      x 4 rows        │
+│   OUTPUT                                                 │
+│     Output Gain / Dry-Wet / Ceiling (knobs)              │
+│     INFO panel (describes whatever is under the mouse)   │
+├──────────────────────────────────────────────────────────┤
+│ MOD tab                                                   │
+│   LFO1 MORPH / LFO2 CUTOFF / LFO3 RESO                   │
+│   LFO4 RATE MOD / LFO5 DRY-WET / ENV FOLLOW              │
+├──────────────────────────────────────────────────────────┤
+│ CONFIG tab                                                │
+│   MORPH (Blend / Cutoff Algo / XY Depth)                 │
+│   DISPLAY (colour theme)                                 │
+│   QUALITY (oversampling)                                 │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ### Mouse Operations
@@ -123,10 +131,18 @@ A standalone executable is also provided. Simply run `Quad-Morph Filter.exe` —
 | Action | Target | Effect |
 |---|---|---|
 | **Drag** | XY Pad | Change morph position |
-| **Left Click** | E-Button | Randomize background color |
-| **Right Click** | E-Button | Reset to default color |
+| **Drag** | XY Pad (Recording waveform selected) | Record a path |
 | **Slider Drag** | Parameter | Smooth value change |
-| **Ctrl + Click** | Slider | Reset to default value |
+| **Drag up/down or left/right** | Knob | Change value |
+| **Ctrl + Click** | Slider or knob | Reset to default value |
+| **Click** | S button | Solo that filter |
+| **Click** | LFO2 / LFO3 button | Cycle Off → +X → +Y → -X → -Y |
+| **Hover** | Any control | Show its description in the INFO panel |
+| **Click** | Star in the preset list | Add or remove from Favorites |
+| **Right Click** | User preset | Delete menu |
+
+> **Changed in V1.1.0:** the *E-Button* background randomizer has been removed.
+> Colours are now chosen from the ten themes on the CONFIG tab.
 
 ---
 
@@ -440,6 +456,74 @@ Prevents accidental overwriting during recording:
 [LFO1] [LFO2] [LFO3]
  ★              ← Currently recording LFO
 ```
+
+---
+
+## Presets
+
+The **PRESET** button in the header opens the browser.
+
+### Browser layout
+
+Three columns: category, subcategory and the preset list.
+
+| Category | Contents |
+|---|---|
+| **All** | Factory and user presets together |
+| **Factory** | The 200 built-in presets only |
+| **User** | Only the ones you saved |
+| **Favorites** | Only the ones you starred |
+
+A **single click on the name loads it** — no double-click needed. Clicking the **star** on the left adds or removes it from Favorites. The search box filters by name.
+
+Favorites live in `Documents/OTODESK/QuadMorphFilter/Presets/_favorites.txt` and are shared across plugin instances. The file is re-read and merged on every write, so two open windows never overwrite each other's list.
+
+### The 200 factory presets
+
+Ten categories of twenty.
+
+| Category | What it covers |
+|---|---|
+| Classic Analog | Moog, CEM3320, SSM2040, Jupiter, SEM, CS-80 staples |
+| Acid & Squelch | TB-303 territory, high resonance with synced LFOs |
+| Vocal & Formant | The Vowel filter morphing between vowels |
+| Rhythmic & Gated | Synced LFOs used as gates |
+| Ambient & Space | FDN reverb, waveguide and modal resonators |
+| Metallic & Resonant | Comb, modal and waveguide ringing |
+| Lo-Fi & Digital | Bitcrush and Nyquist AA textures |
+| Motion & Morph | Spread and 2-D waveforms rotating the four filters |
+| FX & Special | Phaser, Bode shifter, wavefolder, phased array |
+| Bass & Sub | Low register with restrained resonance |
+
+The **◀ ▶** buttons in the header step through them one at a time and wrap at either end. The current preset name sits between the two arrows.
+
+### Saving your own
+
+Type a name in the bar at the bottom of the browser, optionally add a subcategory, and press **Save**. Presets go to `Documents/OTODESK/QuadMorphFilter/Presets` as XML, and the subcategory becomes a folder. **Right-click** a user preset to delete it.
+
+### The browser's Random button
+
+This **loads a random preset from whatever the list is currently showing**. The category, subcategory and search filters all apply, so you can shuffle within just Ambient & Space, or pick one at random from your favourites.
+
+It is not the same as the header's RANDOM button.
+
+### The header's RANDOM button (generate)
+
+Scattering uniform random numbers across every parameter almost always produces something unusable, so four constraints are applied.
+
+It picks **one voicing character** — Analog, Aggressive, Resonant, Clean, Digital or Spatial — and draws all four models from that group rather than independently. It **spreads the four cutoffs** along a logarithmic curve so they divide the spectrum instead of fighting over one band. It **scales resonance down as more filters are active**, and further for the higher bands. LFOs are **tempo-synced** and limited to periods between eight bars and one beat.
+
+Output Gain, Dry/Wet and Ceiling are **never randomised**, so there are no level accidents.
+
+### The RESET button
+
+Returns **every parameter** to its default, including all four filters, all five LFOs, the envelope follower and the morph settings. A confirmation dialog appears first, so nothing happens unless you choose Yes. The colour theme is left alone since it has no effect on the sound.
+
+### What gets saved
+
+The preset name, the factory index and the window size are part of the plugin state. They survive both saving and reopening a DAW project and simply closing and reopening the plugin window.
+
+Solo is a temporary monitoring feature and is **not saved**. Reopening a project always starts with solo released.
 
 ---
 

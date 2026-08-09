@@ -247,8 +247,9 @@ def build():
                 p[f"cutoff{s}"] = round(cut, 1)
                 p[f"res{s}"] = round(res, 2)
                 # LFO2/3 の割り当て（0=Off,1=+X,2=+Y,3=-X,4=-Y）
-                p[f"lfoCutSrc{s}"] = [1,2,3,4][k] if (i % 3 != 2) else 0
-                p[f"lfoResSrc{s}"] = [0,2,0,4][k] if (i % 5 == 0) else 0
+                # 割り当ては後段でまとめて決める（LFO の ON/OFF と必ず一致させるため）
+                p[f"lfoCutSrc{s}"] = 0
+                p[f"lfoResSrc{s}"] = 0
 
             # ---- MORPH ----
             p["posX"] = round(0.2 + 0.6 * ((i % 5) / 4.0), 3)
@@ -266,16 +267,37 @@ def build():
                       "lfo1step":1 if k1=='16thstep' else 0})
 
             # ---- LFO2 (Cutoff) ----
+            #
+            # 【整合性】LFO の ON/OFF と、各フィルターの割り当てボタンは
+            # 必ず一致させる。片方だけ立っていると
+            #   ・LFO は動いているのに音が変わらない
+            #   ・ボタンは点灯しているのに変調が来ない
+            # という「壊れて見える」プリセットになるため。
             k2 = c['lfo2'][i % len(c['lfo2'])]
             e,w,sy,rs,rf,mn,mx,sp = LFOS[k2]
             p.update({"lfo2en":e,"lfo2wave":w,"lfo2sync":sy,"lfo2rateSync":rs,
                       "lfo2rateFree":rf,"lfo2min":mn,"lfo2max":mx,"lfo2spread":sp})
+
+            if e:
+                # 有効フィルターの中から 2 本以上に、別々の軸を割り当てる
+                targets = [k for k in range(4) if p[f"enable{'ABCD'[k]}"] == 1]
+                axes = [1, 2, 3, 4]            # +X / +Y / -X / -Y
+                for n, k in enumerate(targets):
+                    if n == 0 or (n + i) % 2 == 0:
+                        p[f"lfoCutSrc{'ABCD'[k]}"] = axes[(i + n) % 4]
 
             # ---- LFO3 (Reso) ----
             k3 = c['lfo3'][i % len(c['lfo3'])]
             e,w,sy,rs,rf,mn,mx,sp = LFOS[k3]
             p.update({"lfo3en":e,"lfo3wave":w,"lfo3sync":sy,"lfo3rateSync":rs,
                       "lfo3rateFree":rf,"lfo3min":mn,"lfo3max":mx,"lfo3spread":sp})
+
+            if e:
+                # Res 変調は掛けすぎると不安定になるので 1〜2 本に絞る
+                targets = [k for k in range(4) if p[f"enable{'ABCD'[k]}"] == 1]
+                for n, k in enumerate(targets):
+                    if n == 0 or (n + i) % 3 == 0:
+                        p[f"lfoResSrc{'ABCD'[k]}"] = [2, 4, 1, 3][(i + n) % 4]
 
             # ---- LFO4 (Rate Mod) : 5 件に 1 件だけ ----
             use4 = (i % 5 == 3)
