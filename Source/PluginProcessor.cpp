@@ -174,6 +174,9 @@ QuadMorphFilterAudioProcessor::QuadMorphFilterAudioProcessor()
     cacheParameterPointers();
     lfoEngine.cacheParams(apvts);
     lfo5Engine.cacheParams(apvts);
+
+    // レイテンシ変化の監視。10Hz あれば OS 切替の反映として十分。
+    startTimerHz(10);
 }
 
 // ==========================================
@@ -233,7 +236,28 @@ void QuadMorphFilterAudioProcessor::cacheParameterPointers()
     cutoffAParam = apvts.getParameter("cutoffA");
 }
 
-QuadMorphFilterAudioProcessor::~QuadMorphFilterAudioProcessor() {}
+QuadMorphFilterAudioProcessor::~QuadMorphFilterAudioProcessor()
+{
+    // Timer は必ずデストラクタ最優先で停止（CLAUDE.md §3）。
+    // 破棄中にコールバックが走ると、解放済みメンバへのアクセスになる。
+    stopTimer();
+}
+
+// ==========================================
+// timerCallback
+// メッセージスレッドで動く。オーディオスレッドが置いた
+// pendingLatencySamples を読み、変化していればホストへ通知する。
+// ==========================================
+void QuadMorphFilterAudioProcessor::timerCallback()
+{
+    const int lat = pendingLatencySamples.load(std::memory_order_relaxed);
+
+    if (lat != reportedLatencySamples)
+    {
+        reportedLatencySamples = lat;
+        setLatencySamples(lat);
+    }
+}
 
 void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
@@ -270,6 +294,11 @@ void QuadMorphFilterAudioProcessor::prepareToPlay(double sampleRate, int samples
     maxLatency = std::max(maxLatency, filterB.getOsLatencySamples());
     maxLatency = std::max(maxLatency, filterC.getOsLatencySamples());
     maxLatency = std::max(maxLatency, filterD.getOsLatencySamples());
+
+    // prepareToPlay はメッセージ／準備スレッドなのでここは直接通知してよい。
+    // 以降の OS 切替による変化は processBlock → timerCallback 経由で反映される。
+    pendingLatencySamples.store(maxLatency, std::memory_order_relaxed);
+    reportedLatencySamples = maxLatency;
     setLatencySamples(maxLatency);
 }
 
@@ -287,8 +316,21 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         return;
     }
 
-    const int   numSamples = buffer.getNumSamples();
-    const int   numChannels = buffer.getNumChannels();
+    const int numSamples = buffer.getNumSamples();
+
+    // ===== チャンネル数の防御 =====
+    // isBusesLayoutSupported() で mono / stereo のみ許可しているが、
+    // ホストによっては宣言と異なるチャンネル数でバッファを渡してくることがある。
+    // 以下のコードは要素数 2 の固定長配列（outPtrs 等）と 2ch 固定の
+    // dryBuffer / filterBuffers を前提にしているため、必ず 2 でクランプする。
+    // 万一 3ch 以上で来た場合、余剰チャンネルは無音にして出力を汚さない。
+    static constexpr int kMaxChannels = 2;
+    const int hostChannels = buffer.getNumChannels();
+    const int numChannels = juce::jmin(hostChannels, kMaxChannels);
+
+    for (int ch = numChannels; ch < hostChannels; ++ch)
+        buffer.clear(ch, 0, numSamples);
+
     const float dt = numSamples / (float)expectedSampleRate;
 
     bool lfo5Enabled = gp.lfo5en->load() > 0.5f;
@@ -497,6 +539,19 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     updateTpt(filterB, 1);
     updateTpt(filterC, 2);
     updateTpt(filterD, 3);
+
+    // ===== レイテンシ変化の検出 =====
+    // OS ファクターは OS Quality パラメータと、Auto 時のモデル変更で変わる。
+    // ここではアトミックに値を置くだけ（ロック・確保・ホスト通知なし）。
+    // 実際の setLatencySamples() は timerCallback がメッセージスレッドで行う。
+    {
+        int lat = 0;
+        lat = std::max(lat, filterA.getOsLatencySamples());
+        lat = std::max(lat, filterB.getOsLatencySamples());
+        lat = std::max(lat, filterC.getOsLatencySamples());
+        lat = std::max(lat, filterD.getOsLatencySamples());
+        pendingLatencySamples.store(lat, std::memory_order_relaxed);
+    }
 
     bool enA = fp[0].enable->load() > 0.5f;
     bool enB = fp[1].enable->load() > 0.5f;
@@ -711,7 +766,34 @@ int  QuadMorphFilterAudioProcessor::getCurrentProgram() { return 0; }
 void QuadMorphFilterAudioProcessor::setCurrentProgram(int) {}
 const juce::String QuadMorphFilterAudioProcessor::getProgramName(int) { return {}; }
 void QuadMorphFilterAudioProcessor::changeProgramName(int, const juce::String&) {}
-bool QuadMorphFilterAudioProcessor::isBusesLayoutSupported(const BusesLayout&) const { return true; }
+// ==========================================
+// isBusesLayoutSupported
+// 【V1.1.0 修正】
+//   旧実装は無条件に true を返していたが、processBlock 側は
+//   float* outPtrs[2] のような要素数 2 の固定長配列を実チャンネル数で
+//   ループしており、dryBuffer と filterBuffers も 2ch 固定、
+//   currentGainReduction[2] も同様だった。
+//   ホストが 3ch 以上のレイアウト（5.1 など）で問い合わせて
+//   インスタンス化した場合、スタックとバッファの範囲外書き込みになり
+//   スキャン失敗やクラッシュにつながる。
+//   実際に処理できる mono / stereo のみを受け付けるよう明示する。
+// ==========================================
+bool QuadMorphFilterAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
+{
+    const auto& mainIn  = layouts.getMainInputChannelSet();
+    const auto& mainOut = layouts.getMainOutputChannelSet();
+
+    // 出力は mono か stereo のみ
+    if (mainOut != juce::AudioChannelSet::mono()
+        && mainOut != juce::AudioChannelSet::stereo())
+        return false;
+
+    // 入出力のチャンネル構成は一致していること（サイドチェイン等は非対応）
+    if (mainIn != mainOut)
+        return false;
+
+    return true;
+}
 bool QuadMorphFilterAudioProcessor::hasEditor() const { return true; }
 juce::AudioProcessorEditor* QuadMorphFilterAudioProcessor::createEditor()
 {

@@ -44,18 +44,46 @@ private:
     TptFilterState state;
 
     // ===== TptFilter 固有（カテゴリファイルに非公開）=====
+    // 【V1.1.0】preparedBlockSize は旧 rebuildOversampler() 専用だったため削除。
+    // オーバーサンプラーは prepare() でブロックサイズを直接受け取って初期化する。
     int    maxChannels = 2;
-    int    preparedBlockSize = 512;
 
     juce::SmoothedValue<float> cutoff;
     juce::SmoothedValue<float> resonance;
     float lastCutoff = -1.0f;
     float lastRes = -1.0f;
 
-    // Oversampling
-    std::unique_ptr<juce::dsp::Oversampling<float>> oversampler;
-    int currentOsFactor = 0;
+    // ===== Oversampling =====
+    // 【V1.1.0 修正】オーディオスレッド上での再構築を廃止。
+    //
+    // 旧実装は setOsMode() / setModel() から rebuildOversampler() を呼び、
+    // その中で std::make_unique と initProcessing()（内部バッファ確保）、
+    // さらに旧インスタンスの解放を行っていた。これらはすべて processBlock から
+    // 呼ばれる経路であり、CLAUDE.md §1 の「動的メモリ確保の禁止」に抵触する。
+    // しかも OS Quality の既定値が Auto のため、ユーザーが Model ツマミを
+    // 回すたびに確保と解放が走っていた（モデル切替時のプチノイズの原因）。
+    //
+    // 現在は prepare() で 2x / 4x の両方を生成しておき、切り替えは
+    // ポインタを選び直すだけにしている。確保はオーディオスレッドで一切起きない。
+    // メモリコストは 1 フィルターあたり数十 KB 程度。
+    std::unique_ptr<juce::dsp::Oversampling<float>> os2x;   // factor 1 (2倍)
+    std::unique_ptr<juce::dsp::Oversampling<float>> os4x;   // factor 2 (4倍)
+    int currentOsFactor = 0;      // 0 = OS 無効 / 1 = 2x / 2 = 4x
     int osMode = 0;
+
+    /** 現在の OS ファクターに対応するオーバーサンプラー（無効時は nullptr）。 */
+    juce::dsp::Oversampling<float>* activeOversampler() const noexcept
+    {
+        switch (currentOsFactor)
+        {
+        case 1:  return os2x.get();
+        case 2:  return os4x.get();
+        default: return nullptr;
+        }
+    }
+
+    /** OS ファクターを切り替える（確保を伴わない）。 */
+    void selectOsFactor(int newFactor);
 
     // ===== 内部メソッド =====
     float processSample(int channel, float x);
@@ -72,7 +100,6 @@ private:
     double lastCoeffRate = 0.0;
 
     int  getAutoOsFactor(int modelIdx) const;
-    void rebuildOversampler(int newFactor);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TptFilter)
 };

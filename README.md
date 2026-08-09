@@ -311,8 +311,14 @@ Control the minimum and maximum mix level of the wet signal via LFO5:
 * Comb / Waveguide delay indices now use a named constant with a range clamp instead of a hard-coded mask.
 * `spreadActive` is now cleared when an LFO is disabled; previously it stayed set and frozen modulation values kept being applied.
 
+#### Host compatibility
+
+* **Only mono and stereo layouts are accepted now.** `isBusesLayoutSupported` previously returned `true` for every layout, while the processing code assumed at most two channels and used fixed size-2 arrays. A host instantiating the plugin with three or more channels could overrun those buffers. The channel count is also clamped defensively inside `processBlock`.
+* **Latency changes are reported to the host.** Switching OS Quality — or changing a filter model while OS Quality is on Auto — alters the oversampling latency, but `setLatencySamples` was only ever called from `prepareToPlay`, leaving the host's delay compensation stale. The current latency is now published whenever it changes.
+
 #### Performance and real-time safety
 
+* **Oversamplers are no longer rebuilt on the audio thread.** Changing a filter model with OS Quality on Auto (the default) ran `std::make_unique`, `initProcessing` and a deallocation of the previous instance from inside `processBlock` — allocation and freeing on the real-time thread during the most common user action. Both the 2× and 4× oversamplers are now built up front in `prepareToPlay`, and switching is a pointer selection.
 * **Removed all heap allocation from the audio thread.** Parameter IDs were being assembled with `juce::String` concatenation inside `processBlock` and the LFO engines (`"cutoff" + s`, `"lfo" + String(i+1)` and so on), causing roughly 78 allocations per block — about 10,000 malloc calls per second on the real-time thread. All parameter pointers are now resolved once in the constructor.
 * Removed ~70 string-keyed parameter lookups per block, including four per *sample* in the mix loop.
 * Loop invariants hoisted out of the sample loop; the morph weight calculation is now skipped entirely when it cannot change within a block.

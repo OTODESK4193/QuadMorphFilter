@@ -28,7 +28,6 @@ void TptFilter::prepare(double newSampleRate, int samplesPerBlock, int numChanne
 {
     state.sampleRate = newSampleRate;
     maxChannels = juce::jmin(numChannels, 2);
-    preparedBlockSize = samplesPerBlock;
 
     cutoff.reset(state.sampleRate, 0.01);
     resonance.reset(state.sampleRate, 0.01);
@@ -39,11 +38,18 @@ void TptFilter::prepare(double newSampleRate, int samplesPerBlock, int numChanne
     lastCoeffRate = 0.0;          // 強制的に再計算させる
     updateRateDependentCoeffs(newSampleRate);
 
-    if (oversampler != nullptr)
-    {
-        oversampler->initProcessing(static_cast<size_t>(samplesPerBlock));
-        oversampler->reset();
-    }
+    // ===== オーバーサンプラーの事前生成 =====
+    // 2x と 4x の両方をここで作り切ってしまう。以降 processBlock 側は
+    // ポインタを選び直すだけになり、オーディオスレッドでの確保が消える。
+    // prepare() はメッセージ／準備スレッドで走るため確保して問題ない。
+    using Osl = juce::dsp::Oversampling<float>;
+    os2x = std::make_unique<Osl>(maxChannels, 1, Osl::filterHalfBandPolyphaseIIR, true);
+    os4x = std::make_unique<Osl>(maxChannels, 2, Osl::filterHalfBandPolyphaseIIR, true);
+
+    os2x->initProcessing(static_cast<size_t>(samplesPerBlock));
+    os4x->initProcessing(static_cast<size_t>(samplesPerBlock));
+    os2x->reset();
+    os4x->reset();
 
     reset();
 }
@@ -176,8 +182,9 @@ void TptFilter::reset()
     lastRes = resonance.getCurrentValue();
     state.smoothedDigitalCutoff = cutoff.getCurrentValue();
 
-    if (oversampler != nullptr)
-        oversampler->reset();
+    // 事前生成した両方をクリアしておく（切替時に古い状態が残らないように）
+    if (os2x != nullptr) os2x->reset();
+    if (os4x != nullptr) os4x->reset();
 }
 
 // ==========================================
@@ -188,8 +195,11 @@ void TptFilter::setModel(int newModel)
     if (state.filterModel == newModel) return;
     state.filterModel = newModel;
     lastCutoff = -1.0f;
+    // Auto モードではモデルごとに最適な OS ファクターへ切り替える。
+    // 【V1.1.0】以前はここで rebuildOversampler() が走り、Model を回すたびに
+    // オーディオスレッドで確保と解放が発生していた。現在は選択のみ。
     if (osMode == 1)
-        rebuildOversampler(getAutoOsFactor(newModel));
+        selectOsFactor(getAutoOsFactor(newModel));
 }
 
 void TptFilter::setCutoff(float newCutoff)
@@ -324,13 +334,32 @@ void TptFilter::setOsMode(int mode)
     case 2: newFactor = 1;                                       break;
     case 3: newFactor = 2;                                       break;
     }
-    rebuildOversampler(newFactor);
+    selectOsFactor(newFactor);
+}
+
+// ==========================================
+// selectOsFactor
+// OS ファクターを切り替える。事前生成済みのインスタンスを選び直すだけで、
+// 確保・解放・システムコールを一切行わないためオーディオスレッドから安全。
+// ==========================================
+void TptFilter::selectOsFactor(int newFactor)
+{
+    newFactor = juce::jlimit(0, 2, newFactor);
+    if (newFactor == currentOsFactor) return;
+
+    currentOsFactor = newFactor;
+    lastCutoff = -1.0f;   // 実効レートが変わるので係数を再計算させる
+
+    // 切り替え先の内部状態をクリアして、前回使用時の残響が漏れるのを防ぐ。
+    // reset() はフィルター状態のゼロクリアのみで確保を伴わない。
+    if (auto* os = activeOversampler())
+        os->reset();
 }
 
 int TptFilter::getOsLatencySamples() const
 {
-    return (oversampler != nullptr)
-        ? static_cast<int>(oversampler->getLatencyInSamples()) : 0;
+    auto* os = activeOversampler();
+    return (os != nullptr) ? static_cast<int>(os->getLatencyInSamples()) : 0;
 }
 
 int TptFilter::getAutoOsFactor(int m) const
@@ -340,20 +369,6 @@ int TptFilter::getAutoOsFactor(int m) const
         m == 10 || m == 12 || m == 13 || m == 14 || m == 15 || m == 16) return 1;
     // Model 10 (FDN Reverb): SVF プリフィルターの共鳴エイリアシング低減のため 2× OS
     return 0;
-}
-
-void TptFilter::rebuildOversampler(int newFactor)
-{
-    if (newFactor == currentOsFactor && oversampler != nullptr) return;
-    currentOsFactor = newFactor;
-    if (newFactor == 0) { oversampler.reset(); lastCutoff = -1.0f; return; }
-
-    oversampler = std::make_unique<juce::dsp::Oversampling<float>>(
-        maxChannels, newFactor,
-        juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true);
-    oversampler->initProcessing(static_cast<size_t>(preparedBlockSize));
-    oversampler->reset();
-    lastCutoff = -1.0f;
 }
 
 void TptFilter::updateCoefficients()
@@ -540,6 +555,8 @@ void TptFilter::process(juce::AudioBuffer<float>& buffer)
 {
     int numSamples = buffer.getNumSamples();
     int numChannels = juce::jmin(buffer.getNumChannels(), maxChannels);
+
+    auto* oversampler = activeOversampler();
 
     if (oversampler == nullptr || currentOsFactor == 0)
     {

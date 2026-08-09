@@ -4,7 +4,8 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
-#include <juce_dsp/juce_dsp.h> // FastMathApproximations 等のために必須
+#include <juce_dsp/juce_dsp.h>     // FastMathApproximations 等のために必須
+#include <juce_events/juce_events.h> // juce::Timer（レイテンシ通知用）を明示的に取り込む
 #include "DSP/TptFilter.h"
 #include "DSP/LfoEngine.h"
 #include "DSP/Lfo5Engine.h"
@@ -13,7 +14,12 @@
 #include <array>
 #include <atomic>
 
-class QuadMorphFilterAudioProcessor : public juce::AudioProcessor
+// juce::Timer は「OS 切替によるレイテンシ変化をホストへ通知する」ためだけに使う。
+// setLatencySamples() は updateHostDisplay() を伴いオーディオスレッドから
+// 呼べないため、processBlock 側はアトミックに値を置くだけにして、
+// 実際の通知をメッセージスレッド（タイマー）から行う。
+class QuadMorphFilterAudioProcessor : public juce::AudioProcessor,
+                                      private juce::Timer
 {
 public:
     QuadMorphFilterAudioProcessor();
@@ -144,6 +150,19 @@ private:
 
     // ===== Ableton Live フェイルセーフ用 =====
     double expectedSampleRate = 0.0;
+
+    // ===== 【V1.1.0 追加】レイテンシ変化のホスト通知 =====
+    // 旧実装は prepareToPlay() でしか setLatencySamples() を呼んでおらず、
+    // OS Quality を切り替えたり（Auto 時に）モデルを変えたりして
+    // オーバーサンプリング量が変わってもホストへ伝わらず、
+    // 遅延補正（PDC）がずれたままになっていた。
+    //
+    // processBlock は pendingLatencySamples に値を置くだけ（ロックなし）。
+    // timerCallback がメッセージスレッドで差分を検出して通知する。
+    void timerCallback() override;
+
+    std::atomic<int> pendingLatencySamples { 0 };
+    int              reportedLatencySamples = -1;   // メッセージスレッドからのみ触る
 
     // ===== パラメータスムージング（統一的な 5ms タイムコンスタント）オリジナル復元 =====
     float lastDryWet = 0.5f;                   // 0.0-1.0 range（dB domain ではない）
