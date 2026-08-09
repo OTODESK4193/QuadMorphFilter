@@ -99,6 +99,7 @@ private:
         std::atomic<float>* posY             = nullptr;
         std::atomic<float>* morphBlend       = nullptr;
         std::atomic<float>* cutoffAlgo       = nullptr;
+        std::atomic<float>* xyDepth          = nullptr;
         std::atomic<float>* osMode           = nullptr;
         std::atomic<float>* dryWet           = nullptr;
         std::atomic<float>* masterGain       = nullptr;
@@ -131,7 +132,7 @@ private:
     //   必ず上書きされていた（実質デッドコード）ためメンバごと除去。
     //   ソースファイル自体は Source/DSP/FilterA_SVF_SIMD.* に温存してある。
 
-    // 27モデル用
+    // 全 28 モデル（Model 0 の Clean SVF を含む）を TptFilter が処理する
     TptFilter filterA, filterB, filterC, filterD;
 
     std::array<juce::AudioBuffer<float>, 4> filterBuffers;

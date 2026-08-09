@@ -128,6 +128,16 @@ QuadMorphFilterAudioProcessor::createParameterLayout()
         juce::ParameterID{ "cutoffAlgo", 1 }, "Cutoff Algo",
         juce::StringArray{ "Abs", "Rel", "Zone" }, 0));
 
+    // ===== 【V1.1.0 追加】XY → Cutoff/Res の適用量 =====
+    // Cutoff Algo は V1.0.0 から存在していたが、算出した xyCutoff / xyRes が
+    // DSP に接続されておらず、実際には音に影響していなかった。
+    // 深さ調整が無いまま接続すると既存プロジェクトの音が激変するため、
+    // 適用量パラメータを新設する。
+    // 既定値 0% = 従来どおり Cutoff / Res ノブの値がそのまま使われる（音は不変）。
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "xyDepth", 1 }, "XY Depth",
+        juce::NormalisableRange<float>(0.0f, 100.0f, 0.1f), 0.0f));
+
     const juce::StringArray modSrcs = { "Off", "+X", "+Y", "-X", "-Y" };
     const int defaults[4] = { 0, 0, 0, 0 };
     int fi = 0;
@@ -202,6 +212,7 @@ void QuadMorphFilterAudioProcessor::cacheParameterPointers()
     gp.posY             = apvts.getRawParameterValue("posY");
     gp.morphBlend       = apvts.getRawParameterValue("morphBlend");
     gp.cutoffAlgo       = apvts.getRawParameterValue("cutoffAlgo");
+    gp.xyDepth          = apvts.getRawParameterValue("xyDepth");
     gp.osMode           = apvts.getRawParameterValue("osMode");
     gp.dryWet           = apvts.getRawParameterValue("dryWet");
     gp.masterGain       = apvts.getRawParameterValue("masterGain");
@@ -344,6 +355,13 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     xyCutoff = juce::jlimit(20.0f, 20000.0f, xyCutoff);
     xyRes = juce::jlimit(0.1f, 10.0f, xyRes);
 
+    // ===== 【V1.1.0 修正】XY Depth =====
+    // ここまでで求めた xyCutoff / xyRes は V1.0.0 以来どこからも参照されておらず、
+    // Cutoff Algo コンボが音に影響しない状態だった。xyDepth で適用量を決めて
+    // getFilterParams() に渡す。0% のときは補間が恒等になるため従来の音と完全に一致する。
+    const float xyDepth = juce::jlimit(0.0f, 1.0f, gp.xyDepth->load() / 100.0f);
+    const bool  xyActive = (xyDepth > 1.0e-4f);
+
     bool lfo1_isRand1 = ((int)gp.lfo2wave->load() == 3)
         && (gp.lfo2en->load() > 0.5f);
     bool lfo2_isRand1 = ((int)gp.lfo3wave->load() == 3)
@@ -444,6 +462,20 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             float baseCutoff = (idx == 0) ? envFollowCutoffNormA : p.cutoff->load();
             float baseRes    = p.res->load();
 
+            // ===== XY Depth: モーフ座標由来の Cutoff/Res を混ぜる =====
+            // 幾何補間（対数領域の線形補間）: base * (xy / base)^depth
+            //   depth = 0 → base そのもの（恒等 = 従来の音）
+            //   depth = 1 → xyCutoff / xyRes そのもの
+            // 周波数も Q も比率で知覚されるため、線形ではなく対数領域で補間する。
+            // base は常に正（20〜20000 / 0.1〜10）なので pow の定義域は安全。
+            // ブロックレートの計算であり、TptFilter 側の SmoothedValue が
+            // サンプル間を補間するためジッパーノイズは生じない。
+            if (xyActive)
+            {
+                baseCutoff *= std::pow(xyCutoff / baseCutoff, xyDepth);
+                baseRes    *= std::pow(xyRes    / baseRes,    xyDepth);
+            }
+
             float fc = lfoCutOn ? MorphEngine::applyFrequencyMod(baseCutoff, cM[cutModIdx]) : baseCutoff;
             float res = lfoResOn ? MorphEngine::applyResonanceMod(baseRes, rM[resModIdx]) : baseRes;
 
@@ -472,19 +504,6 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     bool enD = fp[3].enable->load() > 0.5f;
     const int enabledCount = (int)enA + (int)enB + (int)enC + (int)enD;
 
-    // 【V1.1.0 削除】ブロックレートの wMix 計算ブロック（約 45 行）
-    //   ここで計算していた std::array<float,4> wMix は、算出後どこからも
-    //   参照されていなかった（実際のミックスはサンプルループ内の
-    //   wMix_current が担っている）。switch + sqrt + 正規化がブロック毎に
-    //   まるごと捨てられていたため削除。
-    //
-    //   【要確認】削除したコードには LFO1 の波形が Rand1 のとき
-    //   wMix = lfoEngine.getMod4(0) を使う分岐があったが、
-    //   生きているサンプルループ側にはこの分岐が無く、
-    //   getPosition(0) の 2D 座標から重みを求めている。
-    //   Rand1 時に「4 フィルターへ独立したランダム重みを配る」挙動を
-    //   意図していたのなら、それは現状すでに失われている
-    //   （この削除で音は変わらない。元々効いていなかったため）。
 
     int modelA = (int)fp[0].model->load();
     int modelB = (int)fp[1].model->load();

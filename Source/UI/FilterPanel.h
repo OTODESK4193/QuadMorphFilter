@@ -62,6 +62,14 @@ private:
     juce::ComboBox morphBlendCombo, cutoffAlgoCombo;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> morphBlendAtt, cutoffAlgoAtt;
 
+    // ===== 【V1.1.0 追加】XY Depth =====
+    // Cutoff Algo で求めた Cutoff/Res を各フィルターへどれだけ適用するか。
+    // 0% で従来どおり（Cutoff/Res ノブの値をそのまま使用）。
+    // 宣言順に注意: アタッチメントはスライダーより後に宣言し、
+    // 破棄が先に走るようにする（CLAUDE.md §3）。
+    juce::Slider xyDepthSlider;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> xyDepthAtt;
+
     // 見出しの描画位置（resized で確定、paint で使用）
     juce::Rectangle<int> headerArea, columnArea, morphHeaderArea, morphRowArea;
     std::array<juce::Rectangle<int>, 4> rowAreas;

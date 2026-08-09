@@ -41,6 +41,20 @@ FilterPanel::FilterPanel(QuadMorphFilterAudioProcessor& p)
     cutoffAlgoAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         processor.apvts, "cutoffAlgo", cutoffAlgoCombo);
 
+    // ---- XY Depth（Cutoff Algo の適用量。0% で従来どおり）----
+    xyDepthSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    xyDepthSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    xyDepthSlider.setName("XY Amt");
+    xyDepthSlider.getProperties().set("qmUnit", (int)QMUI::Unit::Pct);
+    xyDepthSlider.setColour(juce::Slider::thumbColourId, QMColors::accentMorph);
+    // 表示文字列は英字のみ（144 行のコメント参照: 非 ASCII は assert する）
+    xyDepthSlider.setTooltip("How much the Cutoff Algo mapping of the morph XY position "
+                             "drives every filter's cutoff and resonance.  "
+                             "At 0% the Cut / Res sliders are used unchanged.");
+    addAndMakeVisible(xyDepthSlider);
+    xyDepthAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        processor.apvts, "xyDepth", xyDepthSlider);
+
     updateLfoSrcButtons();
     startTimerHz(20);
 }
@@ -409,6 +423,13 @@ void FilterPanel::resized()
         r.removeFromLeft(30);
         r.removeFromLeft(84);                                 // "CUTOFF ALGO" ラベル分
         cutoffAlgoCombo.setBounds(r.removeFromLeft(120));
+
+        // XY Depth バー（名前と値はバー内に描画されるのでラベル不要）
+        r.removeFromLeft(20);
+        const int barW = juce::jmin(160, r.getWidth());
+        if (barW > 40)
+            xyDepthSlider.setBounds(r.removeFromLeft(barW)
+                                        .withSizeKeepingCentre(barW, QMUI::kBarH));
     }
 }
 
