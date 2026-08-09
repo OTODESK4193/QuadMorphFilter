@@ -59,6 +59,30 @@ namespace
     const int kModWaves[] = { 0, 1, 2, 3, 7 };
     constexpr int kNumModWaves = (int)(sizeof(kModWaves) / sizeof(kModWaves[0]));
 
+    // ---- 自己発振しない Res の上限 ----
+    // DSP の帰還量マッピングから逆算した値（FactoryPresets 生成器と同じ根拠）。
+    //   ラダー系 (1,12,15): ladderRes = jmap(res, 0.1..10, 0..4.5)
+    //     4 極ラダーは帰還 4 で発振 → res ≈ 8.9。余裕を見て 7.5。
+    //   SSM2040 (13): r_scale = 5.0 → 閾値 ≈ 8.0 → 6.8
+    //   TB-303 (2) / MS-20 (7) / Comb (6) / Waveguide (23) / FDN (10) も同様に
+    //     フィードバックが 1 に近づくと鳴り続けるため上限を設ける。
+    //   ここに無いモデルは構造上発振しない（SVF は Q が上がるだけ）。
+    float safeRes(int model)
+    {
+        switch (model)
+        {
+        case 1: case 12: case 15: return 7.5f;   // Moog / CEM3320 / Jupiter
+        case 13:                  return 6.8f;   // SSM2040
+        case 2:                   return 7.0f;   // TB-303
+        case 7:                   return 7.0f;   // MS-20
+        case 6:                   return 7.5f;   // Comb
+        case 23:                  return 6.5f;   // Waveguide
+        case 10:                  return 8.0f;   // FDN Reverb (decay)
+        case 16:                  return 8.0f;   // EDP Wasp
+        default:                  return 10.0f;  // 上限なし
+        }
+    }
+
     // ------------------------------------------------------------------
     void setParam(QuadMorphFilterAudioProcessor& proc, const juce::String& id, float value)
     {
@@ -96,6 +120,12 @@ void randomise(QuadMorphFilterAudioProcessor& proc, juce::Random& rng)
     const float logLo = std::log(ch.cutLow);
     const float logHi = std::log(ch.cutHigh);
 
+    // 自己発振ガードのために、選んだ内容を控えておく
+    int   chosenModel[4] = { 0, 0, 0, 0 };
+    float chosenRes[4]   = { 1.0f, 1.0f, 1.0f, 1.0f };
+    bool  resModulated[4] = { false, false, false, false };
+    bool  slotActive[4]  = { false, false, false, false };
+
     for (int k = 0; k < 4; ++k)
     {
         const juce::String s = juce::String::charToString((juce::juce_wchar)('A' + k));
@@ -128,16 +158,23 @@ void randomise(QuadMorphFilterAudioProcessor& proc, juce::Random& rng)
         const float cutoff = std::exp(logLo + (logHi - logLo) * juce::jlimit(0.0f, 1.0f, t + jitter));
         setParam(proc, "cutoff" + s, juce::jlimit(20.0f, 20000.0f, cutoff));
 
-        // 高い帯域ほどレゾナンスを控えめにする（耳に痛くなりやすいため）
+        // 高い帯域ほどレゾナンスを控えめにする（耳に痛くなりやすいため）。
+        // さらにモデル固有の発振閾値でクランプする。
         const float resScale = 1.0f - 0.35f * t;
-        setParam(proc, "res" + s, juce::jlimit(0.1f, 10.0f,
-            randRange(rng, 0.7f, resCeiling) * resScale));
+        const float res = juce::jlimit(0.1f, safeRes(model) * 0.90f,
+                                       randRange(rng, 0.7f, resCeiling) * resScale);
+        setParam(proc, "res" + s, res);
 
         // LFO 割り当ては 4 本すべてに配らず、半分程度に留める
-        setParam(proc, "lfoCutSrc" + s, on && rng.nextFloat() < 0.5f
-                                            ? (float)(1 + rng.nextInt(4)) : 0.0f);
-        setParam(proc, "lfoResSrc" + s, on && rng.nextFloat() < 0.25f
-                                            ? (float)(1 + rng.nextInt(4)) : 0.0f);
+        const bool cutMod = on && rng.nextFloat() < 0.5f;
+        const bool resMod = on && rng.nextFloat() < 0.25f;
+        setParam(proc, "lfoCutSrc" + s, cutMod ? (float)(1 + rng.nextInt(4)) : 0.0f);
+        setParam(proc, "lfoResSrc" + s, resMod ? (float)(1 + rng.nextInt(4)) : 0.0f);
+
+        chosenModel[k]  = model;
+        chosenRes[k]    = res;
+        resModulated[k] = resMod;
+        slotActive[k]   = on;
     }
 
     // ---- MORPH ----
@@ -193,8 +230,28 @@ void randomise(QuadMorphFilterAudioProcessor& proc, juce::Random& rng)
         setParam(proc, "lfo3wave", (float)pick(rng, kModWaves, kNumModWaves));
         setParam(proc, "lfo3sync", 1.0f);
         setParam(proc, "lfo3rateSync", (float)pick(rng, kUsefulSyncRates, kNumSyncRates));
-        setParam(proc, "lfo3min", randRange(rng, 0.1f, 0.35f));
-        setParam(proc, "lfo3max", randRange(rng, 0.65f, 0.9f));
+
+        // ---- 自己発振の回避 ----
+        // DSP は applyResonanceMod(base, mod) = base * 2^(2*mod)、
+        // mod は LFO 出力 pos から mod = 2*pos - 1 で作られる。
+        // pos を [0.5-m/2, 0.5+m/2] に収めれば |mod| <= m になるので、
+        //   base * 2^(2*m) <= 閾値   →   m <= log2(閾値/base) / 2
+        // LFO3 は 4 本共通なので、変調が掛かっている中で最も厳しい制約を採る。
+        float limit = randRange(rng, 0.30f, 0.55f);   // 変調しないときの既定幅
+
+        for (int k = 0; k < 4; ++k)
+        {
+            if (!slotActive[k] || !resModulated[k]) continue;
+
+            const float ceiling = safeRes(chosenModel[k]) * 0.92f;
+            if (chosenRes[k] >= ceiling) { limit = 0.05f; break; }
+
+            limit = juce::jmin(limit, std::log2(ceiling / chosenRes[k]) * 0.5f);
+        }
+
+        limit = juce::jlimit(0.05f, 0.9f, limit);
+        setParam(proc, "lfo3min", 0.5f - limit * 0.5f);
+        setParam(proc, "lfo3max", 0.5f + limit * 0.5f);
     }
 
     // ---- LFO4 (Rate Mod) : 1/4 の確率。深さは控えめ ----

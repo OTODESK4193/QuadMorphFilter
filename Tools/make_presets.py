@@ -16,6 +16,30 @@ CAPS = {
     8:(3,1,1,0,0), 27:(3,1,0,0,0),
 }
 def caps(m): return CAPS.get(m, (3,1,1,1,1))
+
+# ---- 自己発振しない Res の上限 ----
+#  DSP 側の帰還量マッピングから逆算し、余裕を持たせた値。
+#   ラダー系 (1,12,15): ladderRes = jmap(res, 0.1..10, 0..4.5)
+#     4極ラダーは帰還 4 で発振 → res ≈ 8.9 が閾値。7.5 で止める。
+#   SSM2040 (13): r_scale = 5.0 → 閾値 ≈ 8.0。6.8 で止める。
+#   TB-303 (2): k_max = 4.2〜5.0（Accent で変化）→ 閾値 8.0〜9.5。7.0 で止める。
+#   MS-20 (7): ms_k = jmap(res, 0.1..10, 0..2.5)。Sallen-Key は k≈2 で発振。
+#   Comb (6): fb = jmap(res, 0.1..10, 0..0.95) → 上端は延々と鳴り続ける。
+#   Waveguide (23): fb 上限 0.99。実質無限に持続するので更に低く。
+#   FDN (10): Res = ディケイ。上端は減衰しない残響になる。
+#  ここに無いモデルは構造上発振しない（SVF は Q が上がるだけ）ため上限なし。
+SAFE_RES = {
+    1: 7.5, 12: 7.5, 15: 7.5,   # Moog / CEM3320 / Jupiter
+    13: 6.8,                     # SSM2040
+    2:  7.0,                     # TB-303
+    7:  7.0,                     # MS-20
+    6:  7.5,                     # Comb
+    23: 6.5,                     # Waveguide
+    10: 8.0,                     # FDN Reverb (decay)
+    16: 8.0,                     # EDP Wasp
+}
+def safe_res(m): return SAFE_RES.get(m, 10.0)
+
 def ok_type(m,t):
     c = caps(m); return c[1+t] == 1
 def fix_type(m,t):
@@ -238,6 +262,8 @@ def build():
                 cut = cut * (0.72 + 0.38 * k)
                 cut = max(20.0, min(20000.0, cut))
                 res = c['ress'][(i + k) % len(c['ress'])]
+                # 自己発振するモデルは静的な時点で閾値を超えないようにする
+                res = min(res, safe_res(m))
                 t = fix_type(m, [0,0,1,2][k] if k != 0 else 0)
                 sl = fix_slope(m, [1,1,2,1][k])
                 p[f"enable{s}"] = on
@@ -298,6 +324,47 @@ def build():
                 for n, k in enumerate(targets):
                     if n == 0 or (n + i) % 3 == 0:
                         p[f"lfoResSrc{'ABCD'[k]}"] = [2, 4, 1, 3][(i + n) % 4]
+
+                # ---- 自己発振の回避 ----
+                # DSP 側は applyResonanceMod(base, mod) = base * 2^(2*mod)。
+                # mod は LFO 出力 pos から mod = 2*pos - 1 で作られるので、
+                # pos を [0.5-m/2, 0.5+m/2] に収めれば |mod| <= m になる。
+                #
+                #   base * 2^(2*m) <= safeMax
+                #   → m <= log2(safeMax / base) / 2
+                #
+                # LFO3 のレンジは 4 本共通なので、変調が掛かっている
+                # フィルターすべての中で最も厳しい制約を採用する。
+                # XY Depth が Res を持ち上げる分も見込んで 0.92 の余裕を掛ける。
+                import math
+                limit = 1.0
+                for k in range(4):
+                    sfx = 'ABCD'[k]
+                    if p[f"lfoResSrc{sfx}"] == 0 or p[f"enable{sfx}"] == 0:
+                        continue
+                    base = p[f"res{sfx}"]
+                    ceil_ = safe_res(p[f"model{sfx}"]) * 0.92
+                    if base >= ceil_:
+                        limit = 0.0
+                        break
+                    limit = min(limit, math.log2(ceil_ / base) / 2.0)
+
+                # 変調幅が 0 になると LFO が死んでしまうので下限を置く。
+                # ただし下限を適用した結果ピークが閾値を超えることがあるため、
+                # そのときは Res の基準値そのものを下げて辻褄を合わせる。
+                # （制約を「上限を超えない」側で必ず満たすようにする）
+                limit = max(0.05, min(1.0, limit))
+                p["lfo3min"] = round(0.5 - limit / 2.0, 3)
+                p["lfo3max"] = round(0.5 + limit / 2.0, 3)
+
+                gain = 2.0 ** (2.0 * limit)          # 変調ピークの倍率
+                for k in range(4):
+                    sfx = 'ABCD'[k]
+                    if p[f"lfoResSrc{sfx}"] == 0 or p[f"enable{sfx}"] == 0:
+                        continue
+                    ceil_ = safe_res(p[f"model{sfx}"]) * 0.92
+                    if p[f"res{sfx}"] * gain > ceil_:
+                        p[f"res{sfx}"] = round(max(0.15, ceil_ / gain), 2)
 
             # ---- LFO4 (Rate Mod) : 5 件に 1 件だけ ----
             use4 = (i % 5 == 3)
