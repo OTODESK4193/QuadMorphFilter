@@ -138,7 +138,20 @@ struct TptFilterState
     float aa_s2[8][2] = {};
 
     // ===== 【既存コード: FDN Reverb ここから】=====
-    float fdnBuffer[4][2][16384] = {};
+    //
+    // kFdnBufSize: FDN 遅延バッファの 1 ライン当たりサンプル数。
+    //
+    // 【サイズ根拠】
+    //   Cave プリセット (base_ms=120ms) × 192kHz × 遅延比最大 1.911 で
+    //   必要サンプル数 = 0.120 × 192000 × 1.911 = 44,030 サンプル。
+    //   旧サイズ 16384 では大幅に不足し、Cave/Hall プリセットの残響が
+    //   高 SR で完全に崩壊（サイレントクランプ）していた。
+    //   次の 2 の冪乗 65536 に拡張して 192kHz まで正確に対応する。
+    //   メモリコスト: 4 lines × 2ch × 65536 × 4 bytes = 2.0 MB/インスタンス
+    //   (旧 0.5 MB から +1.5 MB、4 フィルター合計 +6 MB)
+    static constexpr int kFdnBufSize = 65536;
+
+    float fdnBuffer[4][2][kFdnBufSize] = {};
     int   fdnWriteIdx[4][2] = {};      // ← ここは触らない
     float fdn_ap_state[4][2] = {};
     float fdnDelayTimes[4] = { 1.0f, 1.313f, 1.637f, 1.911f };
@@ -178,6 +191,14 @@ struct TptFilterState
     float rmsOut[2] = {};
     float agcGain[2] = { 1.0f, 1.0f };
     // ===== 【既存コード: AGC ここまで】=====
+
+    // ===== AGC SR 依存係数 (prepare() で計算、processSample() で使用) =====
+    // 固定係数 0.005/0.0005 は SR によってタイムコンスタントが変わるため
+    // SR から exp(-1/(τ·SR)) で計算し SR 非依存の時定数を保証する。
+    // rmsCoef  : τ ≈ 4.5 ms  (RMS 追従速度)
+    // agcCoef  : τ ≈ 45 ms   (AGC ゲイン平滑速度)
+    float rmsCoef = 0.005f;    // デフォルト = 44.1kHz 相当
+    float agcCoef = 0.0005f;   // デフォルト = 44.1kHz 相当
 
     // ===== Wavefolder ADAA (Model 9) =====
     // 1次 ADAA: f(x) = sin(x)、F1(x) = -cos(x)

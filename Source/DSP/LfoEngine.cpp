@@ -494,11 +494,12 @@ void LfoEngine::processLFO4(float dt,
     float depth     = apvts.getRawParameterValue("lfo4depth")->load();
 
     // ===== Rate計算 =====
-    float rate = sync ? getSyncTime(rateSync, bpm) : rateFree;
+    // sync モード: getSyncTime() は周期 [秒] を返すため 1/T でHz 換算してから位相を進める
+    float rate = sync ? (1.0f / getSyncTime(rateSync, bpm)) : rateFree;
 
     // ===== 位相更新 =====
     const float twoPi = 6.283185307f;
-    lfo4State.phase += rate * dt;
+    lfo4State.phase += twoPi * rate * dt;
     while (lfo4State.phase >= twoPi) lfo4State.phase -= twoPi;
     if (lfo4State.phase < 0.0f) lfo4State.phase += twoPi;
 

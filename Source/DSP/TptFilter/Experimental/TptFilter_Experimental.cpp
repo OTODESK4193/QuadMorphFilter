@@ -137,12 +137,14 @@ namespace TptFilter_Experimental
         for (int i = 0; i < 4; ++i)
         {
             // 遅延ライン読み出し (Thiran allpass 補間)
-            const float delaySamples = juce::jlimit(1.0f, 16383.0f,
+            const float delaySamples = juce::jlimit(1.0f,
+                                                    static_cast<float>(TptFilterState::kFdnBufSize - 1),
                                                     baseSamples * delayRatios[i]);
             const int   dInt  = (int)delaySamples;
             const float dFrac = delaySamples - (float)dInt;
-            const int r1 = (st.fdnWriteIdx[i][ch] - dInt) & 16383;
-            const int r2 = (r1 - 1) & 16383;
+            const int kMask = TptFilterState::kFdnBufSize - 1;
+            const int r1 = (st.fdnWriteIdx[i][ch] - dInt) & kMask;
+            const int r2 = (r1 - 1) & kMask;
             const float eta = (1.0f - dFrac) / (1.0f + dFrac);
             float delayed = st.fdnBuffer[i][ch][r2]
                           + eta * (st.fdnBuffer[i][ch][r1] - st.fdn_ap_state[i][ch]);
@@ -167,8 +169,9 @@ namespace TptFilter_Experimental
         st.fdnBuffer[2][ch][st.fdnWriteIdx[2][ch]] = pre_in * input_gain + m2 * fb;
         st.fdnBuffer[3][ch][st.fdnWriteIdx[3][ch]] = pre_in * input_gain + m3 * fb;
 
+        const int kMaskW = TptFilterState::kFdnBufSize - 1;
         for (int s = 0; s < 4; ++s)
-            st.fdnWriteIdx[s][ch] = (st.fdnWriteIdx[s][ch] + 1) & 16383;
+            st.fdnWriteIdx[s][ch] = (st.fdnWriteIdx[s][ch] + 1) & kMaskW;
 
         // ──────────────────────────────────────────────────────────
         // 4. 出力ミックス

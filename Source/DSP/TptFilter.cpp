@@ -34,6 +34,13 @@ void TptFilter::prepare(double newSampleRate, int samplesPerBlock, int numChanne
     resonance.reset(state.sampleRate, 0.01);
     state.smoothedDigitalCutoff = cutoff.getCurrentValue();
 
+    // ===== AGC SR 依存係数の計算 =====
+    // τ_rms ≈ 4.5ms、τ_agc ≈ 45ms を SR によらず一定に保つ。
+    // exp(-1/(τ·SR)) でデジタルフィルター係数に変換。
+    // oversampler 使用時は OS 済み SR でなく元 SR を使用（AGC は最終出力段で動作）。
+    state.rmsCoef = 1.0f - std::exp(-1.0f / (0.0045f * (float)newSampleRate));
+    state.agcCoef = 1.0f - std::exp(-1.0f / (0.045f  * (float)newSampleRate));
+
     if (oversampler != nullptr)
     {
         oversampler->initProcessing(static_cast<size_t>(samplesPerBlock));
@@ -88,7 +95,8 @@ void TptFilter::reset()
         for (int ch = 0; ch < 2; ++ch) {
             state.fdnWriteIdx[s][ch] = 0; state.fdn_ap_state[s][ch] = 0.0f;
             state.fdnLpState[s][ch] = 0.0f;
-            for (int i = 0; i < 16384; ++i) state.fdnBuffer[s][ch][i] = 0.0f;
+            std::fill(std::begin(state.fdnBuffer[s][ch]),
+                      std::end  (state.fdnBuffer[s][ch]), 0.0f);
         }
 
     // Per-channel
@@ -334,7 +342,6 @@ void TptFilter::updateCoefficients()
         std::abs(currentRes - lastRes) < 0.001f)
         return;
 
-    state.currentResVal = currentRes;  // ← この行を追加
     state.currentCutoffVal = cutoff.getCurrentValue();
     state.currentResVal = currentRes;
 
@@ -432,8 +439,8 @@ float TptFilter::processSample(int ch, float x)
         x = state.srrHeld[ch];
     }
 
-    // ===== RMS 入力 =====
-    state.rmsIn[ch] = (1.0f - 0.005f) * state.rmsIn[ch] + 0.005f * (x * x);
+    // ===== RMS 入力 (SR 依存係数: prepare() で計算済み) =====
+    state.rmsIn[ch] += state.rmsCoef * ((x * x) - state.rmsIn[ch]);
 
     // ===== カテゴリ dispatch =====
     float out = 0.0f;
@@ -454,14 +461,14 @@ float TptFilter::processSample(int ch, float x)
 
     // ===== RMS 出力 + AGC =====
 // ===== ここから processSample の末尾全体を置き換え =====
-    state.rmsOut[ch] = (1.0f - 0.005f) * state.rmsOut[ch] + 0.005f * (out * out);
+    state.rmsOut[ch] += state.rmsCoef * ((out * out) - state.rmsOut[ch]);
 
     float targetGain = 1.0f;
     if (state.rmsOut[ch] > 1e-8f) {
         targetGain = std::sqrt((state.rmsIn[ch] + 1e-8f) / (state.rmsOut[ch] + 1e-8f));
         targetGain = juce::jlimit(0.1f, 15.0f, targetGain);
     }
-    state.agcGain[ch] = (1.0f - 0.0005f) * state.agcGain[ch] + 0.0005f * targetGain;
+    state.agcGain[ch] += state.agcCoef * (targetGain - state.agcGain[ch]);
 
     float finalGain = state.agcGain[ch];
 
