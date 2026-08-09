@@ -163,13 +163,17 @@ Quad Morph Filter ships with **28 handcrafted filter models**, each optimized fo
 
 ### Cutoff Algorithms
 
-Quad Morph Filter provides **3 cutoff calculation modes** to suit different workflows:
+**Cutoff Algo** maps the morph XY position onto a cutoff frequency and a resonance value, and **XY Depth** decides how much of that mapping reaches the filters. At the default depth of 0 % the Cut / Res sliders are used unchanged and the algorithm has no audible effect; raise the depth and moving the XY pad sweeps every filter as well as morphing between them.
 
 | Mode | Range | Description |
 |---|---|---|
 | **Absolute (Abs)** | 20 Hz – 20 kHz | Direct frequency position (20 Hz at left, 20 kHz at right) |
-| **Relative (Rel)** | ±4 octaves | Center at XY midpoint; ±4 octaves from center |
-| **Zone (Zone)** | Asymmetric | Different scaling for left/right regions (musical control) |
+| **Relative (Rel)** | ±4 octaves | Centred on 632 Hz; X deviation gives ±4 octaves, Y gives ±2 octaves of resonance |
+| **Zone (Zone)** | Asymmetric | Different scaling for the left/right and upper/lower regions (musical control) |
+
+The blend is geometric (a linear interpolation in the logarithmic domain), so the perceived movement is even across the whole depth range.
+
+> **Note for V1.0.0 users:** in V1.0.0 the Cutoff Algo selector was present in the UI but never reached the DSP, so it did not change the sound. V1.1.0 connects it through the new XY Depth control, which defaults to 0 % — existing projects therefore sound exactly as before until you raise it.
 
 
 ## LFO System Guide
@@ -257,7 +261,8 @@ Control the minimum and maximum mix level of the wet signal via LFO5:
 | Base X | 0.0 – 1.0 | 0.5 | XY pad X position (left = 0, right = 1) |
 | Base Y | 0.0 – 1.0 | 0.5 | XY pad Y position (top = 0, bottom = 1) |
 | Morph Blend | EqPwr / Linear / Smooth / Radial | EqPwr | Blending algorithm for 4-filter combination |
-| Cutoff Algo | Abs / Rel / Zone | Abs | Cutoff frequency calculation mode |
+| Cutoff Algo | Abs / Rel / Zone | Abs | Mapping from XY position to cutoff / resonance |
+| XY Depth | 0 – 100% | 0% | How much the Cutoff Algo mapping drives every filter's cutoff and resonance |
 
 ### LFO Cut/Res Modulation (per Filter)
 
@@ -289,7 +294,31 @@ Control the minimum and maximum mix level of the wet signal via LFO5:
 
 ### V1.1.0
 
-**GUI overhaul. DSP and audio behaviour are unchanged — every filter model, LFO and parameter ID is identical to V1.0.0, so existing projects and presets load exactly as before.**
+**GUI overhaul plus a round of DSP fixes.** All V1.0.0 parameter IDs are preserved and one parameter is added (`xyDepth`, default 0 %), so existing projects and presets load correctly. Most of the DSP work below is either inaudible at 44.1/48 kHz or gated behind a control that defaults to off, but **Models 12 and 13 do sound different** — see the DSP section.
+
+#### Audio-affecting changes
+
+* **Model 12 (CEM3320)** — renamed from "Prophet (Curtis)", input gain raised 1.1 → 1.4, and BP / HP response types enabled.
+* **Model 13 (SSM2040)** — added asymmetric soft-clipping (`ssm2040Sat`) for a more authentic saturation character.
+* **Cutoff Algo is now connected to the DSP.** In V1.0.0 the selector existed in the UI but its result was discarded, so it had no effect on the sound. It now drives every filter's cutoff and resonance through the new **XY Depth** control. XY Depth defaults to 0 %, which reproduces the V1.0.0 sound exactly.
+* **LFO1 (Morph) Rand1 and Filter Spread now reach the morph weights.** These modes produce four independent per-filter values, but only two of them were being read (as a 2-D position); the remaining two were discarded. All four are now used directly as the filter weights, matching how LFO2 and LFO3 already behaved. Rand1 makes the four filters fade in and out independently; Spread makes them rise in sequence.
+
+#### DSP correctness fixes (inaudible at common sample rates)
+
+* **AGC and the MS-20 DC blocker are now sample-rate independent.** Their time constants were hard-coded for 44.1 kHz, so at 96/192 kHz the AGC responded several times too fast and the MS-20 DC blocker's corner rose from 3.5 Hz to roughly 15 Hz, thinning the low end. Both are now derived from the effective rate — including the oversampled rate, since these run inside the oversampled loop.
+* **FDN Reverb (Model 10) delay buffers enlarged 16384 → 65536 samples.** The Cave and Hall presets need up to ~44,000 samples at 192 kHz and were silently clamped, collapsing the reverb tail at high sample rates.
+* **LFO4 rate calculation fixed** in sync mode (the sync time was used directly instead of its reciprocal, and the phase increment was missing its 2π factor).
+* Comb / Waveguide delay indices now use a named constant with a range clamp instead of a hard-coded mask.
+* `spreadActive` is now cleared when an LFO is disabled; previously it stayed set and frozen modulation values kept being applied.
+
+#### Performance and real-time safety
+
+* **Removed all heap allocation from the audio thread.** Parameter IDs were being assembled with `juce::String` concatenation inside `processBlock` and the LFO engines (`"cutoff" + s`, `"lfo" + String(i+1)` and so on), causing roughly 78 allocations per block — about 10,000 malloc calls per second on the real-time thread. All parameter pointers are now resolved once in the constructor.
+* Removed ~70 string-keyed parameter lookups per block, including four per *sample* in the mix loop.
+* Loop invariants hoisted out of the sample loop; the morph weight calculation is now skipped entirely when it cannot change within a block.
+* Removed a dead `FilterA_SVF_SIMD` instance that cleared four buffers every block for no reason, an unused 128 KB waveguide buffer per filter instance, and a ~45-line block-rate weight calculation whose result was never read.
+
+#### GUI
 
 * Tabbed layout (FILTER / MOD / OUT) replaces the single crowded page.
 * Filter response display enlarged and redrawn: per-filter translucent curves weighted by morph amount, composite curve with glow and gradient fill, per-filter cutoff markers, refined grid.

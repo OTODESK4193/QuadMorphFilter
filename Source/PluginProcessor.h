@@ -130,7 +130,9 @@ private:
     // ===== 【V1.1.0 削除】FilterA_SVF_SIMD svfQuad =====
     //   全 4 インスタンスが常時 disabled であり、出力は直後の TptFilter 処理に
     //   必ず上書きされていた（実質デッドコード）ためメンバごと除去。
-    //   ソースファイル自体は Source/DSP/FilterA_SVF_SIMD.* に温存してある。
+    //   ソースファイルは Source/DSP/FilterA_SVF_SIMD.* に温存してあるが、
+    //   V1.1.0 で CMakeLists のビルド対象からも外した（無駄なコンパイルの削減）。
+    //   再利用する際は CMakeLists への追加も忘れないこと。
 
     // 全 28 モデル（Model 0 の Clean SVF を含む）を TptFilter が処理する
     TptFilter filterA, filterB, filterC, filterD;

@@ -10,9 +10,12 @@
 class Lfo5Engine
 {
 public:
-    void prepare(double sampleRate)
+    // LFO5 は位相を dt（ブロック長の秒数）で進めるため、サンプルレート自体は
+    // 使用しない。呼び出し側との互換のため引数は残すが値は保持しない。
+    // 【V1.1.0】旧実装のメンバ sampleRate は代入されるだけで一度も読まれて
+    // いなかったため削除した。
+    void prepare(double /*newSampleRate*/)
     {
-        this->sampleRate = sampleRate;
         phase = 0.0f;
         output = 0.0f;
     }
@@ -107,7 +110,6 @@ public:
     }
 
     float getOutput() const { return output; }
-    float getPhase() const { return phase; }
 
 private:
     // ===== パラメータポインタキャッシュ =====
@@ -128,7 +130,6 @@ private:
     ParamPtrs prm;
     bool      paramsCached = false;
 
-    double sampleRate = 0.0;
     float phase = 0.0f;
     float output = 0.0f;
     juce::Random rng;

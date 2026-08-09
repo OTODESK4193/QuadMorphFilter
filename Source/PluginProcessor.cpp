@@ -564,19 +564,10 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     const bool  lfo1Enabled      = gp.lfo1en->load() > 0.5f;
     const int   morphBlendCurrent = (int)gp.morphBlend->load();
 
-    // wMix を計算するヘルパー（switch + 正規化）。
+    // 有効フィルターだけを対象に等パワー正規化する（無効分は加算側で無視される）。
     // ラムダは参照キャプチャのみでヒープ確保を伴わない。
-    auto computeWMixNormalized = [&](float mx, float my) -> std::array<float, 4>
+    auto normalizeWMix = [&](std::array<float, 4>& w)
         {
-            std::array<float, 4> w;
-            switch (morphBlendCurrent)
-            {
-            case 1:  w = MorphEngine::computeLinearWMix(mx, my); break;
-            case 2:  w = MorphEngine::computeSmoothstepWMix(mx, my); break;
-            case 3:  w = MorphEngine::computeRadialWMix(mx, my); break;
-            default: w = MorphEngine::computeEqualPowerWMix(mx, my); break;
-            }
-
             float sumSq = 0.0f;
             if (enA) sumSq += w[0] * w[0];
             if (enB) sumSq += w[1] * w[1];
@@ -590,22 +581,62 @@ void QuadMorphFilterAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
                 if (enC) w[2] *= norm;
                 if (enD) w[3] *= norm;
             }
+        };
+
+    // モーフ座標 (mx, my) から wMix を計算するヘルパー。
+    auto computeWMixNormalized = [&](float mx, float my) -> std::array<float, 4>
+        {
+            std::array<float, 4> w;
+            switch (morphBlendCurrent)
+            {
+            case 1:  w = MorphEngine::computeLinearWMix(mx, my); break;
+            case 2:  w = MorphEngine::computeSmoothstepWMix(mx, my); break;
+            case 3:  w = MorphEngine::computeRadialWMix(mx, my); break;
+            default: w = MorphEngine::computeEqualPowerWMix(mx, my); break;
+            }
+            normalizeWMix(w);
             return w;
         };
 
-    // wMix がブロック全体で不変になる 2 ケースを事前に判定する。
-    //   1) 有効フィルターが 1 個以下 → 重みは 0/1 の固定値
-    //   2) LFO1 有効 → morph 座標に LFO のブロック定数 posX/posY を使うため不変
+    // ===== LFO1 (Morph) が per-filter 値を出しているか =====
+    // 【V1.1.0 修正】
+    //   LFO1 は Rand1 波形または Spread>0 のとき mod4[0][f] に
+    //   4 フィルター分の独立した値を書き込んでいる。
+    //   ところが旧実装は positions[0]（= mod4[0][0] と mod4[0][1] の 2 つだけ）を
+    //   2D 座標として使っており、3 番目と 4 番目が捨てられていた。
+    //   LFO2 / LFO3 側には同じ用途の lfo1_useMod4 / lfo2_useMod4 が既にあるため、
+    //   LFO1 も同じパターンに揃えて 4 値をそのまま重みに使う。
+    //
+    //   Rand1  : 4 フィルターが独立にランダムな音量で出入りする
+    //   Spread : 4 フィルターが位相をずれて順に立ち上がる（回るような効果）
+    const bool lfo0_isRand1 = lfo1Enabled && ((int)gp.lfo1wave->load() == 3);
+    const bool lfo0_useMod4 = lfo1Enabled
+                            && (lfo0_isRand1 || lfoEngine.isSpreadActive(0));
+
+    // wMix がブロック全体で不変になるケースを事前に判定する。
+    //   1) 有効フィルターが 1 個以下   → 重みは 0/1 の固定値
+    //   2) LFO1 が per-filter 値を出力 → mod4[0] はブロック定数
+    //   3) LFO1 有効                   → morph 座標にブロック定数 posX/posY を使う
     // 残る「LFO1 無効 かつ 有効フィルター 2 個以上」のときだけ、
     // サンプル毎に平滑化される lastMorphX/Y に追従する必要がある。
     const bool wMixIsBlockConstant = (enabledCount <= 1) || lfo1Enabled;
 
     std::array<float, 4> wMix_current{};
     if (enabledCount <= 1)
+    {
         wMix_current = { enA ? 1.0f : 0.0f, enB ? 1.0f : 0.0f,
                          enC ? 1.0f : 0.0f, enD ? 1.0f : 0.0f };
+    }
+    else if (lfo0_useMod4)
+    {
+        // Rand1 / Spread: 4 フィルターそれぞれの値を直接重みにする
+        wMix_current = lfoEngine.getMod4(0);
+        normalizeWMix(wMix_current);
+    }
     else if (lfo1Enabled)
+    {
         wMix_current = computeWMixNormalized(posX, posY);
+    }
 
     // =========================================================================
     // サンプルループ

@@ -139,6 +139,13 @@ void LfoEngine::processSingleLfo(int i,
     {
         positions[i] = { baseX, baseY };
         states[i].fadeEnv = 0.0f;  // 次に有効化されたときフェードを先頭から再開
+
+        // 【V1.1.0 修正】spreadActive のクリア漏れ
+        //   旧実装はここで早期 return しており spreadActive[i] が
+        //   前回の値のまま取り残されていた。そのため Spread を効かせた状態で
+        //   LFO を無効化すると、呼び出し側の isSpreadActive() が true を返し続け、
+        //   更新の止まった mod4[i]（フリーズした古い値）が変調に使われていた。
+        spreadActive[i] = false;
         return;
     }
 
